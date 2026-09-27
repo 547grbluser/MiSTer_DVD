@@ -22,6 +22,16 @@ predate later confirmations; the `CLAUDE.md` index carries the reconciled status
 
 ## Hardware status (THIS fork, verified 2026-06-21)
 
+- 🔧 **VM GPRMs IN AN M10K — logic reclaim branch E (2026-09-26, branch
+  `feature/vm-gprm-ram`); sim-proven, ⏳ build + HW menu regression pending.** Split out
+  of the shelved save-state work (`docs/save_states.md` §5e), where it measured `dvd_vm`
+  at 1,618 ALMs / 2,622 ALUTs against `main`'s 1,965 / 3,397, for one M10K. Operands are
+  prefetched in `V_OPRD`, writes are one registered request with forwarding, swap is two
+  writes, the tick and the mount clear are walks. Every reader-bench verdict matches
+  `main`; only the six VM-carrying benches' traces shift by a few cycles. Gates:
+  `bench/dvd/run_gprm_ram.sh --red`, `tools/check_gprm_ram.py`. Detail:
+  `docs/logic_reclaim.md` §9.
+
 - ✅ **AUTO CHAPTER TABLE FOLLOWS THE PGC IT PLAYS (issue #132, 2026-09-26, ✅ MERGED
   (PR #134), `dev-autoptt`); sim-proven and ✅ HW-CONFIRMED on the rig by
   the HIL harness** (see HW below for which build).
