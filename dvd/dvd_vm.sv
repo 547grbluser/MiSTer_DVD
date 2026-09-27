@@ -257,8 +257,43 @@ end
 // =========================================================================
 // Registers
 // =========================================================================
-reg [15:0] gprm [0:15];
+// ★ The 16 GPRMs live in an M10K (2026-09-26), ONE port: operand reads
+// (V_OPRD), the counter-mode tick walk, and every write, through ONE registered
+// write request (g_we/g_wa/g_wd). As flops the VM read them combinationally at
+// ~8 sites (two compare operands, the set source, the destination, SetSTN's and
+// SetHL_BTNN's fields), each a 16:1 x 16-bit mux; those are replaced by six
+// operand registers loaded before V_EXEC. Measured in the full fit: dvd_vm
+// 3,397 -> ~2,600 ALUTs, ~-350 ALMs, for one M10K (docs/logic_reclaim.md §9).
+// The move was first made for save states (the shelved feature/save-states,
+// where a second port served as the snapshot port); it is kept on its own
+// because the reclaim does not depend on them.
+//
+// ⚠ Keep EVERY access in the two clocked blocks below. A read anywhere else
+// (a continuous assign, an always @*) makes Quartus build the array out of
+// LUTs -- the parse_buf LUT-RAM explosion -- and a write anywhere else, or an
+// async reset of the array, stops the RAM being inferred at all; the ext_mem
+// trap (docs/logic_reclaim.md) did that WITH NO WARNING. After any edit near
+// here, grep the map report for this array's "Inferred altsyncram" line.
+(* ramstyle = "M10K, no_rw_check" *) reg [15:0] gprm [0:15];
 reg [15:0] gprm_mode;          // bit per GPRM: 1 = counter mode (stored, no tick)
+// Operand registers, loaded from the RAM in V_OPRD before every V_EXEC. They
+// stand in for what were combinational gprm[] reads: A/B = the two compare
+// operands, S = the set source, D = the destination's CURRENT value, Y/Z =
+// SetSTN's AGLN-less fields and SetHL_BTNN/SetSTN's third (ins[27:24],
+// ins[19:16]). A/B are FORWARDED on every GPRM write so type 4's
+// compare-AFTER-set still sees the value its own set just wrote.
+reg [15:0] opA, opB, opS, opD, opY, opZ;
+reg  [2:0] op_i;               // V_OPRD cursor
+// Port A write request: registered, so the RAM takes it on the NEXT edge.
+reg        g_we;
+reg  [3:0] g_wa;
+reg [15:0] g_wd;
+reg        sw_pend;            // swap's second write, issued one cycle later
+reg  [3:0] sw_wa;
+reg [15:0] sw_wd;
+reg        clr_busy;           // RAM clear walk (reset / mount): no async clear
+reg  [3:0] clr_i;
+reg  [1:0] tick_ph;            // counter-mode tick: 0 address, 1 issue, 2 land
 reg [15:0] sprm1, sprm2, sprm3, sprm4, sprm5, sprm6, sprm7, sprm8;
 reg [15:0] sprm9, sprm10, sprm13;
 
@@ -419,9 +454,9 @@ end
 // it in the same instruction (type 2's SPRM writes use the LATCHED cond).
 reg [15:0] cmpa_sh, cmpb_sh;
 always @* begin
-    cmpa_sh = cmpa_rsel[7] ? sprm_read(cmpa_rsel[4:0]) : gprm[cmpa_rsel[3:0]];
+    cmpa_sh = cmpa_rsel[7] ? sprm_read(cmpa_rsel[4:0]) : opA;
     cmpb_sh = cmpb_isimm ? cmpb_immv
-            : cmpb_rsel[7] ? sprm_read(cmpb_rsel[4:0]) : gprm[cmpb_rsel[3:0]];
+            : cmpb_rsel[7] ? sprm_read(cmpb_rsel[4:0]) : opB;
 end
 wire        cond_now = cmp_eval(cmp_op, cmpa_sh, cmpb_sh);
 
@@ -439,7 +474,7 @@ wire [7:0]  set_rsel = (ins_type == 3'd3) ? ins[23:16] :          // s1
 wire [15:0] set_imm  = (ins_type == 3'd3) ? ins[31:16] : ins[47:32];
 reg [15:0] set_data_sh;                  // direct gprm read: same reason as above
 always @* set_data_sh = ins_imm   ? set_imm :
-                        set_rsel[7] ? sprm_read(set_rsel[4:0]) : gprm[set_rsel[3:0]];
+                        set_rsel[7] ? sprm_read(set_rsel[4:0]) : opS;
 
 // Which set variant applies (types 3-6) and whether it executes
 reg         set_do;
@@ -473,10 +508,22 @@ always @* begin
 end
 
 // Clamped add/sub (17-bit)
-wire [16:0] add_raw   = {1'b0, gprm[set_sel_reg]} + {1'b0, set_sel_data};
+wire [16:0] add_raw   = {1'b0, opD} + {1'b0, set_sel_data};
 wire [15:0] add_clamp = add_raw[16] ? 16'hFFFF : add_raw[15:0];
-wire [16:0] sub_raw   = {1'b0, gprm[set_sel_reg]} - {1'b0, set_sel_data};
+wire [16:0] sub_raw   = {1'b0, opD} - {1'b0, set_sel_data};
 wire [15:0] sub_clamp = sub_raw[16] ? 16'd0 : sub_raw[15:0];
+// The value a simple set writes (ops 1/3/4/9/10/11; swap and the serial ALU
+// ops are handled at their own sites). opD = the destination's value BEFORE
+// this command, which is what the old gprm[set_sel_reg] read returned.
+reg [15:0] set_wd;
+always @* case (set_sel_op)
+    4'd3:    set_wd = add_clamp;
+    4'd4:    set_wd = sub_clamp;
+    4'd9:    set_wd = opD & set_sel_data;
+    4'd10:   set_wd = opD | set_sel_data;
+    4'd11:   set_wd = opD ^ set_sel_data;
+    default: set_wd = set_sel_data;          // 4'd1 mov
+endcase
 
 // Link/jump presence per type (mirrors eval_command routing). The link
 // CONDITION is LATCHED in V_EXEC (link_cond_l) because decoder.c evaluates
@@ -538,6 +585,7 @@ localparam V_PMRD   = 4'd7;    // program map: pm[pg_tgt-1] -> seek cell
 localparam V_PMRD2  = 4'd8;
 localparam V_NEXT   = 4'd9;    // pc advance / block fall-through
 localparam V_WAIT   = 4'd10;   // jump issued: await pgc_loaded / pgc_error
+localparam V_OPRD   = 4'd11;   // load the GPRM operands out of the RAM (7 cycles)
 
 reg [3:0] state;
 
@@ -690,6 +738,14 @@ reg [31:0] alu_acc;            // mul accumulator
 reg [16:0] alu_rem;            // divider remainder
 reg [15:0] alu_a, alu_b, alu_b_orig;
 reg [15:0] alu_quot;
+// The ALU writeback value (V_ALUWB), one expression for the one write.
+reg [15:0] alu_wd;
+always @* case (alu_op)
+    4'd5:    alu_wd = (alu_acc[31:16] != 16'd0) ? 16'hFFFF : alu_acc[15:0];
+    4'd6:    alu_wd = (alu_b_orig == 16'd0) ? 16'hFFFF : alu_quot;
+    4'd7:    alu_wd = (alu_b_orig == 16'd0) ? 16'hFFFF : alu_rem[15:0];
+    default: alu_wd = (alu_b_orig == 16'd0) ? 16'd0 : (alu_rem[15:0] + 16'd1);   // 4'd8 rnd
+endcase
 reg [4:0]  alu_cnt;
 
 wire [16:0] div_shift = {alu_rem[15:0], alu_a[15]};
@@ -713,12 +769,43 @@ wire [7:0] pg_final = pg_hit ? (pg_i + 8'd1) : cur_pg;
 reg [23:0] wait_tmr;
 
 assign dbg_state = {came_via_menukey, fb, state};   // bit7 = came_via_menukey
-assign dbg_g3    = gprm[3];
-assign dbg_g14_9 = {gprm[14][7:0], gprm[9][7:0]};
+// ⚠ Tied off: the GPRMs are a RAM now, and a read here would rebuild the array
+// out of LUTs. Nothing consumed these (emu declares the wires and stops).
+assign dbg_g3    = 16'd0;
+assign dbg_g14_9 = 16'd0;
 assign dbg_rsm   = {rsm_vts, rsm_pgcn[7:0]};   // probe keeps the low byte
 assign dbg_deadend = {deadend_vts, deadend_pgcn[7:0]};
 
 integer gi;
+
+// =========================================================================
+// GPRM RAM (see the declaration). One port, the VM's.
+// =========================================================================
+// The operand each V_OPRD slot loads, in capture order (see V_OPRD).
+wire [3:0] opi_A = cmpa_rsel[3:0];
+wire [3:0] opi_B = cmpb_rsel[3:0];
+wire [3:0] opi_S = set_rsel[3:0];
+wire [3:0] opi_D = set_sel_reg;
+wire [3:0] opi_Y = ins[27:24];
+wire [3:0] opi_Z = ins[19:16];
+reg  [3:0] g_ra;
+always @* begin
+    case (op_i)
+    3'd0:    g_ra = opi_A;
+    3'd1:    g_ra = opi_B;
+    3'd2:    g_ra = opi_S;
+    3'd3:    g_ra = opi_D;
+    3'd4:    g_ra = opi_Y;
+    default: g_ra = opi_Z;
+    endcase
+    if (state != V_OPRD) g_ra = tick_i;       // the counter-mode walk, in V_IDLE
+end
+wire [3:0] g_aa = g_we ? g_wa : g_ra;           // a write owns port A that cycle
+reg [15:0] g_qa;
+always @(posedge clk) begin
+    if (g_we) gprm[g_aa] <= g_wd;
+    g_qa <= gprm[g_aa];
+end
 
 // =========================================================================
 // Main FSM
@@ -726,7 +813,13 @@ integer gi;
 always @(posedge clk or negedge rst_n) begin
     if (!rst_n) begin
         state <= V_IDLE;
-        for (gi = 0; gi < 16; gi = gi + 1) gprm[gi] <= 16'd0;
+        // The GPRM RAM cannot be reset asynchronously (it would stop being a
+        // RAM): it is cleared by a 16-cycle walk after reset, and dispatch waits.
+        clr_busy <= 1'b1; clr_i <= 4'd0;
+        g_we <= 1'b0; g_wa <= 4'd0; g_wd <= 16'd0;
+        sw_pend <= 1'b0; sw_wa <= 4'd0; sw_wd <= 16'd0;
+        op_i <= 3'd0; tick_ph <= 2'd0;
+        opA <= 16'd0; opB <= 16'd0; opS <= 16'd0; opD <= 16'd0; opY <= 16'd0; opZ <= 16'd0;
         gprm_mode <= 16'd0;
         sprm1 <= 16'd15; sprm2 <= 16'd62; sprm3 <= 16'd1;
         sprm4 <= 16'd1;  sprm5 <= 16'd1;  sprm6 <= 16'd0;
@@ -778,6 +871,12 @@ always @(posedge clk or negedge rst_n) begin
         vm_replay <= 1'b0; vm_adv <= 1'b0;
         btn_force <= 1'b0; btn_force_val <= 6'd1;
     end else begin
+        // GPRM write request: one cycle, unless something issues it below.
+        g_we <= 1'b0;
+        if (sw_pend) begin                   // swap's second write (see V_EXEC)
+            g_we <= 1'b1; g_wa <= sw_wa; g_wd <= sw_wd;
+            sw_pend <= 1'b0;
+        end
         // one-cycle pulses
         jump_pulse <= 1'b0;
         // jump_ptt is only sampled by the reader on the jump_pulse cycle, so
@@ -892,7 +991,8 @@ always @(posedge clk or negedge rst_n) begin
 
         // ---- mount: vm_reset --------------------------------------------
         if (start) begin
-            for (gi = 0; gi < 16; gi = gi + 1) gprm[gi] <= 16'd0;
+            clr_busy <= 1'b1; clr_i <= 4'd0;     // the RAM clear walk (see reset)
+            tick_ph <= 2'd0; op_i <= 3'd0; sw_pend <= 1'b0;
             gprm_mode <= 16'd0;
             sprm1 <= 16'd15; sprm2 <= 16'd62; sprm3 <= 16'd1;
             sprm4 <= 16'd1;  sprm5 <= 16'd1;  sprm6 <= 16'd0;
@@ -941,10 +1041,28 @@ always @(posedge clk or negedge rst_n) begin
                 // arriving mid-walk re-arms tick_pending exactly as before
                 // (one flag, merged), and the NBA ordering with the set at the
                 // end of this block is unchanged.
-                if (tick_pending) begin
-                    if (gprm_mode[tick_i]) gprm[tick_i] <= gprm[tick_i] + 16'd1;
-                    tick_i <= tick_i + 4'd1;
-                    if (tick_i == 4'd15) tick_pending <= 1'b0;
+                // With the GPRMs in a RAM the walk is read-modify-write: phase 0
+                // presents tick_i (g_ra follows it outside V_OPRD), phase 1 has
+                // its value and issues the write, phase 2 is the write landing.
+                // A GPRM NOT in counter mode is skipped in phase 0, so a disc
+                // with no counters still walks in 16 cycles, as before.
+                if (tick_pending && !clr_busy) begin
+                    case (tick_ph)
+                    2'd0: if (gprm_mode[tick_i]) tick_ph <= 2'd1;
+                          else begin
+                              tick_i <= tick_i + 4'd1;
+                              if (tick_i == 4'd15) tick_pending <= 1'b0;
+                          end
+                    2'd1: begin
+                        g_we <= 1'b1; g_wa <= tick_i; g_wd <= g_qa + 16'd1;
+                        tick_ph <= 2'd2;
+                    end
+                    default: begin
+                        tick_ph <= 2'd0;
+                        tick_i  <= tick_i + 4'd1;
+                        if (tick_i == 4'd15) tick_pending <= 1'b0;
+                    end
+                    endcase
                 end
                 // Zero-guard: an all-zero LFSR is a LOCKUP (lfsr_next of 0 is
                 // 0, so every later rnd returns 1 forever). The XOR can land
@@ -953,8 +1071,8 @@ always @(posedge clk or negedge rst_n) begin
                 if (entropy_stir)
                     lfsr <= (|(lfsr ^ entropy_val)) ? (lfsr ^ entropy_val)
                                                     : 16'hACE1;
-                if (tick_pending) begin
-                    // counter-mode walk in progress: hold dispatch (see above)
+                if (tick_pending || clr_busy) begin
+                    // counter-mode walk or RAM clear in progress: hold dispatch
                 end else if (!enable) begin
                     ev_boot <= 1'b0; ev_loaded <= 1'b0; ev_error <= 1'b0;
                     ev_btn  <= 1'b0; ev_menu <= 1'b0;
@@ -1152,7 +1270,7 @@ always @(posedge clk or negedge rst_n) begin
                     // Raider Select scene-skip shape - must execute instantly).
                     nat_src <= 1'b0;
                     blk_base <= 9'd0; blk_end <= 9'd1; pc <= 9'd0;
-                    state <= V_EXEC;
+                    state <= V_OPRD;
                 end else if (ev_cellcmd) begin
                     ev_cellcmd <= 1'b0;
                     fuse <= 13'd0; chain <= 7'd0;
@@ -1356,9 +1474,30 @@ always @(posedge clk or negedge rst_n) begin
                     ins <= {ins[55:0], cmem_q};
                 if (fetch_i == 4'd9) begin
                     fetch_i <= 4'd0;
-                    state   <= V_EXEC;
+                    state   <= V_OPRD;
                 end else
                     fetch_i <= fetch_i + 4'd1;
+            end
+
+            // ------------------------------------------------------------
+            // Load the six GPRM operands out of the RAM. g_ra presents the
+            // operand for op_i; its value is in g_qa one edge later, so each
+            // capture takes the PREVIOUS slot's operand (A..Z = slots 0..5).
+            V_OPRD: begin
+                case (op_i)
+                3'd1: opA <= g_qa;
+                3'd2: opB <= g_qa;
+                3'd3: opS <= g_qa;
+                3'd4: opD <= g_qa;
+                3'd5: opY <= g_qa;
+                3'd6: opZ <= g_qa;
+                default: ;
+                endcase
+                if (op_i == 3'd6) begin
+                    op_i  <= 3'd0;
+                    state <= V_EXEC;
+                end else
+                    op_i <= op_i + 3'd1;
             end
 
             // ------------------------------------------------------------
@@ -1388,13 +1527,13 @@ always @(posedge clk or negedge rst_n) begin
                         if (set_op == 4'd1) begin      // SetSTN
                             if (cond_now && ins[39])
                                 sprm1 <= ins_imm ? {9'd0, ins[38:32]}
-                                                 : gprm[ins[35:32]];
+                                                 : opS;   // set_rsel[3:0] == ins[35:32] for type 2
                             if (cond_now && ins[31])
                                 sprm2 <= ins_imm ? {9'd0, ins[30:24]}
-                                                 : gprm[ins[27:24]];
+                                                 : opY;
                             if (cond_now && ins[23])
                                 sprm3 <= ins_imm ? {9'd0, ins[22:16]}
-                                                 : gprm[ins[19:16]];
+                                                 : opZ;
                         end else if (set_op == 4'd2) begin   // SetNVTMR (stub)
                             if (cond_now) begin
                                 sprm9  <= set_data_sh;
@@ -1403,15 +1542,18 @@ always @(posedge clk or negedge rst_n) begin
                         end else if (set_op == 4'd3) begin   // SetGPRMMD
                             // the mode bit is set even when the cond fails
                             gprm_mode[ins[19:16]] <= ins[23];
-                            if (cond_now)
-                                gprm[ins[19:16]] <= set_data_sh;
+                            if (cond_now) begin
+                                g_we <= 1'b1; g_wa <= ins[19:16]; g_wd <= set_data_sh;
+                                if (opi_A == ins[19:16]) opA <= set_data_sh;
+                                if (opi_B == ins[19:16]) opB <= set_data_sh;
+                            end
                         end else if (set_op == 4'd6) begin   // SetHL_BTNN
                             if (cond_now) begin
-                                sprm8 <= ins_imm ? ins[31:16] : gprm[ins[19:16]];
+                                sprm8 <= ins_imm ? ins[31:16] : opZ;
                                 btn_force <= 1'b1;
                                 btn_force_val <= ins_imm
                                                  ? ins[31:26]
-                                                 : gprm[ins[19:16]][15:10];
+                                                 : opZ[15:10];
                             end
                         end
                         if (lnk_op != 4'd0)
@@ -1428,7 +1570,7 @@ always @(posedge clk or negedge rst_n) begin
                             alu_op  <= set_sel_op;
                             alu_reg <= set_sel_reg;
                             alu_a   <= (set_sel_op == 4'd8) ? lfsr_next
-                                                            : gprm[set_sel_reg];
+                                                            : opD;
                             alu_b   <= set_sel_data;
                             alu_b_orig <= set_sel_data;
                             alu_acc <= 32'd0;
@@ -1440,16 +1582,22 @@ always @(posedge clk or negedge rst_n) begin
                         end else begin
                             if (set_do) begin
                                 case (set_sel_op)
-                                4'd1: gprm[set_sel_reg] <= set_sel_data;
-                                4'd2: begin        // swap: reg2 gets old reg
-                                    gprm[set_sel_reg2] <= gprm[set_sel_reg];
-                                    gprm[set_sel_reg]  <= set_sel_data;
+                                4'd2: begin        // swap: reg2 gets old reg, THEN reg
+                                    // Two writes, one port: reg2 now, reg next cycle
+                                    // (sw_pend). If reg2 == reg the second wins, as the
+                                    // two NBAs did. Forwarded in the same order.
+                                    g_we <= 1'b1; g_wa <= set_sel_reg2; g_wd <= opD;
+                                    sw_pend <= 1'b1; sw_wa <= set_sel_reg; sw_wd <= set_sel_data;
+                                    if (opi_A == set_sel_reg2) opA <= opD;
+                                    if (opi_B == set_sel_reg2) opB <= opD;
+                                    if (opi_A == set_sel_reg)  opA <= set_sel_data;
+                                    if (opi_B == set_sel_reg)  opB <= set_sel_data;
                                 end
-                                4'd3: gprm[set_sel_reg] <= add_clamp;
-                                4'd4: gprm[set_sel_reg] <= sub_clamp;
-                                4'd9:  gprm[set_sel_reg] <= gprm[set_sel_reg] & set_sel_data;
-                                4'd10: gprm[set_sel_reg] <= gprm[set_sel_reg] | set_sel_data;
-                                4'd11: gprm[set_sel_reg] <= gprm[set_sel_reg] ^ set_sel_data;
+                                4'd1, 4'd3, 4'd4, 4'd9, 4'd10, 4'd11: begin
+                                    g_we <= 1'b1; g_wa <= set_sel_reg; g_wd <= set_wd;
+                                    if (opi_A == set_sel_reg) opA <= set_wd;
+                                    if (opi_B == set_sel_reg) opB <= set_wd;
+                                end
                                 default: ;
                                 endcase
                             end
@@ -1487,16 +1635,11 @@ always @(posedge clk or negedge rst_n) begin
             end
 
             V_ALUWB: begin
-                case (alu_op)
-                4'd5: gprm[alu_reg] <= (alu_acc[31:16] != 16'd0) ? 16'hFFFF
-                                                                 : alu_acc[15:0];
-                4'd6: gprm[alu_reg] <= (alu_b_orig == 16'd0) ? 16'hFFFF : alu_quot;
-                4'd7: gprm[alu_reg] <= (alu_b_orig == 16'd0) ? 16'hFFFF
-                                                             : alu_rem[15:0];
-                4'd8: gprm[alu_reg] <= (alu_b_orig == 16'd0)
-                                       ? 16'd0 : (alu_rem[15:0] + 16'd1);
-                default: ;
-                endcase
+                if (alu_op >= 4'd5 && alu_op <= 4'd8) begin
+                    g_we <= 1'b1; g_wa <= alu_reg; g_wd <= alu_wd;
+                    if (opi_A == alu_reg) opA <= alu_wd;   // type 4 compares after
+                    if (opi_B == alu_reg) opB <= alu_wd;
+                end
                 state <= V_LINKEV;
             end
 
@@ -2121,6 +2264,14 @@ always @(posedge clk or negedge rst_n) begin
 
             default: state <= V_IDLE;
             endcase
+        end
+
+        // RAM clear walk (reset / mount): one word per cycle. Nothing else
+        // writes meanwhile -- dispatch and the tick both wait on clr_busy.
+        if (clr_busy) begin
+            g_we <= 1'b1; g_wa <= clr_i; g_wd <= 16'd0;
+            clr_i <= clr_i + 4'd1;
+            if (clr_i == 4'd15) clr_busy <= 1'b0;
         end
     end
 end

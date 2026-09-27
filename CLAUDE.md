@@ -416,6 +416,7 @@ otherwise; `--red` runs its mutation arms).
 | Line-21 closed captions (`cc_vbi`, pickup-paced) | ✅ | `closed_captions.md` | `cc_extract_tb`, `cc_line21_tb` |
 | mem_shim tag/LRU store in M10K | ✅ | `history.md` §11 | `run_mem_shim.sh` |
 | Logic reclaim (AC-3, nav/VM, reader ×2; debug overlay retired) | ✅ (D HW-confirmed 2026-09-26) | `logic_reclaim.md` §8 | `bench/ac3` suites, `run_reader_regress.sh` |
+| Logic reclaim E: VM GPRMs in an M10K (−1,129 ALUTs) | ✅ | `logic_reclaim.md` §9 | `run_gprm_ram.sh`, `check_gprm_ram.py` |
 
 ### Audio and A/V sync
 

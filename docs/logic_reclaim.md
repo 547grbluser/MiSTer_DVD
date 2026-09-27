@@ -330,3 +330,80 @@ history and are left as they are.
   `seek_jump` branch.
 - **`run_telem.sh`'s `test_key_table` fails on `main`:** its `PS2_TO_LINUX` table lacks
   PS/2 `0x55`/`0x4e`, the `-`/`=` volume keys added in PR #106.
+
+## 9. Branch E — PR #135: the VM's 16 GPRMs in an M10K (✅ HW-CONFIRMED 2026-09-26)
+
+**Origin.** Built 2026-09-26 on the save-state branch (`docs/save_states.md` §5e), where it
+made that feature fit. Save states were then shelved; this branch carries the register move
+alone, because its reclaim never depended on them.
+
+**What it is.** As flops, the VM read its GPRMs combinationally at about eight sites (the
+two compare operands, the set source, the destination for add/sub/and/or/xor/swap and the
+ALU, and SetSTN's and SetHL_BTNN's register operands). Each is a 16:1 × 16-bit mux. Now:
+
+- `gprm` is a single-port M10K (`(* ramstyle = "M10K, no_rw_check" *)`).
+- **`V_OPRD`**: after the command fetch, 7 cycles load six operand registers
+  (`opA`/`opB`/`opS`/`opD`/`opY`/`opZ`) that every former `gprm[]` read now uses.
+- Every write is ONE registered request (`g_we`/`g_wa`/`g_wd`). `opA`/`opB` are
+  **forwarded** on a write, so type 4's compare-after-set still sees its own set.
+- Swap is two writes through the one port (`sw_pend`, a cycle apart).
+- The 1 Hz counter-mode tick is a read-modify-write walk; non-counter GPRMs are still
+  skipped in one cycle.
+- The array cannot be async-reset and stay a RAM, so reset and mount clear it with a
+  16-cycle walk (`clr_busy`), and dispatch waits for it.
+- `dbg_g3`/`dbg_g14_9` are tied off: nothing in `emu.sv` consumes them, and a read there
+  would rebuild the array from LUTs.
+
+**Measured** — `DVD_gprmram_20260927_0055.rbf` (SEED 9 first roll, clk_dec 89.02 / 87.42
+against the 86.0 gate) vs `main` at PR #134 (`DVD_autoptt_20260926_1603`, 89.88 / 88.92):
+
+| `dvd_vm` (full fit) | ALMs | ALUTs | regs | M10K |
+|---|---|---|---|---|
+| `main` (flops) | 1,965 | 3,397 | 1,150 | 5 |
+| save-state branch (RAM + a snapshot port) | 1,618 | 2,622 | 1,171 | 6 |
+| **this branch (single-port RAM)** | **1,340** | **2,281** | **1,045** | 6 |
+
+| whole design | `main` | this branch | Δ |
+|---|---|---|---|
+| Combinational ALUTs | 62,557 | 61,428 | **−1,129** |
+| Map estimate, ALMs needed | 40,920 | 40,203 | −717 |
+| ALMs placed | 40,981 | 40,790 | −191 |
+| Headline "ALMs needed" | 39,189 (94 %) | 38,735 (92 %) | −454 |
+| RAM blocks | 507 | 508 | +1 |
+
+The module saves **625 ALMs / 1,116 ALUTs**; the second port was costing the save-state
+build about 280 ALMs of that. Placed ALMs move less than the module does because the fitter
+packs the freed space loosely (LABs used stay 4,189 / 4,191); the ALUT count is the honest
+reclaim figure (§1). ⚠ clk_dec is ~1 MHz thinner than `main`'s on both corners, still
+passing; sweep the seed if a later branch lands near the gate.
+
+**Behaviour change, deliberately small:** each command takes ~7 more cycles, the tick walks
+the registers, and a mount clears them with a walk. The VM runs at nav-event rate, so none
+of it is time-critical, but it is a timing change in every disc's navigation. The
+reader-regression gate agrees: every bench's verdict and log are identical to `main`, and
+the trace differs only in the six benches that include the VM (`iso_reader_vm`,
+`_zerocell`, `_celldur`, `_menudrain`, `_auddrain`, `_auddrain_noaudio`), by a handful of
+cycles.
+
+**Gates:** `bench/dvd/run_gprm_ram.sh --red` (one mutation per mechanism: forwarding, the
+swap's second write, the tick write, the mount clear, the operand-capture slot; each caught
+by the arm written for it, two of them new — T6s, the first vector ever to execute a swap,
+and T7c, a mount clears the GPRMs) and `tools/check_gprm_ram.py` (the array is touched only
+in its port block and keeps its ramstyle; RED on four re-regressions). A stray read
+silently rebuilds the array from LUTs and a stray write silently stops it inferring;
+neither shows in simulation.
+
+**HW round 1 (2026-09-26, rig, `tools/nav_diff.py` against libdvdnav, same Main both arms,
+control = `main` at PR #134):** six discs, one fixed button script each, derived from the
+oracle. **The branch reproduced the control's table exactly on every compared step:** MiB
+4/4, Matrix 3/3, Harry Potter Interactive 3/3 (its 4th step was voided by another session
+loading a core mid-run), Scooby-Doo 2 1/1, Scene It HP never parked on either build, and
+T2's first button lands on PGCN 5 where libdvdnav says PGCN 1 **on both builds** — a
+pre-existing difference on `main`, not this branch.
+⚠ What that does NOT cover: steps that never reached an armed park on either build (T2
+after its first button, the Scooby maze itself, Scene It's game), and counter-mode GPRMs.
+Those need a hand check.
+✅ **HW-CONFIRMED 2026-09-26 by the maintainer, by hand on the same build:** Scooby-Doo 2
+(minigame and maze), T2 (Mission Profiles and a slideshow), Harry Potter Interactive
+(Player Mode) and Scene It HP (a game started and a question answered) all behave as on
+`main`.
