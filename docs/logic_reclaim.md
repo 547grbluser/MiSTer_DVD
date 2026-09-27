@@ -331,7 +331,7 @@ history and are left as they are.
 - **`run_telem.sh`'s `test_key_table` fails on `main`:** its `PS2_TO_LINUX` table lacks
   PS/2 `0x55`/`0x4e`, the `-`/`=` volume keys added in PR #106.
 
-## 9. Branch E — `feature/vm-gprm-ram`: the VM's 16 GPRMs in an M10K (sim-proven; ⏳ build + HW round)
+## 9. Branch E — `feature/vm-gprm-ram`: the VM's 16 GPRMs in an M10K (sim-proven, built; ⏳ HW round)
 
 **Origin.** Built 2026-09-26 on the save-state branch (`docs/save_states.md` §5e), where it
 made that feature fit. Save states were then shelved; this branch carries the register move
@@ -354,13 +354,28 @@ ALU, and SetSTN's and SetHL_BTNN's register operands). Each is a 16:1 × 16-bit 
 - `dbg_g3`/`dbg_g14_9` are tied off: nothing in `emu.sv` consumes them, and a read there
   would rebuild the array from LUTs.
 
-**Measured** (full fits on the save-state branch, where the VM also carried a second RAM
-port for the snapshot, so this branch should come in slightly smaller):
+**Measured** — `DVD_gprmram_20260927_0055.rbf` (SEED 9 first roll, clk_dec 89.02 / 87.42
+against the 86.0 gate) vs `main` at PR #134 (`DVD_autoptt_20260926_1603`, 89.88 / 88.92):
 
-| `dvd_vm` | ALMs | ALUTs | regs | M10K |
+| `dvd_vm` (full fit) | ALMs | ALUTs | regs | M10K |
 |---|---|---|---|---|
 | `main` (flops) | 1,965 | 3,397 | 1,150 | 5 |
-| GPRMs in RAM | 1,618 | 2,622 | 1,171 | 6 |
+| save-state branch (RAM + a snapshot port) | 1,618 | 2,622 | 1,171 | 6 |
+| **this branch (single-port RAM)** | **1,340** | **2,281** | **1,045** | 6 |
+
+| whole design | `main` | this branch | Δ |
+|---|---|---|---|
+| Combinational ALUTs | 62,557 | 61,428 | **−1,129** |
+| Map estimate, ALMs needed | 40,920 | 40,203 | −717 |
+| ALMs placed | 40,981 | 40,790 | −191 |
+| Headline "ALMs needed" | 39,189 (94 %) | 38,735 (92 %) | −454 |
+| RAM blocks | 507 | 508 | +1 |
+
+The module saves **625 ALMs / 1,116 ALUTs**; the second port was costing the save-state
+build about 280 ALMs of that. Placed ALMs move less than the module does because the fitter
+packs the freed space loosely (LABs used stay 4,189 / 4,191); the ALUT count is the honest
+reclaim figure (§1). ⚠ clk_dec is ~1 MHz thinner than `main`'s on both corners, still
+passing; sweep the seed if a later branch lands near the gate.
 
 **Behaviour change, deliberately small:** each command takes ~7 more cycles, the tick walks
 the registers, and a mount clears them with a walk. The VM runs at nav-event rate, so none
