@@ -22,8 +22,7 @@ predate later confirmations; the `CLAUDE.md` index carries the reconciled status
 
 ## Hardware status (THIS fork, verified 2026-06-21)
 
-- ✅ **VM GPRMs IN AN M10K — logic reclaim branch E (2026-09-26, branch
-  `feature/vm-gprm-ram`); sim-proven, built (`DVD_gprmram_20260927_0055.rbf`, clk_dec
+- ✅ **VM GPRMs IN AN M10K — logic reclaim branch E (2026-09-26, ✅ MERGED PR #135); sim-proven, built (`DVD_gprmram_20260927_0055.rbf`, clk_dec
   89.02/87.42) and ✅ HW-CONFIRMED 2026-09-26:** `nav_diff` landings identical to `main`
   on six discs, then the maintainer's hand check of the Scooby-Doo 2 maze and minigame,
   T2 Mission Profiles, Harry Potter Interactive Player Mode and Scene It HP. Split out of the shelved save-state work

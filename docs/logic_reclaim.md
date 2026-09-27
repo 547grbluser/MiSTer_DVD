@@ -331,7 +331,7 @@ history and are left as they are.
 - **`run_telem.sh`'s `test_key_table` fails on `main`:** its `PS2_TO_LINUX` table lacks
   PS/2 `0x55`/`0x4e`, the `-`/`=` volume keys added in PR #106.
 
-## 9. Branch E — `feature/vm-gprm-ram`: the VM's 16 GPRMs in an M10K (✅ HW-CONFIRMED 2026-09-26)
+## 9. Branch E — PR #135: the VM's 16 GPRMs in an M10K (✅ HW-CONFIRMED 2026-09-26)
 
 **Origin.** Built 2026-09-26 on the save-state branch (`docs/save_states.md` §5e), where it
 made that feature fit. Save states were then shelved; this branch carries the register move
