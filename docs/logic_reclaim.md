@@ -331,7 +331,7 @@ history and are left as they are.
 - **`run_telem.sh`'s `test_key_table` fails on `main`:** its `PS2_TO_LINUX` table lacks
   PS/2 `0x55`/`0x4e`, the `-`/`=` volume keys added in PR #106.
 
-## 9. Branch E — `feature/vm-gprm-ram`: the VM's 16 GPRMs in an M10K (sim-proven, built; ⏳ HW round)
+## 9. Branch E — `feature/vm-gprm-ram`: the VM's 16 GPRMs in an M10K (sim-proven, built, nav-diff equal to `main` on the rig; ⏳ hand check of game menus)
 
 **Origin.** Built 2026-09-26 on the save-state branch (`docs/save_states.md` §5e), where it
 made that feature fit. Save states were then shelved; this branch carries the register move
@@ -393,6 +393,13 @@ in its port block and keeps its ramstyle; RED on four re-regressions). A stray r
 silently rebuilds the array from LUTs and a stray write silently stops it inferring;
 neither shows in simulation.
 
-**HW gate:** a menu-navigation regression against the current `main` build as the control:
-T2 and Matrix menus, MiB's JumpSS trampoline and Play, the Scooby-Doo 2 maze (GPRM-driven
-game state), Harry Potter Player Mode, and a counter-mode disc if one is at hand.
+**HW round 1 (2026-09-26, rig, `tools/nav_diff.py` against libdvdnav, same Main both arms,
+control = `main` at PR #134):** six discs, one fixed button script each, derived from the
+oracle. **The branch reproduced the control's table exactly on every compared step:** MiB
+4/4, Matrix 3/3, Harry Potter Interactive 3/3 (its 4th step was voided by another session
+loading a core mid-run), Scooby-Doo 2 1/1, Scene It HP never parked on either build, and
+T2's first button lands on PGCN 5 where libdvdnav says PGCN 1 **on both builds** — a
+pre-existing difference on `main`, not this branch.
+⚠ What that does NOT cover: steps that never reached an armed park on either build (T2
+after its first button, the Scooby maze itself, Scene It's game), and counter-mode GPRMs.
+Those need a hand check — see §9's status.
