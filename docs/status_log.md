@@ -22,9 +22,11 @@ predate later confirmations; the `CLAUDE.md` index carries the reconciled status
 
 ## Hardware status (THIS fork, verified 2026-06-21)
 
-- 🔧 **VM GPRMs IN AN M10K — logic reclaim branch E (2026-09-26, branch
-  `feature/vm-gprm-ram`); sim-proven and built (`DVD_gprmram_20260927_0055.rbf`, clk_dec
-  89.02/87.42), ⏳ HW menu regression pending.** Split out of the shelved save-state work
+- ✅ **VM GPRMs IN AN M10K — logic reclaim branch E (2026-09-26, branch
+  `feature/vm-gprm-ram`); sim-proven, built (`DVD_gprmram_20260927_0055.rbf`, clk_dec
+  89.02/87.42) and ✅ HW-CONFIRMED 2026-09-26:** `nav_diff` landings identical to `main`
+  on six discs, then the maintainer's hand check of the Scooby-Doo 2 maze and minigame,
+  T2 Mission Profiles, Harry Potter Interactive Player Mode and Scene It HP. Split out of the shelved save-state work
   (`docs/save_states.md` §5e). Full fit: `dvd_vm` 1,965 → 1,340 ALMs, 3,397 → 2,281 ALUTs,
   for one M10K; whole design −1,129 ALUTs. Operands are
   prefetched in `V_OPRD`, writes are one registered request with forwarding, swap is two
