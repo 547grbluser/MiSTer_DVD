@@ -9,10 +9,13 @@ so every cell measures the same scene region, and runs a reset-aware
 (A/B/C/A/B/C...) so scene content cannot masquerade as a mode effect.
 
 Every window writes its raw rows (.jsonl) and its summary (.json) under --out,
-and the run ends with one table. A cell ASSERTS what it measured from
-telemetry (sched_ps / sched_pf / sched_frc, flags.menu / still) -- the table
-prints them beside the rates, so a window that landed on the wrong content is
-visible rather than silently reported (docs/decode_pacing.md).
+and the run ends with one table. A cell reports what it measured from
+telemetry (sched_pf / sched_frc, flags.menu / still) beside the rates, so a
+window that landed on the wrong content is visible rather than silently
+reported (docs/decode_pacing.md). ⚠ sched_ps is progressive_SEQUENCE, not
+picture_structure: telemetry cannot see field coding at all, so a field-coded
+cell rests on the census (video_cadence_census.py --field-order) plus a forced
+Title VTS.
 
 Usage:
   tools/pacing_matrix.py <image-on-target> --label NAME [--opt "Name=Value"]...

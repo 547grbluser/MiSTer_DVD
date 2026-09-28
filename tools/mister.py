@@ -873,7 +873,9 @@ def telem_summary(rows):
                 'alias_suspect': any(abs(v) > 5000 for v in vals)}
     # word 5 is {skip[7:0], catch[3:0], rearm[3:0]} (the JSON key kept its old
     # name, vid_err, and dvd_ctl decodes it SIGNED).
-    if 'vid_err' in rows[0]:
+    # word 5 lives in the aud_rst_n domain with aud_play: across a reset its
+    # difference is meaningless, so it is only reported on a reset-free window.
+    if 'vid_err' in rows[0] and not s['resets'].get('aud_play'):
         w0, w1 = rows[0]['vid_err'] & 0xFFFF, rows[-1]['vid_err'] & 0xFFFF
         s['aud_disc'] = {'skip': ((w1 >> 8) - (w0 >> 8)) & 0xFF,
                          'catch': (((w1 >> 4) & 0xF) - ((w0 >> 4) & 0xF)) & 0xF,
