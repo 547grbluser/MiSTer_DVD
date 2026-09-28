@@ -128,13 +128,13 @@ module title_span_tb;
         // agl_vm_en would poison the angle resolve (see the port comments).
         .agl_vm(4'd0), .agl_vm_en(1'b0), .vm_pre_done(1'b0),
         .clk(clk), .rst_n(rst_n), .start(start), .file_size(file_size),
-        .title_sel(title_sel), .aud_drained(1'b1), .vbuf_empty(1'b0), .menu_snap(1'b0),
+        .title_sel(title_sel), .aud_drained(1'b1), .vbuf_empty(1'b0), 
         .jump_ttn(7'd0), .jump_pgn(8'd0),
         .vm_mode(1'b0), .vm_adv(1'b0), .vm_replay(1'b0),
         .vm_cell_cmd(), .vm_pgc_end(), .nav_ready_o(), .auto_vts(), .cell_count_o(),
         .pm_we(), .pm_waddr(), .pm_wdata(), .cmd_nr_pgm(),
         .seek_pulse(1'b0), .seek_natural(1'b0), .seek_cell(8'd0), .seek_ack(seek_ack),
-        .seek_rbn_pulse(sk_pulse), .seek_rbn(sk_rbn),
+        .seek_rbn_pulse(sk_pulse), .seek_rbn(sk_rbn), .seek_tm_req(1'b0), .seek_tm_secs(17'd0),
         .title_first_rbn(title_first_rbn), .title_last_rbn(title_last_rbn),
         .title_start_rbn(title_start_rbn), .title_end_rbn(title_end_rbn),
         .keep_vbuf(),
@@ -142,9 +142,8 @@ module title_span_tb;
         .sd_lba(sd_lba), .sd_rd(sd_rd), .sd_ack(sd_ack),
         .sd_buff_addr(sd_buff_addr), .sd_buff_dout(sd_buff_dout), .sd_buff_wr(sd_buff_wr),
         .stream_data(stream_data), .stream_valid(stream_valid), .busy(1'b0),
-        .debug_active(), .debug_sd_rd(), .debug_sd_ack(), .debug_cache_has_data(),
-        .debug_file_size(), .debug_total_sectors(), .debug_next_lba(),
-        .debug_state(), .debug_iso_mode(), .debug_iso_error()
+        .debug_active(),   
+         .debug_iso_mode() 
     );
 
     // The REAL consumer, with the REAL clamp. Only the time constants shrink.
@@ -157,6 +156,8 @@ module title_span_tb;
         .title_start_rbn(title_start_rbn), .title_end_rbn(title_end_rbn),
         .title_secs(16'd0), .lin_blk10(24'd0), .lin_rate_ok(1'b0),
         .jump_fire(1'b0), .jump_dir(1'b0), .jump_base(32'd0), .jump_off(32'd0),
+        .live_secs(17'd0), .live_ok(1'b0), .tm_title(1'b0),   // sector seeks only here
+        .seek_tm_req(), .tgt_secs(), .tgt_secs_ok(),
         .seek_rbn_pulse(sk_pulse), .seek_rbn(sk_rbn),
         .hold_freeze(), .bar_active(), .bar_base_rbn(), .bar_tgt_rbn(),
         .hud_tier(), .hud_dir()

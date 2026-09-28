@@ -186,7 +186,7 @@ int main(void)
 	printf("[17] the gate is off when the ini says off\n");
 	// ⚠ 1 = ON, 0 = OFF. The opposite sense shipped briefly on the belief that
 	// cfg had no defaults pass and 0 therefore had to mean on; cfg_parse() DOES
-	// have one (integration step 54 sets cfg.dvd_ir_remap = 1 there), and "1
+	// have one (integration step 56 sets cfg.dvd_ir_remap = 1 there), and "1
 	// disables a thing" reads backwards to anyone editing MiSTer.ini.
 	cfg.dvd_ir_remap = 0;
 	ck("DVD_IR_REMAP=0 -> inactive", dvd_ir_active(), 0);

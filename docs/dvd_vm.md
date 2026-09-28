@@ -174,6 +174,10 @@ A faithful port of **libdvdnav `src/vm/decoder.c` `eval_command`**:
 - **GPRM[16]** × 16 bit; `gprm_mode` stores SetGPRMMD's counter bit (the mode bit is
   written even when the guard fails, per decoder.c). Counter-mode GPRMs **tick at 1 Hz**
   (see "DVD-game entropy" below).
+  ★ **The GPRMs are an M10K, not flops** (2026-09-26, `docs/logic_reclaim.md` §9):
+  operands are loaded in `V_OPRD` before `V_EXEC`, writes go through one registered
+  request with forwarding into the compare operands, and reset/mount clear the array by
+  a 16-cycle walk. Touch `gprm[]` only in its port block (`tools/check_gprm_ram.py`).
 - **SPRMs implemented**: 1 ASTN (init 15 = none), 2 SPSTN (init 62), 3 AGLN, 4 TTN,
   5 VTS_TTN, 6 TT_PGCN, 7 PTTN, 8 HL_BTNN (init 0x400), 9/10 NVTMR (stored, never
   fires), 13 PML. Constants per libdvdnav `vm_reset`: SPRM0/16/18 = 'en', 12 = 'US',

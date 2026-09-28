@@ -44,7 +44,7 @@ module iso_reader_raw_tb;
     wire        stream_valid;
     reg         busy = 0;
 
-    wire        debug_iso_mode, debug_iso_error;
+    wire        debug_iso_mode;
     wire        raw_mode_o;
 
     reg  [7:0]  img [0:MAXIMG-1];
@@ -75,21 +75,19 @@ module iso_reader_raw_tb;
         // new reader inputs tied off: a floating input is X, and X on
         // agl_vm_en would poison the angle resolve (see the port comments).
         .agl_vm(4'd0), .agl_vm_en(1'b0), .vm_pre_done(1'b0),
-        .clk(clk), .rst_n(rst_n), .start(start), .file_size(file_size), .title_sel(4'd0), .aud_drained(1'b1), .vbuf_empty(1'b0), .menu_snap(1'b0),
+        .clk(clk), .rst_n(rst_n), .start(start), .file_size(file_size), .title_sel(4'd0), .aud_drained(1'b1), .vbuf_empty(1'b0), 
         .jump_ttn(7'd0), .jump_pgn(8'd0),
         .vm_mode(1'b0), .vm_adv(1'b0), .vm_replay(1'b0),
         .vm_cell_cmd(), .vm_pgc_end(), .nav_ready_o(), .auto_vts(), .cell_count_o(),
         .pm_we(), .pm_waddr(), .pm_wdata(), .cmd_nr_pgm(),
-        .seek_rbn_pulse(seek_rbn_pulse), .seek_rbn(seek_rbn_r), .seek_ack(seek_ack_w),
+        .seek_rbn_pulse(seek_rbn_pulse), .seek_rbn(seek_rbn_r), .seek_tm_req(1'b0), .seek_tm_secs(17'd0), .seek_ack(seek_ack_w),
         .flat_seek_en(flat_seek_en), .lin_seek_ok_o(lin_seek_ok_o), .lin_blk_o(lin_blk_o),
         .sd_lba(sd_lba), .sd_rd(sd_rd), .sd_ack(sd_ack),
         .sd_buff_addr(sd_buff_addr), .sd_buff_dout(sd_buff_dout), .sd_buff_wr(sd_buff_wr),
         .stream_data(stream_data), .stream_valid(stream_valid), .busy(busy),
         .raw_mode_o(raw_mode_o),
-        .debug_active(), .debug_sd_rd(), .debug_sd_ack(), .debug_cache_has_data(),
-        .debug_file_size(), .debug_total_sectors(), .debug_next_lba(),
-        .debug_state(), .debug_iso_mode(debug_iso_mode),
-        .debug_iso_error(debug_iso_error)
+        .debug_active(),   
+         .debug_iso_mode(debug_iso_mode)
     );
 
     always #5 clk = ~clk;

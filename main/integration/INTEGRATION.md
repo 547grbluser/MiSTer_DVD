@@ -539,17 +539,67 @@ every byte is a pure function of disc LBA/offset) plus new arms in
 caught by its own arm (`run_tests.sh --red`). Detail:
 `MiSTer_DVD/docs/physical_disc.md`, `MiSTer_DVD/docs/vcd_svcd.md`.
 
+## Steps 50-51 — `.cue` sheets (`support/dvd/dvd_cue.{h,cpp}`)
+
+An audio CD or Video CD rip selected by its `.cue`. The Main parses the sheet and
+serves the stream a physical disc of that kind already produces: an audio CD
+through `dvd_css`'s CD-DA source (`SD_TYPE_DVDCSS`), a VCD/SVCD through `dvd_vcd`'s
+source (`SD_TYPE_VCD`). So the read hooks (8/9, 46/47), the read-ahead defer (49)
+and the close on remount (5, 44b) all apply unchanged, and only the dispatch is new.
+Design: `MiSTer_DVD/docs/cdda.md` "`.cue` sheets".
+
+| # | File | Edit |
+|---|---|---|
+| 50 | `menu.cpp` | `static char fs_pFileExt[13]` → `[256]` (`// dvd:ext-len`) |
+| 51a | `user_io.cpp` | include `support/dvd/dvd_cue.h` |
+| 51b | `user_io.cpp` | `// dvd:cue` — a mount arm before `else if (x2trd_ext_supp(name))` |
+
+```cpp
+else if (is_dvd() && len > 4 && !strcasecmp(name + len - 4, ".cue"))   // dvd:cue
+{
+	int kind = dvd_cue_mount(name);
+	if (kind == DVD_CUE_AUDIO) { sd_type[index] = SD_TYPE_DVDCSS; sd_image[index].size = dvd_css_size(); writable = 0; ret = 1; }
+	else if (kind == DVD_CUE_VCD) { sd_type[index] = SD_TYPE_VCD; sd_image[index].size = dvd_vcd_size(); writable = 0; ret = 1; }
+}
+```
+
+★ **Step 50 fixes a stock overflow this core is the one to trip.** The OSD file
+picker `strcpy`s a core's `S` extension list (from a 256-byte buffer) into the
+13-byte `fs_pFileExt`. Our list was 24 characters before this feature and is 27
+with `CUE`; in the built object the bytes past the buffer are `menu_visible`,
+`osd_unlocked` and `config_scale[0]`, a pointer. It stayed harmless because those
+are rewritten every pass or read only by other cores, and Main restarts at every
+core load, but that is layout luck. ⚠ A stock-Main bump that renames or resizes
+this buffer breaks the anchor loudly, as intended.
+
+★ **A refused sheet must NOT fall through to the plain-file branch.** The arm
+matches every `.cue`; when `dvd_cue_mount()` fails, `ret` stays 0, the size goes to
+0, and the core sees an empty mount (the idle screen). Falling through would hand
+the core the sheet's TEXT as an image.
+
+★ **The track table is NOT sent here.** `user_io_file_mount()` sends
+`UIO_SET_SDSTAT` last, and the core clears its table on that mount, so an upload
+from inside the dispatch would be thrown away. `dvd_cdda_toc_service()`, called
+from `dvd_css_tick()` on the next poll, sends it.
+
+⚠ This is another `insert_before` arm on the `x2trd_ext_supp` anchor, the chain the
+step 43-47 notes above warn about. The block does not repeat the anchor line.
+
+Host tests: `main/tests/dvd_cue_test.cpp` (parser and layout from sheet text; real
+temporary files mounted and read back through the real `dvd_cdda.cpp`) and 12 RED
+mutations in `run_tests.sh --red`.
+
 ---
 
-## Steps 50-53 — IR / media-remote keycode normalisation (`support/dvd/dvd_ir.{h,cpp}`)
+## Steps 52-56 — IR / media-remote keycode normalisation (`support/dvd/dvd_ir.{h,cpp}`)
 
 | Step | File | What |
 |---|---|---|
-| 50 | `input.cpp` | `#include "support/dvd/dvd_ir.h"` after `#include "file_io.h"` (1 match) |
-| 51 | `input.cpp` | the rewrite itself (`// dvd:ir`), by `replace_once` on the `has_advanced_map` block |
-| 52 | `cfg.h` | `uint8_t dvd_ir_remap;` after step 21's `dvd_hdmi_bitstream` |
-| 53 | `cfg.cpp` | the `DVD_IR_REMAP` ini row after step 21's `DVD_HDMI_BITSTREAM` |
-| 54 | `cfg.cpp` | `cfg.dvd_ir_remap = 1` in `cfg_parse()`'s defaults block |
+| 52 | `input.cpp` | `#include "support/dvd/dvd_ir.h"` after `#include "file_io.h"` (1 match) |
+| 53 | `input.cpp` | the rewrite itself (`// dvd:ir`), by `replace_once` on the `has_advanced_map` block |
+| 54 | `cfg.h` | `uint8_t dvd_ir_remap;` after step 21's `dvd_hdmi_bitstream` |
+| 55 | `cfg.cpp` | the `DVD_IR_REMAP` ini row after step 21's `DVD_HDMI_BITSTREAM` |
+| 56 | `cfg.cpp` | `cfg.dvd_ir_remap = 1` in `cfg_parse()`'s defaults block |
 
 **The problem.** A remote reaches Main as an ordinary keyboard, and stock Main
 then drops nearly everything it sends. Three stacked ceilings, measured against
@@ -561,12 +611,12 @@ the pinned stock tree rather than assumed:
 | `get_ps2_code()` returns `NONE` for `key > 255` | `input.cpp:1409-1412` | a second barrier behind the first |
 | `ev2ps2[]` is 256 entries **and most media keys are `NONE` in it** | `input.cpp:367` | PLAY, STOP, REWIND, FASTFORWARD, PLAYPAUSE, EJECTCD, EXIT, MEDIA all dropped |
 
-Without step 51: **arrows, Enter and volume work; nothing else does.**
+Without step 53: **arrows, Enter and volume work; nothing else does.**
 `KEY_PAUSE` is the sharpest case — `ev2ps2[119]` is `0xE1`, the multi-byte PS/2
 Pause sequence `dvd/kbd_map.sv` deliberately never binds, so the most obvious
 button on the handset is inert.
 
-### ★★ Step 51's PLACEMENT is the design, not a convenience
+### ★★ Step 53's PLACEMENT is the design, not a convenience
 
 It must sit **after** the three map-loading blocks and **before**
 `if (!input[dev].num)`. Three independent reasons, each of which alone would
@@ -610,13 +660,13 @@ default), `2` = on for every core. No OSD option: `CONF_STR` is inside the
 netlist and a menu row would re-roll the pinned fitter seed for a setting nobody
 changes.
 
-⚠⚠ **The default is set by step 54, in `cfg_parse()`'s defaults block.** An
+⚠⚠ **The default is set by step 56, in `cfg_parse()`'s defaults block.** An
 earlier cut instead defined `0` as ON, on the belief that cfg had no defaults
-pass — **false**, and disproved by the very block step 54 inserts into
+pass — **false**, and disproved by the very block step 56 inserts into
 (`cfg.csync = 1`, `cfg.bootscreen = 1`, `cfg.dvi_mode = 2` …). It also read
 backwards in the ini, where `1` should enable a thing.
 
-⚠ **Steps 52/53/54 re-`read()` `cfg.h` and `cfg.cpp`** — step 21 already wrote
+⚠ **Steps 54/55/56 re-`read()` `cfg.h` and `cfg.cpp`** — step 21 already wrote
 both, and these anchors are lines step 21 *inserted*. Working from a stale copy
 would drop step 21's rows.
 

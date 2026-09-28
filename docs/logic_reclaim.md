@@ -1,7 +1,9 @@
 # Logic reclaim — the 2026-09-10 area audit and its branches
 
-**Status:** Branch A (AC-3) built and sim-gated, ⏳ HW-confirm pending; Branch B
-(nav/VM/glue) in progress; Branch C (reader) and the block-RAM packing pass planned.
+**Status:** Branches A (AC-3), B (nav/VM/glue) and C (reader) ✅ merged and
+HW-confirmed 2026-09-11. Branch D (`feature/reader-slim`, the reader again, plus the
+retirement of the numeric debug overlay) is bit-identical in simulation and
+✅ HW-confirmed by the maintainer on 2026-09-26, §8. The block-RAM packing pass (§6) is still planned.
 
 ## 0. Why
 
@@ -161,7 +163,8 @@ one address expression restored the `altsyncram`. After any edit near a memory's
 sites, check `DVD.map.rpt` for its "Inferred altsyncram" line before spending a fit.
 
 Not done (deferred, medium risk): serialising the VCD seek arithmetic, dropping the BCD
-prefix sum, the 34-source `sec_lba` mux factoring.
+prefix sum, the 34-source `sec_lba` mux factoring. (The `sec_lba` factoring was done in
+Branch D, §8; the other two are still open.)
 
 ### Originally planned
 
@@ -182,3 +185,225 @@ on the HW gate.
 `MISTER_DISABLE_ALSA` — yes (unused HPS→core audio, ~290 ALMs). `MISTER_DISABLE_ADAPTIVE`
 and `MISTER_DOWNSCALE_NN` — declined (scaler filters vanish from the OSD; NN downscale
 would alias a 720×576 source on 640×480 / 480-line-PAL outputs, the CRT users).
+
+## 8. Branch D — `feature/reader-slim` (bit-identical in sim; ✅ HW-CONFIRMED 2026-09-26)
+
+**Why again.** Between Branch C and 2026-09-25 the reader grew from 6,421 to **7,869
+ALUTs** (seamless-branch seek, four angle fixes, the duration scan, WAV/CD-DA, the title
+span, TMAP), the design sat at **98 % ALMs needed**, and the reader's 6-bit state space was
+at **63 of 64 codes**: the TMAP time seek (PR #128) had to squeeze ten phases into one
+state code because codes were scarce. Scope, by user decision: **bit-identical only** (no
+timer, cache or BCD-path change), and retire the compiled-out numeric debug overlay.
+
+**The gate: `bench/dvd/run_reader_regress.sh` + `bench/dvd/reader_trace.sv`.** Every bench
+that instantiates the reader (41 benches, 50 arms including the red arms) runs with a second
+root module that `$fmonitor`s all 82 kept output ports (741 bits) of the reader. Run once in a
+worktree of `main` for a baseline, then `--baseline` after each commit: any difference in a
+verdict, a run log or a trace fails. `$fmonitor` prints settled end-of-timestep values, so the
+trace cannot race the edge a bench drives on. ★ **Negative control:** routing `S_CELL_LOAD`
+through one extra cycle changed the traces of all three arms it was tried on **while all three
+benches still passed**, so a verdict-only gate would have missed it. Baseline non-passes on
+`main`, all expected: `iso_reader_atmos` and `iso_reader_tpsw_boot` (pre-existing failures)
+and the two red arms (`auddrain` with `NO_AUDIO_TERM=1`, `mode_realign_chain +realign=0`).
+⚠ Gitignored fixtures (e.g. `mib_vts21_vtsi_mat.hex`) must be copied into the `main`
+worktree before its baseline run, or the baseline differs for the wrong reason.
+
+**Baseline numbers** are the 2026-09-26 SEED 9 fit of `main` (build
+`DVD_deintmerge_20260926_0154`, commit `2a79dd7`, no RTL difference from `e8f790d`); Branch C
+compared on SEED 7. Reader row from `DVD.map.rpt` (ALUTs total (own), registers, DSP):
+
+| step | change | ALUTs | regs | DSP | gate |
+|---|---|---|---|---|---|
+| — | `main` | 7,869 (7,799) | 4,435 | 3 | baseline |
+| 3 | stale comments | — | — | — | comment-stripped source identical |
+| 4 | 27 redundant `fi`/`fi_cap_v` resets before `S_SECREAD`; write-only `chap_tp`, `ptt_base_off`, `ttsrp0_vtsn`; constant `attr_resume`; 1-bit `ptt_res_tt`; dead `nr_cells > MAXCELL` and `cur_angle == 0` guards | | | | trace identical |
+| 5 | DEBUG_OVERLAY retired (below) | | | | lint, preprocess-identical |
+| 6 | the reader's 16 dead ports | **7,586 (7,516)** | 4,493 | 3 | trace identical |
+| 7 | `jump_ctx`, `menu_dom` (now a wire of `dom`), `cf_c`, an unreachable empty-cell arm | | | | trace identical |
+| 8 | `ext_cum` folded into `seek_cum` | | | | trace identical |
+| 9 | one BCD→seconds converter for `dur_scan` and the cell walk | | | | trace identical; exhaustive 2²⁴-input check, 0 mismatches |
+| 10 | one subtractor for the `sml_agli` byte snoop | | | | trace identical |
+| 11 | **one shared sector-address adder** for all 37 parse reads | **7,018 (6,948)** | 4,451 | **2** | trace identical |
+| 12 | six pure wait states folded into `S_LAT` | **7,065 (6,995)** | 4,453 | 2 | trace identical |
+
+Net: **−804 ALUTs (−10.2 %), +18 registers, −1 DSP, 0 M10K** (all 12 reader `altsyncram`s
+still inferred after every step). The design's map total moved by the same amount
+(63,038 → 62,232), so the emu/overlay edits were exactly area-neutral. ⚠ Step 12 **costs**
+47 ALUTs over step 11: `state <= lat_ret` has to decode a register into the one-hot state.
+It is there for the six state codes, not for area.
+
+**Final fit** (commit `6a443ab`, build `DVD_readerslim_20260926_0404.rbf`, SEED 9 **first
+roll**): clk_dec **90.03 MHz @100C / 89.45 MHz @-40C** (gate 86.0; `main` was 90.95 / 89.09),
+**40,654 / 41,910 ALMs needed (97 %)** against `main`'s 41,221 (98 %), reader **4,449 ALMs**
+against 4,895, 94 / 112 DSP (was 95), M10K unchanged (507), registers 52,932 (+23).
+`lint_undriven`, `netlist_canary` and `fmax_check` pass. Both builds were made in a detached
+worktree pinned at their commit, so their `.rbf.json` records `branch: HEAD`; the SHA is the
+real identity. A mid-branch fit of step 6
+(`DVD_readerslim_20260926_0329.rbf`, SEED 9 first roll) read 93.07 / 90.69 MHz and 41,039
+ALMs.
+
+**✅ HW-CONFIRMED by the maintainer (2026-09-26)** on the final build, running the targeted list:
+a physical disc with menus on, the menu-heavy discs (T2 Mission Profiles, Scooby-Doo 2's maze
+and whac-a-mole, Harry Potter / Scene It in-title menus), a language-page menu and back,
+Chapter Menu and a scene jump, gamepad hold-to-scrub, seeks inside T2's branches, a seek
+pre-empting a seek, Auto mode on stub and TV discs, timed stills, and the `O[2]` blocks, all
+good. One pre-existing defect surfaced on X-Men Apocalypse (the chapter total, see the Auto
+Auto-mode note in `docs/dvd_nav.md`); it is identical on v0.7.0 and is not from this branch.
+
+**Harness smoke pass (2026-09-26, final build + the current Main), run before it:**
+- `nav_diff` on Men in Black, `--script "1 2"`: no differences from libdvdnav (boot parks at
+  PGC 5, both buttons land in PGC 9).
+- Men in Black with Disc Menus Off: Auto picks the feature (1:37:52, PGCN 1 of VTS 21);
+  30 s of telemetry read 2.498 refreshes per frame, 47,999.5 Hz, 0 lates, 0 drops, 0
+  drain-gate closures (Branch C's round read 2.496–2.498 and −11 ppm).
+- Chapter skips 1 → 2 → 3 of 27. A keyboard Fast Fwd and three Rewind taps: `flags.tmap=1`,
+  `tmap_fb=0`, landings consistent with +10 s and −30 s.
+- VTS 14's five-angle block via the Debug title picker: `ANGLE 2/5` then `3/5`, clock running.
+- `WAVTEST_48.wav`: total `0:02:59`, 47,999.9 Hz. A VCD `.bin`: 44.1 kHz, 2.00 refreshes per
+  frame, seek works. A flat `.VOB`: seek works; a settled 20 s window read 2.350 refreshes per
+  frame against 2.373 for `main`'s build through the identical script (the file's cadence
+  varies with content). Its total estimate moving 3:16 → 2:16 after a seek is pre-existing
+  (`main` does the same).
+
+★ **Two things the numbers do not say at first sight:**
+- **The +58 registers at step 6 are Quartus extracting the reader's main FSM.** `debug_state`
+  exported the raw `state` register, which blocked state-machine extraction; with the port
+  gone, `DVD.map.rpt` lists `dvd_iso_reader_inst|state` as a state machine for the first time
+  and re-encodes it one-hot (about 55 more flip-flops, less decode logic). Functionally
+  identical, but it is a real netlist change from a "dead port" removal.
+- **"Area-neutral" steps were not all neutral.** Steps 3–6 were expected to cost nothing in
+  silicon (Quartus prunes dead ports and write-only registers), yet the reader lost 283 ALUTs
+  by step 6: the 27 deleted resets and the constant `attr_resume` simplified next-state muxes,
+  and the FSM re-encoding simplified decode.
+
+**Step 11, the sector-address unit** (the "34-source `sec_lba` mux" deferred in §5). Each of
+the 37 read sites now writes `sec_base`/`sec_off`, and `S_SECREAD` issues
+`sd_lba <= sec_base + sec_off` on its first cycle, the cycle it always issued on. Two details
+carry the identity:
+- the `S_FETCH` straddle cross reads **`pb_sec + 1`, not `sd_lba + 1`**: a resident fetch can
+  cross after `S_STREAM` has moved `sd_lba`, and `pb_sec` is the resident sector by definition;
+- eleven sites also loaded `pit_sec`/`pgc_sec`/`ptt_srpt_lba`/`tm_sec` with the same sum. They
+  set a flag, and the flagged register takes the sum on the next cycle **at the top of the
+  clocked block, whichever branch runs**. `seek_jump` is not state-gated and can pre-empt
+  `S_SECREAD`'s first cycle; loading inside the `S_SECREAD` arm would then have skipped the
+  load the old code made at the site. Nothing reads those registers on that cycle.
+
+**Step 12** frees codes 14, 29, 30, 45, 47 and 51. `S_CELL_LOAD`, `S_ATTR_RD` and
+`S_EXT_LOAD` are not pure and stay.
+
+**The DEBUG_OVERLAY retirement (step 5).** `dvd/debug_overlay.sv`, emu's 207-line
+`ifdef DEBUG_OVERLAY` block and ~40 emu nets that only fed it, `ps_demux`'s seen-mask block,
+and `tools/osd_read.py` are deleted; `DVD.qsf` keeps a one-line note. The overlay had been
+compiled out of every release since 2026-07-09, its last real use was the 2026-08-31 IEC 61937
+flap probe, and `dvd_telem` has carried every hardware round since 2026-09-05. The debug
+**ports** on `mem_shim_burst`, `dvd_vm`, `dvd_audio_decode`, `iec61937_wrap`, `audio_ring`,
+`av_sync` and `mpeg2video` stay, connected `()` in emu, because their own benches read them
+(`cache_missrate_tb` exists to test one). The release-visible `O[2]` mode (menu-highlight
+blocks, HUD `{PGCN,VTS}`) is a different mechanism and is untouched. If a `pgc_error` reason
+readout is ever wanted again, it is one more `dvd_telem` word; the reason codes were: 1 empty
+PGCIT, 2 PGCN out of range, 3 bad `pgc_start_byte`, 4 JumpTT resolve, 5 no PGCI_UT, 6 bad UT
+header, 7 VTS or menu VOB not found. Older `docs/` mentions of overlay rows are measurement
+history and are left as they are.
+
+**Considered and skipped:**
+- **`gmem` single write port:** a cycle-identical shape exists but costs **+126 registers**
+  (the `S_WALK_VTS` site reassigns `grp_*` in the cycle it writes). Two write sites have
+  always inferred fine.
+- **The textual duplicates** (move-to-next-PGC, next-cell, timed-still arming, VM dispatch,
+  angle clear, pmap launch, `CH_R`/`CH_GR`): Quartus already collapses identical
+  assignments, and a pulse register acted on by another arm would add a cycle.
+- **A muxed extent-walk comparator:** the 32-bit mux costs more than the comparator it saves.
+- **Merging `nav_cand` into `seek_target`:** the lifetime proof predates TMAP's rewrite of the
+  seek path; 32 registers were not worth re-proving it.
+- **Deferred, by user decision:** the BCD/binary twin prefix sum (`run_eltm` +
+  `bcd_time_add` + the 255×32 `cell_start_mem` + `cur_cell_start`; needs emu's HUD clock to
+  take binary seconds, own branch and HW round), the 16 KB → 8 KB stream cache (−8 M10K, but
+  it is the hot delivery path), and sharing a timer prescaler (moves expiries by ≤ 1 ms).
+
+**Pre-existing defects found on the way, NOT fixed here (the branch is bit-identical by rule):**
+- **`seek_jump` and `jump_go` never clear `fetch_cross` or `pb_skip`** (only reset does).
+  `seek_jump` is not state-gated, so a seek landing on the first cycle of a straddle refill's
+  `S_SECREAD` leaves `fetch_cross` set, and the next unrelated read then resumes the
+  abandoned fetch (`fi <= fi_save`, `fetch_xw` set). TMAP's fetches can straddle, and its own
+  comment says a newer seek can pre-empt it between reads. The likely outcome is a garbled
+  probe that falls back, not a hang, but it is wrong. One-line fix: clear both in the
+  `seek_jump` branch.
+- **`run_telem.sh`'s `test_key_table` fails on `main`:** its `PS2_TO_LINUX` table lacks
+  PS/2 `0x55`/`0x4e`, the `-`/`=` volume keys added in PR #106.
+
+## 9. Branch E — PR #135: the VM's 16 GPRMs in an M10K (✅ HW-CONFIRMED 2026-09-26)
+
+**Origin.** Built 2026-09-26 on the save-state branch (`docs/save_states.md` §5e), where it
+made that feature fit. Save states were then shelved; this branch carries the register move
+alone, because its reclaim never depended on them.
+
+**What it is.** As flops, the VM read its GPRMs combinationally at about eight sites (the
+two compare operands, the set source, the destination for add/sub/and/or/xor/swap and the
+ALU, and SetSTN's and SetHL_BTNN's register operands). Each is a 16:1 × 16-bit mux. Now:
+
+- `gprm` is a single-port M10K (`(* ramstyle = "M10K, no_rw_check" *)`).
+- **`V_OPRD`**: after the command fetch, 7 cycles load six operand registers
+  (`opA`/`opB`/`opS`/`opD`/`opY`/`opZ`) that every former `gprm[]` read now uses.
+- Every write is ONE registered request (`g_we`/`g_wa`/`g_wd`). `opA`/`opB` are
+  **forwarded** on a write, so type 4's compare-after-set still sees its own set.
+- Swap is two writes through the one port (`sw_pend`, a cycle apart).
+- The 1 Hz counter-mode tick is a read-modify-write walk; non-counter GPRMs are still
+  skipped in one cycle.
+- The array cannot be async-reset and stay a RAM, so reset and mount clear it with a
+  16-cycle walk (`clr_busy`), and dispatch waits for it.
+- `dbg_g3`/`dbg_g14_9` are tied off: nothing in `emu.sv` consumes them, and a read there
+  would rebuild the array from LUTs.
+
+**Measured** — `DVD_gprmram_20260927_0055.rbf` (SEED 9 first roll, clk_dec 89.02 / 87.42
+against the 86.0 gate) vs `main` at PR #134 (`DVD_autoptt_20260926_1603`, 89.88 / 88.92):
+
+| `dvd_vm` (full fit) | ALMs | ALUTs | regs | M10K |
+|---|---|---|---|---|
+| `main` (flops) | 1,965 | 3,397 | 1,150 | 5 |
+| save-state branch (RAM + a snapshot port) | 1,618 | 2,622 | 1,171 | 6 |
+| **this branch (single-port RAM)** | **1,340** | **2,281** | **1,045** | 6 |
+
+| whole design | `main` | this branch | Δ |
+|---|---|---|---|
+| Combinational ALUTs | 62,557 | 61,428 | **−1,129** |
+| Map estimate, ALMs needed | 40,920 | 40,203 | −717 |
+| ALMs placed | 40,981 | 40,790 | −191 |
+| Headline "ALMs needed" | 39,189 (94 %) | 38,735 (92 %) | −454 |
+| RAM blocks | 507 | 508 | +1 |
+
+The module saves **625 ALMs / 1,116 ALUTs**; the second port was costing the save-state
+build about 280 ALMs of that. Placed ALMs move less than the module does because the fitter
+packs the freed space loosely (LABs used stay 4,189 / 4,191); the ALUT count is the honest
+reclaim figure (§1). ⚠ clk_dec is ~1 MHz thinner than `main`'s on both corners, still
+passing; sweep the seed if a later branch lands near the gate.
+
+**Behaviour change, deliberately small:** each command takes ~7 more cycles, the tick walks
+the registers, and a mount clears them with a walk. The VM runs at nav-event rate, so none
+of it is time-critical, but it is a timing change in every disc's navigation. The
+reader-regression gate agrees: every bench's verdict and log are identical to `main`, and
+the trace differs only in the six benches that include the VM (`iso_reader_vm`,
+`_zerocell`, `_celldur`, `_menudrain`, `_auddrain`, `_auddrain_noaudio`), by a handful of
+cycles.
+
+**Gates:** `bench/dvd/run_gprm_ram.sh --red` (one mutation per mechanism: forwarding, the
+swap's second write, the tick write, the mount clear, the operand-capture slot; each caught
+by the arm written for it, two of them new — T6s, the first vector ever to execute a swap,
+and T7c, a mount clears the GPRMs) and `tools/check_gprm_ram.py` (the array is touched only
+in its port block and keeps its ramstyle; RED on four re-regressions). A stray read
+silently rebuilds the array from LUTs and a stray write silently stops it inferring;
+neither shows in simulation.
+
+**HW round 1 (2026-09-26, rig, `tools/nav_diff.py` against libdvdnav, same Main both arms,
+control = `main` at PR #134):** six discs, one fixed button script each, derived from the
+oracle. **The branch reproduced the control's table exactly on every compared step:** MiB
+4/4, Matrix 3/3, Harry Potter Interactive 3/3 (its 4th step was voided by another session
+loading a core mid-run), Scooby-Doo 2 1/1, Scene It HP never parked on either build, and
+T2's first button lands on PGCN 5 where libdvdnav says PGCN 1 **on both builds** — a
+pre-existing difference on `main`, not this branch.
+⚠ What that does NOT cover: steps that never reached an armed park on either build (T2
+after its first button, the Scooby maze itself, Scene It's game), and counter-mode GPRMs.
+Those need a hand check.
+✅ **HW-CONFIRMED 2026-09-26 by the maintainer, by hand on the same build:** Scooby-Doo 2
+(minigame and maze), T2 (Mission Profiles and a slideshow), Harry Potter Interactive
+(Player Mode) and Scene It HP (a game started and a question answered) all behave as on
+`main`.

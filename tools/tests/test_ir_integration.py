@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
-"""Rehearse integration steps 50-53 against copies of the real stock files.
+"""Rehearse integration steps 52-56 against copies of the real stock files.
 
-★★ WHY THIS EXISTS AND WHY IT IS NOT JUST "DOES IT APPLY". Step 51's PLACEMENT
-is the design (INTEGRATION.md "Steps 50-53"): the hook must sit after the three
+★★ WHY THIS EXISTS AND WHY IT IS NOT JUST "DOES IT APPLY". Step 53's PLACEMENT
+is the design (INTEGRATION.md "Steps 52-56"): the hook must sit after the three
 map-loading blocks and before `if (!input[dev].num)`, and above all it must be
 UPSTREAM of `ev->code >= 256` -- which is the joystick split that drops 39 of a
 Media Center receiver's keycodes. A hook below that line applies cleanly, passes
@@ -54,7 +54,7 @@ def find_stock():
 
 SRC = find_stock()
 if not SRC:
-    print("  SKIP no stock Main_MiSTer -- steps 50-53 cannot be rehearsed here")
+    print("  SKIP no stock Main_MiSTer -- steps 52-56 cannot be rehearsed here")
     print("test_ir_integration: ALL GREEN")
     sys.exit(0)
 
@@ -76,7 +76,7 @@ try:
 
     marker = "# ------------------------------------------------------------------- IR remap"
     if marker not in text:
-        print("  FAIL steps 50-53 block not found in apply_integration.py")
+        print("  FAIL steps 52-56 block not found in apply_integration.py")
         print("test_ir_integration: 1 FAILURE(S)")
         sys.exit(1)
     blk = text[text.index(marker):text.index('print("[integration] done")')]
@@ -88,7 +88,7 @@ try:
     out = io.StringIO()
     real, sys.stdout = sys.stdout, out
     try:
-        exec(compile(blk, "apply_integration.py:steps50-53", "exec"), ns)
+        exec(compile(blk, "apply_integration.py:steps52-56", "exec"), ns)
     finally:
         sys.stdout = real
 
@@ -115,10 +115,10 @@ try:
                 num >= 0 and hook < num,
                 split >= 0 and hook < split)
 
-    for want, why in (('#include "support/dvd/dvd_ir.h"', "step 50 include"),
-                      ("// dvd:ir", "step 51 marker"),
+    for want, why in (('#include "support/dvd/dvd_ir.h"', "step 52 include"),
+                      ("// dvd:ir", "step 53 marker"),
                       ("dvd_ir_target(ev->code, user_io_osd_is_visible())",
-                       "step 51 call")):
+                       "step 53 call")):
         chk(why, i.count(want) == 1, "x%d" % i.count(want))
 
     # The block replace_once() consumed must be back, once.
@@ -146,8 +146,8 @@ try:
     # Define buttons must still capture RAW codes.
     chk("mapping session exempt", "!mapping && dvd_ir_active()" in i)
 
-    for f, want, why in (("cfg.h", "uint8_t dvd_ir_remap;", "step 52 field"),
-                         ("cfg.cpp", '"DVD_IR_REMAP"', "step 53 row")):
+    for f, want, why in (("cfg.h", "uint8_t dvd_ir_remap;", "step 54 field"),
+                         ("cfg.cpp", '"DVD_IR_REMAP"', "step 55 row")):
         body = read(os.path.join(tmp, f))
         chk(why, body.count(want) == 1, "x%d" % body.count(want))
         chk("step 21 survives in " + f, "dvd_hdmi_bitstream" in body)
@@ -179,7 +179,7 @@ try:
     # a no-op. Re-run the same block over the already-patched copies.
     real, sys.stdout = sys.stdout, io.StringIO()
     try:
-        exec(compile(blk, "apply_integration.py:steps50-53", "exec"), ns)
+        exec(compile(blk, "apply_integration.py:steps52-56", "exec"), ns)
     finally:
         sys.stdout = real
     i2 = read(os.path.join(tmp, "input.cpp"))

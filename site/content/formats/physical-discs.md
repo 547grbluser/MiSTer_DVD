@@ -119,6 +119,9 @@ on both outputs even in `Passthru`.
 **Enhanced and mixed-mode CDs** — discs with a data track alongside the music —
 play their audio tracks. The data track is skipped.
 
+A **ripped** audio CD plays the same way from its `.cue` sheet, with no drive at all — see
+[Playing a `.cue`](../getting-started/loading.md#playing-a-cue).
+
 !!! note "Launching from the menu on the Physical Disc fork"
     The core plays a CD you insert **while it is already running** on any setup.
     If you use the Physical Disc fork of the Main and want inserting a CD *at the
@@ -140,6 +143,14 @@ exchange, so libdvdcss has to crack every key out of the disc data — that is t
 several-second wait before a title starts, shown on screen as `No drive region: cracking`.
 Set the drive's region to match your discs and it hands the keys over directly, so playback
 starts almost immediately.
+
+A region also makes key recovery **dependable**. Cracking is a statistical attack, and on a
+few discs it cannot recover a key by itself. One example is a clip too short to give it
+enough to work with. When a cracked key turns out not to decrypt the disc, the core checks
+the picture data and tries the disc's other keys, and it uses one only if the data proves it
+right. That rescues the cases seen so far. If none proves right, you get
+[`CSS ENCRYPTED`](../playback/on-screen-messages.md) for that part of the disc. With a
+region set, the drive hands over every key and none of this arises.
 
 Some drives are **region-free** (the "RPC-1" drives, usually sold that way or reflashed to
 be). Those need nothing: they answer for any disc whatever region it is from, which is the

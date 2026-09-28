@@ -119,9 +119,9 @@ stream (`e0_count` stayed 0 — not corruption, just no PES headers).
 `bench/dvd/ps_demux_es_tb.sv`. The debug overlay stays in the tree behind the
 `O2,Debug Overlay` toggle (default off).
 
-**Diagnostic instrument worth keeping:** `dvd/debug_overlay.sv` renders pipeline counters as
-on-screen block-bit rows — no UART cable needed. Toggle it on to inspect the feed/decode
-path on hardware.
+**Diagnostic instrument (since retired):** `dvd/debug_overlay.sv` rendered pipeline counters
+as on-screen block-bit rows. It was deleted on `feature/reader-slim` (2026-09); the telemetry
+bridge (`dvd_telem`, `tools/mister.py telem`) is the on-hardware instrument now.
 
 **Note:** the ES fix got video *bytes* to the decoder, but **playback still does not work** —
 it exposed a deeper blocker (next section). Toggle the overlay on and you can see the demux
@@ -428,6 +428,10 @@ If you want more control or can't build libdvdread for MiSTer's ARM:
 - [x] ✅ Register every VOB. The 64-entry table dropped OZ's VTS_20 sneak peeks, which
       then played scrambled (issue #112, HW-CONFIRMED 2026-09-19).
       `docs/physical_disc.md` "Every VOB must be in the table".
+- [x] ✅ **`CSS ENCRYPTED` after a chapter skip on a physical disc (issue #122).** Branch
+      `fix/css-titleset-key`, reproduced and fixed on the rig 2026-09-24 (Hitch and Kung Fu
+      Panda, control arm first). Title VOB parts key at `VTS_nn_1`'s start, and a zero or
+      missing key is healed from the data. `docs/physical_disc.md` "A title set has ONE key".
 - [x] ✅ **Copy-protection hang on physical discs — FIXED, HW-CONFIRMED 2026-09-19.**
       Deliberately unreadable sectors (OZ, `VTS_08_1.VOB` from RBN ~1995) cost the
       drive's ~30 s timeout each and block the Main in state D, for hours. Traced on
@@ -439,7 +443,9 @@ If you want more control or can't build libdvdread for MiSTer's ARM:
       live, the SAVED config still said Off). Fixed in the reader: an unusable PGC
       tries the next one, and Auto plays the LONGEST PGC rather than PGCN 1 — which is
       a 0-44 s stub on 60 of 1231 library discs. Detail: `docs/dvd_nav.md`,
-      `docs/physical_disc.md`.
+      `docs/physical_disc.md`. Follow-up, issue #132 (2026-09-26, ✅ HW via the HIL harness): the
+      chapter table now follows that PGC's own title instead of title 1's (X-Men
+      Apocalypse read `CH n/1`). Gate `bench/dvd/run_auto_ptt.sh`.
 
 **Checkpoint:** Drop an ISO of any commercial DVD onto the SD card. Core automatically
 finds the main feature, navigates to it, and plays from start.
@@ -572,10 +578,14 @@ the split is deliberate:
   held `iso_mode`. Fixed at both ends (reader reset + a `media_seen` gate on the
   screen arm); gate `wav_probe_tb` TEST 8, RED-proven. Sim-green, ⏳ HW-untested.
 
-⛔ **bin/cue and CHD images: rejected** (user decision). ISO9660 cannot hold
-CD-DA, so it means parsing `.cue` sheets, and nobody archives music that way.
-Cheap to revisit if ever wanted — stock Main's `cd.h`/`mister_chd.*`/`load_cue()`
-would feed the SAME byte stream this core already plays, with no RTL change.
+✅ **`.cue` sheets — ADDED 2026-09-25 (✅ MERGED PR #129), reversing the
+earlier rejection; host-proven (`main/tests/dvd_cue_test.cpp`, 12 mutations) and
+✅ HW-MEASURED on the rig 2026-09-25 (audio bin/cue + per-track wav, VCD split-bin and
+MODE2/2336, refused sheet; physical audio CD and physical VCD both unregressed, eject
+included), and ✅ HW-CONFIRMED by the maintainer from the OSD file picker.** Audio CD and VCD/SVCD bin/cue (and per-track `.wav`) rips, parsed by the
+Main and served as the same streams a physical disc produces — zero RTL beyond `CUE`
+in `CONF_STR`. Design: `docs/cdda.md` "`.cue` sheets". ⛔ CHD still not supported
+(would need libchdr in the overlay).
 
 ## Phase 6 — Polish and Known Issues (Weeks 15+)
 
@@ -927,6 +937,32 @@ aspect via `VIDEO_ARX`/`VIDEO_ARY` in `dvd/emu.sv`. The raster stays 720×480 (o
   read — the option did nothing and output was always 4:3. Sim/lint clean; **✅ HW-confirmed
   2026-07-10** (the CRT view modes verified on the board).
 
+### ✅ Progressive Deint = Blend — non-adaptive field blend (2026-09-24, branch `feature/field-blend`)
+
+`O[49] Progressive Deint = Off / Blend`, **default Off**. On the Progressive raster each
+line of a true-interlaced picture (`cur_ilace`) is filtered `(a + 2b + d + 2) >> 2`.
+There is no detector and no anchor, so it cannot shimmer the way shelved Stage A did.
+The cost is vertical softness.
+
+It is sim-proven and mutation-checked (`bench/dvd/run_field_blend.sh --red`,
+`tools/check_field_blend_wiring.py`).
+
+**✅ HW-CONFIRMED 2026-09-24** (harness round + the maintainer's eye, incl. a film→video change inside one title). Design, the library census
+that chose default Off, and the known limits are in **`docs/field_blend.md`**.
+
+### ✅ One Deinterlace option (Weave / Bob / Blend) + Bob on Progressive (2026-09-25, branch `feature/deint-merge`)
+
+`480i Deint` (OB) and `Progressive Deint` (O[49]) merge into `O[51:50] Deinterlace =
+Weave / Bob / Blend`, default Weave. Two CONF_STR rows share the field, and the menu mask
+(bit 0 = `interlaced_eff`) shows only Weave/Bob on the Interlaced raster. Bob on the
+Progressive raster is `field_blend`'s second kernel: keep one field, interpolate the other.
+The first field shows on the pickup scan and the second on every re-scan, so a hold is
+steady.
+
+Sim-proven + mutation-checked (`run_field_blend.sh --red`), built
+(`DVD_deintmerge_20260926_0049.rbf`, timing clean), ✅ HW-measured 2026-09-26 (§7 table).
+✅ HW-CONFIRMED by the maintainer's eye 2026-09-26. **Next step: merge.**
+
 ### HD Modeline Switching
 The display block drives a fixed 27MHz SD clock. DVD is 480i/480p so this is fine,
 but for future HD content (upscaled output) you'd need dynamic PLL reallocation.
@@ -1017,9 +1053,9 @@ Levers, cheapest/lowest-risk first:
 - [x] **Release-vs-debug split — DONE (PR fj#71).** `dvd/debug_overlay.sv` sits in the hotspot;
   it is now gated behind `` `ifdef DEBUG_OVERLAY `` in `dvd/emu.sv` (default OFF). The shipped
   subpicture release build compiles it out, which was **required** to route/close the fit once
-  the subpicture renderer landed in the same corner (playback wedged with it in). Define
-  `DEBUG_OVERLAY` (VERILOG_MACRO in DVD.qsf) to bring the O2 overlay back for diagnostics — that
-  re-tightens the fit and may need a seed re-sweep. Note the overlay was only ~300 ALMs, but the
+  the subpicture renderer landed in the same corner (playback wedged with it in). (The
+  overlay was later retired outright on `feature/reader-slim`, 2026-09, in favour of
+  `dvd_telem`; see docs/logic_reclaim.md §8.) Note the overlay was only ~300 ALMs, but the
   fit relief + the combinational-blend footprint cut together took it off the edge.
 - [x] **Fitter seed / effort as a stop-gap (not a fix).** ~~The design is a routing
   "lottery"~~ — **largely RESOLVED 2026-08-01 by the SDC clock-groups fix** (docs/history.md
@@ -1473,9 +1509,13 @@ menus + chapter B2/B3 unaffected. (The two live-still-scan rounds before this fa
 "why seek-on-release" note above.)
 
 ~~Follow-up (Phase-8b): absolute arbitrary-time scrub-bar via the VTS TMAP time-map table.~~
-**Phase-8b RETIRED (2026-07-10, user decision):** the seek-on-release scrub + chapter skip +
-seek bar is the accepted, final seek UX — the TMAP absolute-time scrubber will not be built.
-Don't re-propose it.
+~~**Phase-8b RETIRED (2026-07-10, user decision)**~~ — **REOPENED 2026-09-25 (user decision,
+issue #127) and built** (`docs/dvd_nav.md` §2h): held scrubs and D-pad gestures seek to an
+exact TIME through the disc's time map, so the preview is where they land. ✅ MERGED (PR #128), ✅ HW-CONFIRMED;
+the **D-pad arm is ✅ HW-measured 2026-09-25** (every landing 0.3–0.7 s after the previewed
+second against the control's −1.7…+1.4 s, `flags.tmap = 1`; §2h has the table).
+The held scrub is ✅ HW-confirmed by the maintainer the same day. An optional follow-up is the constant +1 s tick at the preview's end, from the live clock's
+~0.7 s parse-front lead (§2h).
 
 ---
 
@@ -2221,9 +2261,9 @@ board-dependent with a USB-IR receiver as the recommended remote — and the **I
 (no receiver available; sim-covered by `dpad_seek_tb` T19a). Design:
 **`docs/dvd_nav.md` "Keyboard / CEC input"**.
 
-## 🔧 IR / media-remote keycode normalisation — ⏳ HW-confirm pending (2026-09-24)
+## ✅ IR / media-remote keycode normalisation — HW-CONFIRMED 2026-09-24 (PR #124)
 
-Branch `feature/ir-remote-keys`. A remote's media keys (Play, Stop, Chapter, Subtitle,
+PR #124. A remote's media keys (Play, Stop, Chapter, Subtitle,
 Audio, the number pad) now work **with nothing mapped**, on any receiver that reaches
 `/dev/input/event*` as a keyboard.
 
@@ -2243,7 +2283,7 @@ modules plus this remap compose into a working remote. A separate upstream
 `MiSTer_defconfig` request (`CONFIG_RC_CORE=m` et al. against `master`/`MiSTer-v6.18`) is
 the real fix and does **not** gate this.
 
-**HW round owed:** `evtest` the rig's Flirc first to record its real keycodes, then the
+**HW round: ✅ ran 2026-09-24** and found two real defects (`docs/ir_remote.md` §7). The plan it replaced: `evtest` the rig's Flirc first to record its real keycodes, then the
 transport sweep, disc-menu digits, the OSD round trip, the Define-buttons regression arm,
 `DVD_IR_REMAP=0`, and a plain keyboard unregressed.
 ★ **The ARM cross-compile FOUND ONE**, which is the whole argument for that gate:

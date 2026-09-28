@@ -51,6 +51,29 @@ For a **`.wav`** it means something more specific, and appears immediately: the 
 refused rather than played as noise, and compressed audio (MP3, FLAC, AAC) is not supported
 at all. Convert with, for example, `ffmpeg -i in.flac -ac 2 -ar 44100 -c:a pcm_s16le out.wav`.
 
+### `Cannot play this CUE sheet`
+
+The player read a [`.cue` sheet](../getting-started/loading.md#playing-a-cue) and could not
+turn it into something to play. The second line says why:
+
+- **`missing FILE "…"`** — a file the sheet names is not next to it. Keep the `.cue` in the
+  same folder as its `.bin`/`.wav` files, and check the sheet names the files you actually
+  have (a sheet written for `Disc.bin` does not find `Disc (Track 2).bin`). Letter case and
+  Windows drive-letter paths are already allowed for.
+- **`FILE type MP3 is not supported`** (or FLAC, AIFF) — only raw `.bin` and CD-format
+  `.wav` files can be played. Convert the tracks to 16-bit stereo 44.1 kHz `.wav`, for
+  example `ffmpeg -i 01.flac -ac 2 -ar 44100 -c:a pcm_s16le 01.wav`, and point the sheet at
+  them.
+- **`WAVE must be 16-bit stereo 44.1 kHz PCM`** — the same, for a `.wav` in the wrong format.
+- **`no AUDIO track and no Video CD track to play`** — a data-only CD, such as a PC or game
+  disc. There is nothing on it this player can show.
+- **`INDEX is past the end of "…"`** — the sheet describes more than the file holds: the
+  `.bin` is truncated, or the sheet belongs to a different rip.
+- **`line N: …`** — the sheet itself is malformed at that line.
+
+When the core was started from an MGL shortcut the reason is not shown on screen (a pop-up
+at that moment would stall the launch), but it is always written to `/tmp/dvd_cue.log`.
+
 ### `CSS ENCRYPTED`
 
 The core is seeing scrambled sectors, so nothing available is decrypting this disc or
@@ -59,6 +82,14 @@ playing so you can still identify the disc.
 
 **Fix:** install `MiSTer_DVDcss` and libdvdcss, or use a decrypted rip. See
 [What you need](../getting-started/what-you-need.md).
+
+**On a physical disc with libdvdcss already installed**, it means a title key could not be
+recovered for part of the disc. That can only happen when the drive has **no region set**,
+because the keys then have to be cracked from the disc data. The warning appears as soon as
+playback reaches the affected part, often after a chapter skip. The core already works
+around the cases seen so far. If you still see it, [set the drive
+region](../formats/physical-discs.md#set-the-drive-region): the drive then supplies the keys
+itself. Once the warning appears it stays until the disc is reloaded.
 
 !!! warning "If the picture is perfect and only the sound is gone"
 
@@ -600,14 +631,18 @@ to say what it picked.
 
 ### The elapsed time is wrong after seeking
 
-On most discs the time readout follows the disc's own timing tables and is accurate.
+On a DVD, Fast Fwd, Rewind and the D-pad all seek to an exact **time**, looked up in the
+disc's own time map, so the time the seek bar showed is the time you land on, give or take
+about half a second.
+
+A small number of discs author a time map that disagrees with their own clock by a few
+seconds, and a few (mostly games and some anime) have none at all. On those a seek can land
+a few seconds from the time the seek bar showed. That is the disc's data, not a fault.
 
 A **seamless-branch disc** — a special edition that stores two cuts of the film woven
-together in the same sectors — used to be the exception: a seek could land in the wrong cut,
-and the clock would then report a position that did not match what you were watching. That
-is fixed, on both cuts, and the scrub preview now tracks the target on long special editions
-too. If you still see the clock disagree with the picture on one of these discs, it is worth
-reporting.
+together in the same sectors — used to be a separate exception: a seek could land in the
+wrong cut. That is fixed, on both cuts. If you still see the clock disagree with the picture
+on one of these discs, it is worth reporting.
 
 On a `.mpg`, `.VOB` or VCD/SVCD the clock is an **estimate** derived from how fast the file
 plays, not a timecode read from the disc, so on a very variable-bitrate file it can drift by

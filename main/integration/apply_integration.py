@@ -765,19 +765,76 @@ u = insert_before(u, 'else if (op & 1)\n\t\t\t{\n\t\t\t\tuint32_t buf_n',
 write(uio_path, u)
 print("[integration] user_io.cpp patched (read-ahead)")
 
+# ---------------------------------------------------------------- .cue sheets
+# Steps 50-51. See INTEGRATION.md "Steps 50-51" and support/dvd/dvd_cue.h.
+
+# 50. The OSD file picker copies a core's extension list into a 13-byte static
+# (`fs_pFileExt[13]`) with strcpy, from a 256-byte one. A stock bug that this core
+# is the one to trip: "MPGM2VVOBISOBINIMGDATWAVCUE" is 27 characters, and in the
+# built object the 15 bytes past the buffer are menu_visible, osd_unlocked and
+# config_scale[0] -- a pointer. Match the source buffer instead.
+m = read(m_path)
+m = replace_once(m,
+    'static char fs_pFileExt[13] = "xxx";',
+    'static char fs_pFileExt[256] = "xxx";   // dvd:ext-len -- was [13], which a long S0 list overflows',
+    50, 'dvd:ext-len')
+write(m_path, m)
+print("[integration] menu.cpp patched (file-picker extension buffer)")
+
+u = read(uio_path)
+
+# 51a. include
+u = insert_after(u, '#include "support/dvd/dvd_css.h"',
+    '#include "support/dvd/dvd_cue.h"\n',
+    '51a', 'support/dvd/dvd_cue.h')
+
+# 51b. mount dispatch: a .cue is parsed HERE and never handed to the core as a
+# file. An audio CD rides the DVD-CSS slot type (dvd_css's CD-DA source), a Video
+# CD the physical-VCD one, so the read path, the read-ahead defer (49) and the
+# close on remount (5, 44b) all apply unchanged. A sheet that fails is NOT allowed
+# to fall through to the plain-file branch below: the core would be handed text.
+u = insert_before(u, 'else if (x2trd_ext_supp(name))',
+    'else if (is_dvd() && len > 4 && !strcasecmp(name + len - 4, ".cue"))   // dvd:cue\n'
+    '{\n'
+    '\t// .cue sheet: an audio CD or a Video CD image, served by the Main -- see dvd_cue.h.\n'
+    '\tint kind = dvd_cue_mount(name);\n'
+    '\tif (kind == DVD_CUE_AUDIO)\n'
+    '\t{\n'
+    '\t\tsd_type[index] = SD_TYPE_DVDCSS;\n'
+    '\t\tsd_image[index].size = dvd_css_size();\n'
+    '\t\twritable = 0;\n'
+    '\t\tret = 1;\n'
+    '\t}\n'
+    '\telse if (kind == DVD_CUE_VCD)\n'
+    '\t{\n'
+    '\t\tsd_type[index] = SD_TYPE_VCD;\n'
+    '\t\tsd_image[index].size = dvd_vcd_size();\n'
+    '\t\twritable = 0;\n'
+    '\t\tret = 1;\n'
+    '\t}\n'
+    '}\n',
+    '51b', '// dvd:cue')
+
+write(uio_path, u)
+print("[integration] user_io.cpp patched (.cue sheets)")
+
 # ------------------------------------------------------------------- IR remap
-# Steps 50-53: normalise an IR receiver's / media keyboard's keycodes
+# ⚠ KEEP THIS BLOCK LAST. tools/tests/test_ir_integration.py execs everything
+# from the marker above to 'print("[integration] done")' against scratch copies
+# of input.cpp/cfg.h/cfg.cpp, so a step added BELOW here runs inside that test.
+# Put new steps above this marker.
+# Steps 52-56: normalise an IR receiver's / media keyboard's keycodes
 # (support/dvd/dvd_ir.{h,cpp}) so a remote works without the user mapping a
-# single button. See INTEGRATION.md "Steps 50-53".
+# single button. See INTEGRATION.md "Steps 52-56".
 inp_path = os.path.join(ROOT, "input.cpp")
 ip = read(inp_path)
 
-# 50. include
+# 52. include
 ip = insert_after(ip, '#include "file_io.h"',
     '#include "support/dvd/dvd_ir.h"\n',
-    50, 'support/dvd/dvd_ir.h')
+    52, 'support/dvd/dvd_ir.h')
 
-# 51. The rewrite itself.
+# 53. The rewrite itself.
 #
 # ★★ PLACEMENT IS THE DESIGN, and it is the part most likely to be "tidied"
 # later into the `kbdmap` block ~20 lines up. It must sit HERE, after the three
@@ -840,31 +897,31 @@ ip = replace_once(ip,
     '\t\t\tif (ir_to) ev->code = ir_to;\n'
     '\t\t}\n'
     '\t}\n',
-    51, '// dvd:ir')
+    53, '// dvd:ir')
 
 write(inp_path, ip)
 print("[integration] input.cpp patched (IR remap)")
 
-# 52/53. ini key.
+# 54/55. ini key.
 #
 # ⚠ RE-read cfg.h and cfg.cpp: step 21 already wrote both, and these anchors are
 # lines step 21 INSERTED. Working from a stale copy would drop step 21's rows.
 #
 # ⚠ The sense is 0 = off, 1 = on for the DVD core, 2 = on for every core, and
-# the default of 1 is applied by step 54 below.
+# the default of 1 is applied by step 56 below.
 ch2 = read(cfgh_path)
 ch2 = insert_after(ch2, '\tuint8_t dvd_hdmi_bitstream;   // dvd:hdmibs 0=auto 1=off 2=force',
     '\tuint8_t dvd_ir_remap;         // dvd:ir 0=off 1=on (DVD core) 2=on everywhere\n',
-    52, 'dvd_ir_remap')
+    54, 'dvd_ir_remap')
 write(cfgh_path, ch2)
 
 cc2 = read(cfgc_path)
 cc2 = insert_after(cc2, '{ "DVD_HDMI_BITSTREAM", (void*)(&(cfg.dvd_hdmi_bitstream)), UINT8, 0, 2 },',
     '\t{ "DVD_IR_REMAP", (void*)(&(cfg.dvd_ir_remap)), UINT8, 0, 2 },\n',
-    53, 'DVD_IR_REMAP')
+    55, 'DVD_IR_REMAP')
 write(cfgc_path, cc2)
 
-# 54. THE DEFAULT. DVD_IR_REMAP is 1 (on for the DVD core) unless the ini says
+# 56. THE DEFAULT. DVD_IR_REMAP is 1 (on for the DVD core) unless the ini says
 # otherwise, so a remote works out of the box -- which is the whole point of the
 # feature. cfg_parse() memsets cfg to zero and THEN applies a defaults block
 # (cfg.csync = 1, cfg.bootscreen = 1, cfg.dvi_mode = 2 ...), so a non-zero
@@ -877,7 +934,7 @@ write(cfgc_path, cc2)
 cc3 = read(cfgc_path)
 cc3 = insert_after(cc3, '\tcfg.hdmi_cec_power_on = 1;',
     '\tcfg.dvd_ir_remap = 1;   // dvd:ir 0=off 1=on (DVD core) 2=on everywhere\n',
-    54, 'cfg.dvd_ir_remap = 1')
+    56, 'cfg.dvd_ir_remap = 1')
 write(cfgc_path, cc3)
 print("[integration] cfg.h/cfg.cpp patched (DVD_IR_REMAP, default on)")
 

@@ -289,6 +289,10 @@ module dvd_vm_tb;
     begin
         @(negedge clk); start = 1;
         @(negedge clk); start = 0;
+        // The GPRMs are a RAM (2026-09-26): a mount clears them with a 16-cycle
+        // walk, so a GPRM poked before it finishes is overwritten. Wait for the
+        // VM to say it is done rather than counting its cycles.
+        wait (!dut.clr_busy);
         repeat (2) @(negedge clk);
     end
     endtask
@@ -1570,11 +1574,14 @@ module dvd_vm_tb;
         for (k = 0; k < n; k = k + 1) begin
             @(negedge clk); sec_tick = 1;
             @(negedge clk); sec_tick = 0;
-            // let V_IDLE apply tick_pending: since the 2026-09-10 area pass
-            // the tick is a 16-cycle walk (one GPRM per cycle), not a single
-            // cycle, so consecutive ticks need > 16 idle cycles between them
-            // to each be applied -- real ticks are 27 million cycles apart.
-            repeat (20) @(negedge clk);
+            // let V_IDLE apply tick_pending. The tick is a WALK (16 cycles,
+            // plus two per counter-mode GPRM since the GPRMs became a RAM), so
+            // wait for the VM to finish it rather than counting cycles -- a
+            // fixed count encoded the old walk's length and broke with it.
+            // Real ticks are 27 million cycles apart.
+            @(negedge clk);
+            wait (!dut.tick_pending);
+            @(negedge clk);
         end
     end
     endtask
@@ -1630,6 +1637,32 @@ module dvd_vm_tb;
         if (dut.lfsr === 16'd0) fail("T4: zero seed locked the LFSR at 0");
         rnd_seed = 16'hACE1;
         $display("T4 nonzero-seed guard PASS");
+
+        // ---- T6s: SWAP writes TWO registers (2026-09-26) --------------------
+        // With the GPRMs in a RAM a swap is two writes through one port, the
+        // second a cycle later (sw_pend). No other arm executed a swap, so
+        // dropping that second write passed the whole bench. Expected values
+        // are tools/dvd_vm_ref.py's, not restated from the RTL.
+        vm_restart;
+        dut.gprm[1] = 16'h1111; dut.gprm[2] = 16'h2222; dut.gprm[5] = 16'h5555;
+        wr_cmd(0, 64'h6200000100020000);     // g[1] <-> g[2]
+        wr_cmd(1, 64'h6200000500050000);     // g[5] <-> g[5] (self-swap: unchanged)
+        nr_pre = 2; nr_post = 0; nr_cell = 0; cell_count = 8'd3;
+        clear_actions; pulse_loaded; wait_idle;
+        if (dut.gprm[1] !== 16'h2222) fail("T6s: swap g1 != 0x2222 (the second write)");
+        if (dut.gprm[2] !== 16'h1111) fail("T6s: swap g2 != 0x1111 (the first write)");
+        if (dut.gprm[5] !== 16'h5555) fail("T6s: self-swap g5 changed");
+        $display("T6s swap PASS");
+
+        // ---- T7c: a mount CLEARS the GPRMs (vm_reset) ----------------------
+        // The RAM cannot be reset in one cycle, so the clear is a 16-cycle walk
+        // started by `start`. Without an arm of its own, skipping it was caught
+        // only by later vectors tripping over leftover values.
+        dut.gprm[0] = 16'h7777; dut.gprm[7] = 16'h7777; dut.gprm[15] = 16'h7777;
+        vm_restart;
+        if (dut.gprm[0] !== 16'd0 || dut.gprm[7] !== 16'd0 || dut.gprm[15] !== 16'd0)
+            fail("T7c: a mount did not clear the GPRMs");
+        $display("T7c mount clear PASS");
 
         // ---- T5: a stir that XORs the LFSR to ZERO must not lock it --------
         // entropy_val is the free-running entropy counter, so it lands on the

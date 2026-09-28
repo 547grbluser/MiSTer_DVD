@@ -234,7 +234,7 @@ int dvd_ir_active(void)
 	// this Main runs.
 	//
 	// ★ 1 MEANS ON, which reads the way a reader expects, and the default is
-	// set in cfg_parse() (integration step 54) rather than relying on the
+	// set in cfg_parse() (integration step 56) rather than relying on the
 	// memset-to-zero. ⚠ An earlier cut had 0 = on for exactly that reason and
 	// it was WRONG: cfg_parse() has a defaults block (cfg.csync = 1,
 	// cfg.bootscreen = 1, cfg.dvi_mode = 2 ...), so a non-zero default is

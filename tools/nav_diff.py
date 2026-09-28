@@ -92,7 +92,7 @@ def trace_landings(iso, script, seed=None):
     if not os.path.exists(TRACE_NAV):
         sys.exit(f'nav_diff: {TRACE_NAV} not built')
     cmd = [TRACE_NAV, iso, script] + ([str(seed)] if seed is not None else [])
-    p = subprocess.run(cmd, capture_output=True, text=True, timeout=900)
+    p = subprocess.run(cmd, capture_output=True, text=True, errors="replace", timeout=900)
     out = p.stdout
 
     vm_re = re.compile(r'VM\[\w+\]\s+dom=(-?\d+)\s+vtsN=(-?\d+)\s+pgcN=(-?\d+)'

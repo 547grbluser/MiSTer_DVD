@@ -271,7 +271,7 @@ Rows are `{ from, to_play, to_osd, why }`.
   button it names. See §5.
 
 Placement of the hook is the subtle part and lives in
-`main/integration/INTEGRATION.md` "Steps 50-53" — summarised: after the three
+`main/integration/INTEGRATION.md` "Steps 52-56" — summarised: after the three
 map-loading blocks (so `map[]`/`mmap[]` are populated and a user's own binding
 can be detected on a device's *first* event), downstream of
 `input[dev].kbdmap` (so an explicit `config/kbd_<vid>_<pid>.map` still wins),
@@ -288,7 +288,7 @@ default), `2` = on for every core.
 **That belief is false**, and `cfg_parse()` disproves it in the very block the
 default now goes in: `cfg.csync = 1`, `cfg.bootscreen = 1`, `cfg.dvi_mode = 2`,
 `cfg.hdmi_cec_power_on = 1` … A non-zero default is the ordinary mechanism here.
-Integration step 54 sets `cfg.dvd_ir_remap = 1` there.
+Integration step 56 sets `cfg.dvd_ir_remap = 1` there.
 
 ★ It also read backwards to anyone editing the ini — `1` should switch a thing
 **on**, not off. Caught in review by the maintainer, not by any test, because
@@ -412,7 +412,7 @@ both the one that exists there and the one the guards must actually agree with.
 | `main/tests/dvd_ir_test.cpp` | 76 assertions, host `g++`, no MiSTer or Docker. 17 RED mutations in `run_tests.sh --red`, **each caught by its own named arm**. |
 | `tools/check_ir_remap.py` | The derived-table gate. Run from `build_main.sh` with `--require-stock`. |
 | `tools/tests/test_check_ir_remap.py` | 9 RED arms proving the checker can fail, and for the right reason; plus the fallback-constant comparison. |
-| `tools/tests/test_ir_integration.py` | Rehearses steps 50-54 verbatim against copies of the real stock files and asserts the **placement** and the **OSD predicate**, with 2 RED arms that move the hook to the wrong places. |
+| `tools/tests/test_ir_integration.py` | Rehearses steps 52-56 verbatim against copies of the real stock files and asserts the **placement** and the **OSD predicate**, with 2 RED arms that move the hook to the wrong places. |
 
 ⚠ **A mutation whose anchor moves is a vacuous mutation**, and adding the remap
 trace did exactly that to `ir-no-osd-column` — its `sed` targeted a line the
@@ -543,7 +543,7 @@ it can see.
 checked**: *"cfg is memset to zero with no separate defaults pass, so 0 must be
 the default-ON value"*. **False.** `cfg_parse()` has a defaults block right there
 — `cfg.csync = 1`, `cfg.bootscreen = 1`, `cfg.dvi_mode = 2`,
-`cfg.hdmi_cec_power_on = 1` … Integration step 54 now sets
+`cfg.hdmi_cec_power_on = 1` … Integration step 56 now sets
 `cfg.dvd_ir_remap = 1` in it, and the sense is the obvious one: `0` off, `1` on
 (default), `2` every core.
 
