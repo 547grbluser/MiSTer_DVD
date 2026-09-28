@@ -391,6 +391,7 @@ otherwise; `--red` runs its mutation arms).
 | Transport HUD + seek bar + seek-preview clock | ✅ | `transport_hud.md` | `transport_hud_tb`, `seek_bar_tb`, `seek_time_tb` |
 | HUD authored for the DE window, not the raster | ✅ | `transport_hud.md` | `run_ov_geom.sh`, `check_ov_geom_wiring.py` |
 | Keyboard / CEC / IR-receiver transport (`kbd_map`) | ✅ ⏳ CEC unsupported on the rig | `dvd_nav.md` | `run_kbd.sh` |
+| IR / media-remote keys work unmapped (Main-side remap, `DVD_IR_REMAP`; PR #124) | ✅ | `ir_remote.md` | `main/tests/run_tests.sh`, `test_ir_integration.py`, `check_ir_remap.py` |
 | Remote buttons: Stop, Aspect, Chapter Menu, A-B, Frame Step, Eject, Volume | ✅ | `dvd_nav.md`, `screensaver.md` | `run_frame_step.sh`, `check_frame_step_wiring.py` |
 | Frame step as a pause route; unbounded steps; clock follows the step | ✅ | `dvd_nav.md` | `run_frame_step.sh` |
 | Screensaver, and overlays blanked with the picture | ✅ | `screensaver.md` | `run_screensaver.sh`, `check_saver_overlay_wiring.py` |
@@ -704,7 +705,16 @@ saying *"I'm on dev-seekrealign 260903"* names exactly one build:
 | `dvd_report` bundle manifest | `core_version: "dev-seekrealign 260903"` |
 
 Sending a **second** build from the same branch on the same day: append a digit to the slug
-(`dev-seekrealign2`), or the two are indistinguishable in the OSD. The `.rbf.json` beside
+(`dev-seekrealign2`), or the two are indistinguishable in the OSD.
+★ **`main/build_main.sh` writes the same kind of record for the Main:
+`MiSTer_DVDcss.json` beside the binary**, carrying the commit, the BRANCH, a
+**dirty flag with the offending file list**, the stock ref and the binary's
+sha256. ⚠ The dirty flag is the load-bearing field, not the commit: a Main is
+routinely built from a dirty tree and deployed before the commit that captures
+it, so a bare HEAD would name a commit whose content is not what shipped. ★ The
+sha256's first 8 hex are the `MiSTer_DVDcss_hil_<...>` name `tools/mister.py`
+deploys under, so the sidecar ties a file on the SD card back to a commit —
+⚠ that deploy name is a CONTENT hash, not a VCS one. The `.rbf.json` beside
 each pack records the exact commit, seed and timing if a build ever needs identifying later.
 
 > **Always build after completing a requested feature.** When an RTL/feature change is

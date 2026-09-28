@@ -22,6 +22,141 @@ predate later confirmations; the `CLAUDE.md` index carries the reconciled status
 
 ## Hardware status (THIS fork, verified 2026-06-21)
 
+- ✅ **AN IR / MEDIA REMOTE'S KEYS NEVER REACHED THE CORE — THREE STACKED CEILINGS IN
+  STOCK MAIN, NOT THE ONE EVERYONE POINTS AT (2026-09-24, PR #124);
+  host-proven, ARM cross-compile clean, 17 + 9 + 2 mutations each caught by its own
+  arm, ✅ HW-CONFIRMED 2026-09-24 (`docs/ir_remote.md` §7).**
+  Request: a Windows Media Center remote (Rosewill RHRC-11002, eHome dongle `147a:e03e`)
+  working **by default, no remapping**, across the different MCE flavours. The report named
+  the ≥256 keycode ceiling.
+  ★★ **MEASURED against the pinned stock tree, and it is worse than reported — THREE
+  ceilings:** `ev->code >= 256` is routed to the **JOYSTICK** handler (`input.cpp:3602`),
+  so **39 of an MCE receiver's 63 keycodes never reach the keyboard path at all** (Title,
+  Subtitle, Audio, DVD, Info, Next/Prev, the whole numeric pad); `get_ps2_code()` returns
+  `NONE` above 255 (`input.cpp:1409-1412`); and **`ev2ps2[]` has most media keys as `NONE`
+  anyway** (`input.cpp:367`) — PLAY, STOP, REWIND, FASTFORWARD, PLAYPAUSE, EJECTCD, EXIT,
+  MEDIA. **Net effect today: arrows, Enter and volume work; nothing else does.**
+  ★★ **`KEY_PAUSE` IS THE MARQUEE CASE AND IT IS CEILING 3, NOT THE 255 ONE** —
+  `ev2ps2[119] = 0xE1`, the multi-byte PS/2 Pause sequence `dvd/kbd_map.sv` deliberately
+  never binds. So the most obvious button on the handset is inert for a reason unrelated to
+  the ceiling everyone points at, and anyone who "fixes" only the ceiling will find Pause
+  still dead.
+  **Fix = `main/support/dvd/dvd_ir.{h,cpp}`**, a Main-side rewrite of `ev->code` into the
+  ordinary keys `ev2ps2[]` carries and `kbd_map.sv`/`emu.sv` already bind. 58 rows, each
+  carrying a `why` string naming the button it claims. `DVD_IR_REMAP` in `MiSTer.ini`,
+  **default on**: `0` = off, `1` = on for this core (the default), `2` = on everywhere.
+  ⚠⚠ **An earlier cut had this INVERTED, and the reason is a claim I wrote in this very
+  file and never checked: "cfg is memset to zero with no separate defaults pass, so 0
+  must be the default-ON value". THAT IS FALSE** — `cfg_parse()` has a defaults block
+  (`cfg.csync = 1`, `cfg.bootscreen = 1`, `cfg.dvi_mode = 2`, `cfg.hdmi_cec_power_on = 1`
+  …) and integration step 56 sets `cfg.dvd_ir_remap = 1` right in it. ★ Caught in review
+  by the maintainer, not by a test — every test agreed with the implementation's own
+  convention, which is the `jump_dir` shape again. ⚠ The same false claim is repeated in
+  this file's `DVD_HDMI_BITSTREAM` note; that option's `0=auto` is a fine choice on its
+  own terms, but not for the stated reason.
+  ★ **KEYED ON LINUX KEYCODES — the vendor-neutral layer — which is what makes the
+  "different flavours" claim TRUE:** RC6-MCE, NEC clones, Flirc profiles, 2.4 GHz RF media
+  remotes, CEC and USB media keyboards all converge there, so a new protocol needs no code.
+  ★★ **CONFIRMED ON A SECOND DEVICE CLASS, so this is not an MCE-specific fix.** A Nordic
+  2.4 GHz RF receiver measured locally advertises **exactly these keycodes** (PLAY 207,
+  FASTFORWARD 208, REWIND 168, PLAYPAUSE 164, STOPCD 166, NEXTSONG 163, PREVIOUSSONG 165,
+  STOP 128, BACK 158) — **every one `NONE` in `ev2ps2`** — plus **75 keycodes ≥ 256**. A
+  device that already enumerates perfectly on a stock MiSTer, needing no kernel work at all,
+  has a **completely dead transport section today**.
+  ⛔⛔ **MiSTer's KERNEL SHIPS NO IR SUPPORT, SO eHome/`mceusb` IS NOT REACHABLE FROM HERE —
+  and the manual must say "not supported out of the box", NEVER "cannot work".** Measured on
+  the rig (5.15.1): the module tree holds only `bluetooth`/`hid`/`net`, `modules.dep` is 52
+  lines, no `/sys/class/rc`. `MiSTer_defconfig` carries `# CONFIG_RC_CORE is not set` on
+  **`MiSTer-v5.15`, `MiSTer-v6.18` AND `master` alike**, so `update_all` cannot help. It
+  cannot fall back to HID either: the dongle's second interface exposes a Consumer Control
+  collection with **one 8-byte FEATURE report and no INPUT report**, so it creates no input
+  node. ★ But a user CAN build it themselves — `CONFIG_MODULES=y`, `MODVERSIONS` and
+  `MODULE_SIG` both **unset** (only `vermagic` must match), and the driver source is already
+  in MiSTer's own kernel tree — and **the two halves compose**: their modules plus this
+  remap is a working MCE remote, and neither alone is. That is why the DIY route is
+  documented rather than dismissed.
+  ★ **Supported path = a receiver that presents as a USB HID keyboard** (Flirc, 2.4 GHz RF
+  media remotes, console-dock receivers, USB media keyboards). The rig has a Flirc.
+  ⛔ **Volume/mute deliberately NOT remapped**: Main drives the framework's ONE attenuator
+  (`sys_top.v` `vol_att`, covering I2S, the analog DAC **and S/PDIF**) at
+  `user_io.cpp:4266-4280`; a second route would desync from the OSD bar and could not touch
+  passthrough. `KEY_MENU`, `KEY_DELETE` and the power keys likewise — all **listed** in
+  `ir_deny[]` with reasons, because an omission is not a decision.
+  ★★ **INTEGRATION STEP 51'S PLACEMENT IS THE DESIGN, and it is the part most likely to be
+  "tidied" later.** It sits after the three map-loading blocks (so `map[]`/`mmap[]` are
+  populated and a user's own Define-buttons binding is detectable on a device's FIRST
+  event — at the `kbdmap` site 20 lines up they are still empty, and the hook would steal
+  the binding once), downstream of `input[dev].kbdmap` (an explicit
+  `config/kbd_<vid>_<pid>.map` still wins), and **UPSTREAM of the `ev->code >= 256` split,
+  which IS ceiling 1 — a hook below it applies cleanly, compiles, passes every host test and
+  FIXES NOTHING.** ⚠ `insert_before` is unusable (`if (!input[dev].num)` has FOUR matches),
+  hence `replace_once`. ⚠ `!mapping` is load-bearing: it keeps Define buttons capturing RAW
+  codes so a remote key can still be re-bound by hand.
+  ★ **NO FUNCTIONAL RTL CHANGE — this rides the currently released `.rbf`**, like the
+  physical VCD/SVCD feature. ⚠ Stated precisely, because the loose version is an overclaim:
+  the mandatory `` `CORE_VERSION `` slug IS a `CONF_STR` touch (PR #117 settles the
+  precedent — also Main-only, also a one-line `emu.sv` diff), but it costs nothing because
+  **no `.rbf` is cut from this branch**, so nothing is re-fitted and no seed is re-rolled.
+  Do not write "no `CONF_STR` touch".
+  **Gates:** `main/tests/dvd_ir_test.cpp` (76 assertions) + **17 RED mutations each caught
+  by its own named arm**; `tools/check_ir_remap.py`, the derived-table gate, run from
+  `build_main.sh` with `--require-stock`; `tools/tests/test_check_ir_remap.py` (9 RED arms
+  proving the checker can fail, for the right reason); `tools/tests/test_ir_integration.py`
+  (rehearses steps 52-56 VERBATIM out of `apply_integration.py` against copies of the real
+  stock files and asserts the PLACEMENT, with 2 RED arms that relocate the applied hook).
+  ★★ **The checker found a real error on its FIRST run against real data:**
+  `CHANNELUP -> KEY_PAGEUP claims "B3 Next Chapter" but reaches B2`. Root cause was mine —
+  the `why` describes the PLAY target, and the OSD column never goes through `kbd_map.sv`
+  at all (with the OSD open, `user_io_kbd` hands the raw keycode to `menu_key_set()`). The
+  claim is enforced on `to_play` only.
+  ★★★ **THE ARM CROSS-COMPILE CAUGHT A REAL DEFECT AND IT IS THE WHOLE CASE FOR THE
+  GATE: `KEY_FULL_SCREEN` WAS UNGUARDED AND IS ABSENT FROM THE ARM TOOLCHAIN'S OWN UAPI
+  HEADER — IT WOULD NOT HAVE COMPILED**, while every host gate stayed green. MEASURED:
+  `gcc-arm-10.2` defines **446** `KEY_*` names against this host's **527**. Caught by
+  `check_ir_remap.py` running from `build_main.sh` INSIDE the container, before the
+  compiler reached it. ✅ Guarded (0x174, the same code as `KEY_ZOOM`, which IS present
+  there), and `USE_DOCKER=1 main/build_main.sh` now links clean — a stripped ARM EABI5
+  `MiSTer_DVDcss`.
+  ⚠⚠ **AND THE DURABLE LESSON IS MY OWN MISTAKE: an earlier audit swept all 126 `KEY_*`
+  names and concluded "none unguarded — all six guards are pure future-proofing". IT READ
+  THE HOST HEADER.** Portability must be audited against the toolchain that will BUILD the
+  code, never the one you are typing on — which is precisely what a host test cannot do.
+  ★ It also turned the guards from a precaution into a measured fact: against the real ARM
+  header **`KEY_FULL_SCREEN` and `KEY_ASPECT_RATIO` are both ABSENT** (load-bearing), and
+  the other five are present on both (genuine future-proofing). Seven guards now.
+  ⚠ **Finding the header is part of the gate:** the container carries no host kernel
+  headers, so the checker's first run there died outright. It now asks
+  `${CROSS_COMPILE}gcc -print-sysroot` and PREFERS the sysroot copy — both the one that
+  exists there and the one the guards must agree with. ⛔ Never a hardcoded `/opt` path.
+  ⚠⚠ **The fallbacks are still never exercised where they usually compile** — `#ifndef`
+  makes them dead on a modern host, so a wrong constant would pass all 76 assertions and
+  silently map the wrong key on the only build that uses them; they are compared against
+  `linux/input-event-codes.h`, RED-proven by a one-digit mutation.
+  ⚠ **Read the build's LOG, not its exit status** — with the Docker daemon down it exits
+  **0** having built nothing (memory `docker-daemon-not-running`, re-confirmed here).
+  ⚠ Held keys do not repeat (`user_io.cpp:4114` drops autorepeat for the 8-bit core path),
+  consistent with `kbd_map.sv`'s pulse-only design — expected, do not "fix" it.
+  ★ Found beside it and FIXED, PRE-EXISTING: `tools/mister.py`'s `PS2_TO_LINUX` lacked the
+  main-row `=`/`-` that PR #106 aliased onto B20/B21, so the HIL harness could not inject
+  the very keys that PR added and `test_key_table.py` had been RED on exactly those two
+  since it merged.
+  ★ **REBINDING IS "DEFINE BUTTONS", ✅ HW-CONFIRMED 2026-09-24 by the maintainer** —
+  a media key binds there like any other (`input.cpp:3371` gives codes ≥256
+  `mapping_type = 1`), and it wins because the hook SKIPS the remap for any code the user
+  has bound. That is what the manual tells users; the kernel-keymap route
+  (`tools/ir_keymap.py`, `EVIOCSKEYCODE_V2`) stays an engineering note, since it needs SSH
+  and does not survive a reboot on its own. ⛔ `config/kbd_<vid>_<pid>.map` CANNOT do it —
+  `input.cpp:2975` gates that lookup on `ev->code < 256`.
+  ✅ **HW round RAN 2026-09-24 and found two real defects (`docs/ir_remote.md` §7);
+  the Flirc turned out to be the wrong instrument.** The original plan: `evtest` the Flirc FIRST to record
+  which keycodes each button really emits (the table is keyed on keycodes, and only the
+  device can say), then a transport sweep, digits into a disc menu, **the OSD round trip**
+  (the one path with no bench at all), the Define-buttons regression arm, `DVD_IR_REMAP=0`,
+  and a plain USB keyboard unregressed. Not confirmable on this rig: eHome/`mceusb` and
+  HDMI-CEC (that board reports `CEC: no clock detected`).
+  Detail: **`docs/ir_remote.md`**, `main/integration/INTEGRATION.md` "Steps 52-56",
+  `docs/dvd_nav.md` "Keyboard / CEC input".
+
 - ✅ **VM GPRMs IN AN M10K — logic reclaim branch E (2026-09-26, ✅ MERGED PR #135); sim-proven, built (`DVD_gprmram_20260927_0055.rbf`, clk_dec
   89.02/87.42) and ✅ HW-CONFIRMED 2026-09-26:** `nav_diff` landings identical to `main`
   on six discs, then the maintainer's hand check of the Scooby-Doo 2 maze and minigame,
