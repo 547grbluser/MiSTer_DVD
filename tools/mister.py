@@ -785,7 +785,14 @@ TELEM_MAX_RATE = {
     'drops':     125.0,         # a field pair drop acks per field
     'aud_play':  48000 / 16.0 * 1.01,   # 48 kHz NCO, prescaled by 16
     'aud_gate':  100.0,         # drain-gate closures; generous
+    # dec_duty (words 17..20, docs/decode_pacing.md): clk_dec cycles / 4096, so at
+    # 100 % duty 81e6/4096 = 19775/s. Pin-reset only, so a reset here is a bug.
+    'dec_disp':   20500.0,
+    'dec_starve': 20500.0,
+    'dec_back':   20500.0,
+    'dec_ref':    20500.0,
 }
+DEC_CLK_HZ = 81.0e6             # clk_dec (dvd/emu.sv PLL outclk_3)
 
 
 def telem_count(rows, key, max_rate=None):
@@ -843,6 +850,13 @@ def telem_summary(rows):
     s['lates_per_s'] = r.get('lates', 0.0)
     s['drops_per_s'] = r.get('drops', 0.0)
     s['gate_closures'] = s['count'].get('aud_gate')
+    # Where the decoder's time went, as fractions of clk_dec time. The four VLD
+    # classes are exclusive (dec_duty_tb), so active is what is left; ref is
+    # independent (a motion-comp stall, overlapping the VLD classes).
+    if 'dec_disp' in r:
+        d = {k[4:]: r[k] * 4096 / DEC_CLK_HZ for k in ('dec_disp', 'dec_starve', 'dec_back', 'dec_ref')}
+        d['active'] = 1.0 - d['disp'] - d['starve'] - d['back']
+        s['duty'] = d
     # What the window actually measured -- a cell must assert its own coding
     # and domain from these, not from what the disc was chosen to contain.
     s['sched'] = {k: _mode([x.get(k) for x in rows if k in x])
@@ -908,6 +922,10 @@ def telem_print(s):
           f"drops {c.get('drops', 0)} ({s['drops_per_s']:.2f}/s)")
     if 'aud_disc' in s:
         print(f"  aud_disc (word 5, JSON 'vid_err'): {s['aud_disc']}")
+    if 'duty' in s:
+        d = s['duty']
+        print(f"  decoder time: parked-on-display {d['disp']:.3f}  starved {d['starve']:.3f}  "
+              f"pipe-stalled {d['back']:.3f}  active {d['active']:.3f}   ref-wait {d['ref']:.3f}")
     sc = s['sched']
     print(f"  sched (modal): frc={sc['sched_frc']} ps={sc['sched_ps']} pf={sc['sched_pf']} "
           f"tff={sc['sched_tff']} rff={sc['sched_rff']}   tagged={s['tagged']}")

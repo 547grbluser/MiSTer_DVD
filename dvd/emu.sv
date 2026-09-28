@@ -1185,6 +1185,11 @@ dvd_telem dvd_telem_inst (
     .av_drift   (av_drift[19:4]),        // clk_sys: dispatched audio PTS - STC (word 13)
     .sched_flags({7'd0, core_bob_act, core_sched_flags}),   // [8] = progressive bob active   // clk_dec: what the scheduler saw (word 14)
     .sched_dur  (core_sched_dur),             // clk_dec: the duration it applied (word 15)
+    // words 16..19, clk_dec: dec_duty's cycle counts /4096 (docs/decode_pacing.md)
+    .dec_disp   (core_duty_disp),
+    .dec_starve (core_duty_starve),
+    .dec_back   (core_duty_back),
+    .dec_ref    (core_duty_ref),
     // CMD_AF: what the audio wire is really carrying, so Main can put the ADV7513
     // into PCM mode for an LPCM/MP2 track in Passthru.
     .af_passthru    (pass_mode),
@@ -5116,8 +5121,13 @@ mpeg2video mpeg2video_inst (
     .dbg_lines_displayed (core_dbg_lines_displayed),   // DVD-FORK DEBUG (256-line strobe)
     .dbg_first_vpos  (core_dbg_first_vpos),
     .dbg_last_vpos  (core_dbg_last_vpos),
-    .dbg_prof0       (),                 // stage profiler (decoder_profile.sv); unread since the overlay retired
-    .dbg_prof1       (),
+    // dec_duty (docs/decode_pacing.md): free-running clk_dec cycle counts /4096 of where
+    // the decoder's time goes -> telemetry words 16..19. (These ports carried the
+    // retired stage profiler, which the overlay read.)
+    .dbg_prof0       (core_duty_disp),   // VLD parked on the display
+    .dbg_prof1       (core_duty_starve), // no bitstream
+    .dbg_prof2       (core_duty_back),   // parse stalled by the decode pipeline
+    .dbg_prof3       (core_duty_ref),    // recon waiting on reference pixels
     // DVD-FORK (line-21 CC): EIA-608 pairs sniffed from user_data, in clk_dec.
     // They cross to clk_sys inside dvd/cc_line21.sv's own fifo_dc.
     .cc_pair_valid     (core_cc_valid),
@@ -5176,6 +5186,7 @@ assign film_det_pal_sync  = film_det_pal_s2;
 // dvd_telem (tools/mister.py telem). See docs/motcomp_throughput.md.
 wire [15:0] core_frames_late, core_frames_dropped;
 wire [15:0] core_pickups;   // DVD-FORK (telemetry): content frames picked up for display (clk_dec, free-running)
+wire [15:0] core_duty_disp, core_duty_starve, core_duty_back, core_duty_ref;   // DVD-FORK DEBUG (dec_duty): clk_dec cycles/4096, telemetry words 16..19
 wire [15:0] aud_play_cnt;   // DVD-FORK (telemetry): audio play ticks/16 (clk_sys, free-running)
 wire [15:0] aud_gate_cnt;   // DVD-FORK (telemetry): audio drain-gate closures (clk_sys)
 wire [15:0] core_drop_costs; // round-9 debit discriminator: {acks debited 3 [15:8], debited 2 [7:0]}, saturating

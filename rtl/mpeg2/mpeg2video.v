@@ -61,7 +61,7 @@ module mpeg2video(clk, mem_clk, dot_clk, dot_ce,
              testpoint_dip, testpoint_dip_en, testpoint,
              init_cnt_out, sync_rst_out, vbw_almost_full_out,
              dbg_lines_displayed, dbg_first_vpos, dbg_last_vpos,   // DVD-FORK DEBUG (256-line strobe)
-             dbg_prof0, dbg_prof1,                                 // DVD-FORK DEBUG (stage profiler)
+             dbg_prof0, dbg_prof1, dbg_prof2, dbg_prof3,           // DVD-FORK DEBUG (dec_duty, docs/decode_pacing.md)
              cc_pair_valid, cc_pair, cc_pair_field,               // DVD-FORK (line-21 CC): EIA-608 pairs from user_data (clk domain)
              vertical_size_out,                                   // DVD-FORK FIX (PAL auto-detect): sequence-header frame height
              horizontal_size_out,                                 // DVD-FORK (CRT anamorphic overlay align): sequence-header frame width
@@ -150,9 +150,13 @@ module mpeg2video(clk, mem_clk, dot_clk, dot_ce,
   output     [11:0]dbg_lines_displayed;
   output     [11:0]dbg_first_vpos;
   output     [11:0]dbg_last_vpos;
-  /* DVD-FORK DEBUG (stage profiler): windowed pipeline-stage bottleneck duty (clk) */
-  output     [15:0]dbg_prof0;            // {idct_fifo_af%, mvec_af%}  (motcomp backpressure)
-  output     [15:0]dbg_prof1;            // {idct_empty%,   rld_af%}   (starvation | mid-pipe)
+  /* DVD-FORK DEBUG (dec_duty, docs/decode_pacing.md): free-running cycle counts, 1 LSB =
+   * 4096 clk cycles, of where the decoder's time goes. (These ports once carried the
+   * retired stage profiler's windowed duties.) */
+  output     [15:0]dbg_prof0;            // disp:   VLD parked on the display (picbuf_busy)
+  output     [15:0]dbg_prof1;            // starve: no bitstream (getbits not valid)
+  output     [15:0]dbg_prof2;            // back:   parse stalled by rld/mvec/motcomp
+  output     [15:0]dbg_prof3;            // ref:    recon waiting on reference pixels (DDR3)
   /* DVD-FORK FIX (PAL auto-detect): the decoded frame's vertical_size from the MPEG-2
    * sequence header (clk domain). 480 => NTSC, 576 => PAL. emu derives a 1-bit PAL flag
    * and CDC's it to clk_sys to drive the modeline + av_sync + interlace selection. */
@@ -1415,8 +1419,22 @@ module mpeg2video(clk, mem_clk, dot_clk, dot_ce,
      (Error 11802 at 80% ALMs). The profiler's job is done (it confirmed the high-motion
      stutter is compute-bound). Removing it also prunes the recon_ref_stall deep tap
      (only it consumed that). Overlay rows 10/11 now read 0. See docs/motcomp_throughput.md. */
-  assign dbg_prof0 = 16'd0;
-  assign dbg_prof1 = 16'd0;
+  /* DVD-FORK DEBUG (dec_duty): the profiler's successor, and deliberately smaller --
+     four counters, no windowing, no overlay. It exists to separate decode cost from
+     scheduling (docs/decode_pacing.md). hard_rst = the pin only, so no flush zeroes it. */
+  wire picbuf_busy_dbg;
+  dec_duty dec_duty (
+    .clk(clk),
+    .rst(hard_rst),
+    .picbuf_busy(picbuf_busy_dbg),                           // from motcomp
+    .getbits_valid(getbits_valid),                           // from getbits
+    .vld_en(vld_en),                                         // from getbits
+    .ref_stall(recon_ref_stall),                             // from motcomp
+    .disp_cnt(dbg_prof0),
+    .starve_cnt(dbg_prof1),
+    .back_cnt(dbg_prof2),
+    .ref_cnt(dbg_prof3)
+    );
 
   /* motion compensation */
   motcomp motcomp(
@@ -1425,6 +1443,7 @@ module mpeg2video(clk, mem_clk, dot_clk, dot_ce,
     .rst(sync_rst),
     .busy(motcomp_busy),
     .dbg_ref_stall(recon_ref_stall),                         // DVD-FORK DEBUG (stage profiler)
+    .dbg_picbuf_busy(picbuf_busy_dbg),                       // DVD-FORK DEBUG (dec_duty)
     .picture_coding_type(picture_coding_type),               // from vld
     .picture_structure(picture_structure),                   // from vld
     .motion_type(motion_type),                               // from vld

@@ -156,6 +156,8 @@ set_global_assignment -name SYSTEMVERILOG_FILE dvd/dvd_vm.sv
 # DVD-FORK (frame-drop governor O[19]): catch-up credit controller. See
 # dvd/frame_drop_ctl.sv / docs/motcomp_throughput.md.
 set_global_assignment -name SYSTEMVERILOG_FILE dvd/frame_drop_ctl.sv
+# dec_duty: where the decoder's time goes (telemetry words 16-19), docs/decode_pacing.md.
+set_global_assignment -name SYSTEMVERILOG_FILE dvd/dec_duty.sv
 set_global_assignment -name SYSTEMVERILOG_FILE dvd/mem_shim.sv
 set_global_assignment -name SYSTEMVERILOG_FILE dvd/mem_shim_burst.sv
 set_global_assignment -name SYSTEMVERILOG_FILE dvd/sys_pll.sv
