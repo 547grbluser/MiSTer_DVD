@@ -72,8 +72,9 @@ know. It is not an endorsement of the approach — draw your own conclusions.
   [`.wav` file](https://owenb321.github.io/MiSTer_DVD/getting-started/loading/#playing-a-wav) plays
   from the bare core.
 - **Gamepad, keyboard or infrared remote** — every transport action has a
-  [built-in key](https://owenb321.github.io/MiSTer_DVD/playback/controls/), so a USB IR receiver
-  turns any remote you already own into a DVD remote with nothing to configure.
+  [built-in key](https://owenb321.github.io/MiSTer_DVD/playback/controls/). With
+  `MiSTer_DVDcss`, a USB IR receiver that shows up as a keyboard lets a media remote's
+  Play, Stop, Chapter and Menu keys work with nothing to map.
 
 ## Known limitations
 
