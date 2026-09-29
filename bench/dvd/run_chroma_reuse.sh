@@ -13,7 +13,9 @@
 #       word changes the pixels. Two checksums must match: PIXSUM, every displayed pixel per
 #       raster frame, and RSUM, every pixel resample EMITS per scan (independent of raster
 #       timing). Arms: progressive; weave (interlaced content on the progressive raster --
-#       FRAME scans with interlaced chroma upsampling, the case F2 targets); field scans
+#       FRAME scans with interlaced chroma upsampling, the case F2 targets); field blend and
+#       progressive bob (H+1-line walks); the pause field still (interpolated half scans);
+#       field scans
 #       with interlaced and progressive upsampling, both field orders; a height that is not
 #       a multiple of 16 (memory_address's clip against the addrgen's mb_height clamps),
 #       progressive and field; 720 wide; Crop; SIF 2x line repeat; bursty memory stalls;
@@ -40,6 +42,12 @@
 #         wide   45 MB x 256 lines, 128 rows                     -> 23040 + 130*90 = 34740 / 11520
 #         crop   2 MB (cols 1..2) x 256 lines, 128 rows          -> 1024 + 130*4 = 1544 / 512
 #         sif    22 MB x 480 output lines (2x repeat), rows 0..119 -> 21120 + 122*44 = 26488 / 10560
+#         blend, bob   the weave walk plus one line: after line 255 the walk steps back to 254,
+#                whose rows (126) the slots still hold        -> 3088 + 8 = 3096 / 1028
+#         still  (pause field still) normal field scans 2056 / 512; the interpolated slot
+#                repeats one field line. Pinned TOP repeats the last line (slots hold it);
+#                pinned BOTTOM repeats the first, which skipped, so row 1 is fetched there
+#                instead of at y=3 -- the same total either way  -> 2056 + 8 = 2064 / 516
 #       The F1 structure reads 6 words per macroblock-line in every arm. If a count differs,
 #       the model or the slot policy is wrong: do not edit the expectation to match.
 #   [3] The seams (one knob, the fifo width, the key against mem_addr.v, the flag layout) --
@@ -99,6 +107,9 @@ ARMS=("prog|+frames=4|3088/1024"
       "sif|+sif=1 +frames=3|26488/10560"
       "stall|+stallon=40 +stalloff=200 +frames=4|3088/1024"
       "pace|+pace=2 +frames=6|3088/1024"
+      "blend|+weave=1 +blend=1 +frames=4|3096/1028"
+      "bob|+weave=1 +bob=1 +frames=4|3096/1028"
+      "still|+il=1 +pfr=0 +still=1 +frames=5|2056/512 2064/516"
       "croptog|+croptog=5 +frames=6|-")
 
 run() {   # <sim> <outfile> <plusargs...>

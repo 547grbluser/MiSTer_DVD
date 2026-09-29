@@ -109,6 +109,16 @@ module resample_chain_tb;
   // row cached under the old range.
   integer croptog = 0;
   reg     croptog_st = 1'b0;
+  // ---- +blend=1 / +bob=1 / +still=1 : the other scan walks (F2 gate) ----
+  // blend / bob need +weave (a true-interlaced picture on the progressive raster): their
+  // scans emit H+1 lines and step back at the bottom. +still needs +il +pfr=0: pause is
+  // asserted at the FIRST pickup (a logical point, the same in every build) and the pause
+  // field still alternates normal and interpolated (half) scans of the pinned field. The
+  // downstream field_blend / disp_vscale stages are not in this chain; the RSUM stream is
+  // what resample emits for them.
+  integer blend = 0, bob = 0, still = 0;
+  reg     pause_r = 1'b0;
+  always @(posedge clk) if (rst && still != 0 && output_frame_rd) pause_r <= 1'b1;
   reg     il_disp = 0;   // syncgen interlaced
 
   // ---- +crt=1 : CRT 480i mode (native-width 13.5 MHz CE + N64-model interlace) ----
@@ -239,12 +249,12 @@ module resample_chain_tb;
     .persistence(persistence), .repeat_frame(repeat_frame),
     .y(px_y), .u(px_u), .v(px_v), .osd_out(px_osd),
     .position_out(px_position), .pixel_wr_en(px_wr_en),
-    .video_live(), .pickup_hold(1'b0), .pause(1'b0), .step_req(1'b0),
+    .video_live(), .pickup_hold(1'b0), .pause(pause_r), .step_req(1'b0),
     .raster_par_err(1'b0), .vscale_mode(rs_vscale_mode),              // DVD-FORK (CRT anamorphic vscale: letterbox)
     .hcrop_en(rs_hcrop_en ^ croptog_st),       // DVD-FORK (CRT anamorphic horizontal crop); +croptog flips it
     .sched_due(1'b1),                          // THE STC IS A CLOCK: free-run (every picture due at once) -- pacing is not what this bench measures
     .sched_next_due(1'b1),
-    .still_en(1'b0), .blend_en(1'b0), .bob_en(1'b0), .scan_start(), .scan_half()   // pause field still: not exercised here (bench/dvd/pause_still_tb.sv)
+    .still_en(still != 0), .blend_en(blend != 0), .bob_en(bob != 0), .scan_start(), .scan_half()   // +still / +blend / +bob (F2 gate); the stills' own bench is pause_still_tb.sv
   );
 
   // ---- disp_vscale: vertical 2-tap letterbox downscale (480->360 / field 240->180). Pure
@@ -843,6 +853,9 @@ module resample_chain_tb;
     // ---- interlaced/field mode (native 480i) ----
     void'($value$plusargs("weave=%d",    weave));
     void'($value$plusargs("croptog=%d",  croptog));
+    void'($value$plusargs("blend=%d",    blend));
+    void'($value$plusargs("bob=%d",      bob));
+    void'($value$plusargs("still=%d",    still));
     if (weave) begin
       if (!$value$plusargs("pfr=%d", pfr)) pfr = 0;
       progressive_sequence = 0;
