@@ -1,6 +1,6 @@
 # Compatibility
 
-What plays, what does not, and what is untested. Current as of **v0.7.0**.
+What plays, what does not, and what is untested. Current as of **v0.8.0**.
 
 ## Formats
 
@@ -108,11 +108,18 @@ earlier than the bar showed if the target falls in a gap between two parts.
     how the disc is authored; a real player and libdvdnav do the same thing. Let the intro
     play.
 
-**Very demanding scenes may drop a frame.** The inherited decoder has a motion-compensation
-and IDCT throughput ceiling and can fall behind on the heaviest content. The frame-rate
-governor drops a B-frame to stay in step. B-frames are never used as references, so the
-picture cannot be corrupted, and in practice this is not something you notice. PAL has less
-headroom because the frames are taller.
+**Busy interlaced video skips frames on Progressive output.** Concert and TV discs,
+laserdisc-sourced game discs and busy PAL material can lose a few frames a second
+(roughly 3–5) when **Video Output** is **Progressive**. That includes **Auto**, unless
+`MiSTer.ini` sets up an analog TV (Auto lands on Progressive otherwise). On a progressive raster the player
+re-reads the whole picture from memory at every refresh, and those reads compete with the
+decoder for memory, so the heaviest pictures miss their slot. The frame-rate governor then
+drops a B-frame to stay in step. B-frames are never used as references, so the picture
+cannot be corrupted, but the motion is visibly less smooth. **Video Output = Interlaced**
+removes nearly all of it (a game disc's full-motion intro can still skip a frame or two a
+second), and on PAL discs **Film 24p Out = On** does too. See
+[Troubleshooting](troubleshooting.md#busy-video-skips-frames-on-progressive-output). Film
+discs are much less affected, because they carry fewer pictures per second.
 
 **Closed captions are analog-only** and need a television that decodes them — see
 [Closed captions](../video/closed-captions.md). Roughly 1 disc in 6 carries them.

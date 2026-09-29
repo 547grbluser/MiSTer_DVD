@@ -35,6 +35,10 @@
 // Must match dvd/dvd_telem.sv. 0x7A is free: Main uses 0x00-0x44, 0x61-63, 0xF0-F9.
 #define UIO_DVD_TELEM  0x7A
 #define DVD_TELEM_MAGIC 0xD7D1
+// Word 16 of a core with dvd/dec_duty.sv (docs/decode_pacing.md): words 17..20
+// follow. A core built before them answers strobes past 15 with word 15 AGAIN
+// (its word counter saturates), so 17..20 are meaningless without this marker.
+#define DVD_TELEM_DUTY_MAGIC 0xDD01
 
 #define TELEM_PERIOD_MS 250
 
@@ -72,9 +76,9 @@ static void telem_read()
 	// Words 11-13 (A/V phase) were added with the PTS-scheduled display work.
 	// Reading them from an OLDER core is safe: dvd_telem's readout mux answers
 	// 16'd0 for any index it does not implement, so they read 0, not garbage.
-	uint16_t w[16];
+	uint16_t w[21];
 	w[0] = spi_uio_cmd_cont(UIO_DVD_TELEM);
-	for (int i = 1; i < 16; i++) w[i] = spi_w(0);
+	for (int i = 1; i < 21; i++) w[i] = spi_w(0);
 	DisableIO();
 
 	if (w[0] != DVD_TELEM_MAGIC) return;      // no bridge in this core build
@@ -89,8 +93,18 @@ static void telem_read()
 	snprintf(tmp, sizeof(tmp), "%s.tmp", DVD_TELEM_FILE);
 	FILE *f = fopen(tmp, "w");
 	if (!f) return;
+	// dec_duty (words 17..20): free-running clk_dec cycle counts / 4096 of where
+	// the decoder's time goes -- parked on the display, starved of bitstream,
+	// stalled by the decode pipe, recon waiting on reference pixels. 16-bit,
+	// they WRAP; the host differences them. Absent (not zero) on a core
+	// without them, so a reader cannot mistake "old core" for "idle decoder".
+	char duty[128] = "";
+	if (w[16] == DVD_TELEM_DUTY_MAGIC)
+		snprintf(duty, sizeof(duty),
+			"\"dec_disp\":%u,\"dec_starve\":%u,\"dec_back\":%u,\"dec_ref\":%u,",
+			w[17], w[18], w[19], w[20]);
 	fprintf(f,
-		"{\"t\":%.6f,\"refreshes\":%u,\"pickups\":%u,\"lates\":%u,"
+		"{\"t\":%.6f,%s\"refreshes\":%u,\"pickups\":%u,\"lates\":%u,"
 		"\"drops\":%u,\"vid_err\":%d,\"debt\":%d,\"drop_req\":%u,"
 		"\"vbuf_fill\":%u,\"aud_frames\":%u,"
 		"\"aud_play\":%u,\"aud_gate\":%u,"
@@ -110,7 +124,7 @@ static void telem_read()
 		// flags.bob = the display scan under way uses the progressive bob kernel
 		// (docs/field_blend.md "Bob"; word 14 bit 8, 0 on a core without it).
 		"\"still\":%u,\"menu\":%u,\"blend\":%u,\"tmap\":%u,\"tmap_fb\":%u,\"bob\":%u}}\n",
-		t, w[1], w[2], w[3], w[4],
+		t, duty, w[1], w[2], w[3], w[4],
 		(int)(int16_t)w[5],                       // vid_err is SIGNED
 		(int)((w[6] >> 11) & 0x1F) - (((w[6] >> 15) & 1) ? 32 : 0),
 		(unsigned)((w[6] >> 10) & 1),

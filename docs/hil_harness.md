@@ -176,6 +176,19 @@ reports impossibilities: **1003 refreshes/s, 1026 lates/s, 65,524 drain-gate clo
 59.955 Hz, 24.01 fps, audio −12 ppm, 0 lates, 0 drops — the same build, seconds later.
 Settle ~20 s, and re-measure anything that looks catastrophic before believing it.
 
+★ **Resets happen DURING playback too, and `--watch` now catches them** (2026-09-28,
+`docs/decode_pacing.md`). The counters live in three reset domains: `refreshes`
+(`reset_n` only), `pickups`/`lates`/`drops` (`sync_rst`: mount, `~keep_vbuf` jump,
+watchdog) and `aud_play`/`aud_gate` (`aud_rst_n`: every seek, jump, mode switch —
+including a live `osd "Video Output=…"` — audio-track switch and non-seamless
+re-anchor). The old plain modulo-65536 unwrap read each zeroing as a forward jump of up
+to 65535 counts, which is how a Thayer's Quest window printed **"~67 kHz" audio**.
+`telem_count()` now treats a delta the counter could not physically reach in that
+interval (`TELEM_MAX_RATE`) as a reset, excludes that interval from the count AND the
+span, and prints `⚠ counter RESETS mid-window`. Gate: `tools/test_telem_unwrap.py`.
+`--jsonl` keeps the raw rows and `--from FILE` re-summarises them offline; `--json`
+writes the window summary.
+
 ⚠ The same trap in reverse: a 41 s window on a **66 s clip** starting 20 s in spans the
 end of the file and reports the audio rate 15 % low. Match the window to the material.
 
@@ -280,6 +293,21 @@ extension (command `0x7A`); `main/support/dvd/dvd_ctl.cpp` publishes
 tools/mister.py telem --watch 120      # rates, incl. refreshes-per-pickup in ppm
 tools/mister.py osd "A/V Offset=+50ms" # set an option LIVE, no relaunch
 ```
+
+**Decoder duty (words 16–20, 2026-09-28, `docs/decode_pacing.md`).**
+- **Fields:** `dec_disp`, `dec_starve`, `dec_back`, `dec_ref`.
+- **Units:** free-running clk_dec cycle counts ÷ 4096, 16-bit. They wrap about every
+  3.3 s at 100 % duty, well above the 0.5 s poll.
+- **Reset:** by the reset pin **only**, so no flush or seek ever zeroes them.
+- **What they mean:** the VLD parked on the display, starved of bitstream, stalled by the
+  decode pipe; plus the independent recon-waits-for-reference-pixels class.
+- **When they exist:** only when word 16 reads `DUTY_MAGIC` (`0xDD01`), in a Main that
+  reads 21 words. An older core answers past word 15 with word 15 again, so the Main
+  **omits** these keys rather than emitting garbage. An absent key means "old core or old
+  Main", never "idle decoder".
+- **Output:** `telem --watch` prints them as fractions of clk_dec time (`decoder time:
+  parked … active … ref-wait`).
+- **Gate:** `bench/dvd/run_telem.sh`.
 
 **The number it exists for is refreshes / pickups.** The governor is supposed to
 show each content frame for exactly `show_next` refreshes, so for 29.97 content
@@ -558,9 +586,11 @@ older `MiSTer_DVDcss_hil_*` that are neither the target nor running, since
 `/media/fat` is nearly full.
 
 `restore` puts `main=MiSTer_DVDcss` back, stops the key daemon and removes the
-harness core, MGL and spare Mains. It does NOT revert `config/DVD_v3.CFG`, which
-still holds whatever options the harness last set, and the running Main stays
-until the next core load.
+harness core, MGL and spare Mains. It also moves `config/DVD_v3.CFG.hilbak` (the backup
+`launch` takes once) back over the CFG, so the maintainer's options return (this
+paragraph used to say it did not; `mister.py`'s restore script does). It does NOT
+touch `MiSTer.ini` beyond `main=`, and the running Main stays until the next core
+load.
 
 ## Is it safe to leave in a release build?
 

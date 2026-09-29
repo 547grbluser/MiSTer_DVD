@@ -37,6 +37,17 @@
 //     word 11 disp_lag       -- SIGNED, PTS of the picture just DISPLAYED - STC, 1 LSB = 16 ticks
 //     word 12 play_err       -- SIGNED, audio playback position vs its anchor, same scale
 //     word 13 av_drift       -- SIGNED, dispatched audio PTS - STC, same scale
+//     word 14 sched_flags    word 15 sched_dur (debug layout, see dvd_ctl.cpp)
+//     word 16 DUTY_MAGIC     -- says words 17..20 exist. ⚠ A core built before them
+//                               answers strobes past 15 with word 15 AGAIN (wcnt
+//                               saturated at 4'hF), not with zero, so the reader
+//                               must check this marker before trusting 17..20.
+//     words 17..20 dec_duty  -- free-running clk_dec cycle counts / 4096 of where
+//                               the decoder's time goes: parked on the display,
+//                               starved of bitstream, stalled by the decode pipe,
+//                               recon waiting on reference pixels (dvd/dec_duty.sv,
+//                               docs/decode_pacing.md). They move at most once per
+//                               4096 clk_dec cycles, so the two-agree sampler holds.
 //   Word 11 is the measurement docs/av_sync.md "THE STC IS A CLOCK" is built
 //   on: the picture on SCREEN against the clock the audio is scheduled by. It
 //   is ~0 when the display is scheduled by PTS (Stage 1) and reads the whole
@@ -74,7 +85,8 @@ module dvd_telem #(
     // the /media/fat/dvd_hil arm file, so a feature that depended on it would work
     // only on a rig set up for hardware-in-the-loop testing.
     parameter [15:0] CMD_AF = 16'h007B,
-    parameter [15:0] MAGIC = 16'hD7D1
+    parameter [15:0] MAGIC = 16'hD7D1,
+    parameter [15:0] DUTY_MAGIC = 16'hDD01   // word 16: dec_duty words 17..20 follow
 ) (
     input         clk,
 
@@ -105,6 +117,10 @@ module dvd_telem #(
     input  [15:0] av_drift,              // word 13: dispatched audio PTS - STC
     input  [15:0] sched_flags,           // word 14: {frame_rate_code, ps, pf, tff, rff} at the last pickup
     input  [15:0] sched_dur,              // word 15: the duration the scheduler applied, ticks
+    input  [15:0] dec_disp,              // word 17: VLD parked on the display (cycles/4096)
+    input  [15:0] dec_starve,            // word 18: no bitstream to parse
+    input  [15:0] dec_back,              // word 19: parse stalled by the decode pipeline
+    input  [15:0] dec_ref,               // word 20: recon waiting on reference pixels
 
     // --- audio link format (CMD_AF) -------------------------------------
     // What the wire is actually carrying, which is NOT what the OSD bit says: in
@@ -148,7 +164,7 @@ module dvd_telem #(
     // registered-sample commit (never the raw asynchronous input), 1/3 the
     // flops. The atomic snapshot below is untouched: q[] is latched together
     // on the command strobe exactly as the 19 outputs were.
-    localparam int NSRC = 19;
+    localparam int NSRC = 21;
     wire [15:0] src [0:NSRC-1];
     assign src[0]  = refreshes;
     assign src[1]  = pickups;
@@ -179,8 +195,10 @@ module dvd_telem #(
     assign src[16] = {1'b1, 2'd0, 1'b1,
                       rq_voldn_seq, rq_volup_seq, rq_eject_tgl,
                       af_bs_session, af_pcm_session, af_passthru};
-    assign src[17] = 16'd0;                 // spare slots keep the walk a plain counter
-    assign src[18] = 16'd0;
+    assign src[17] = dec_disp;
+    assign src[18] = dec_starve;
+    assign src[19] = dec_back;
+    assign src[20] = dec_ref;
 
     reg  [4:0]  cur;                        // source being sampled
     reg  [1:0]  sph;                        // 0: sample A, 1: sample B, 2: compare+commit
@@ -212,24 +230,26 @@ module dvd_telem #(
     wire [15:0] s_dlag    = q[11], s_perr   = q[12], s_drift = q[13];
     wire [15:0] s_sfl     = q[14], s_sdu    = q[15];
     wire [15:0] s_afmt    = q[16];
+    wire [15:0] s_ddisp   = q[17], s_dstarve = q[18], s_dback = q[19], s_dref = q[20];
 
-    reg  [3:0] wcnt;
+    reg  [4:0] wcnt;
     reg        active;
     reg [15:0] dout_r;
 
     // the atomic snapshot
     reg [15:0] q1, q2, q3, q4, q5, q6, q7, q8, q9, q10, q11, q12, q13, q14, q15;
+    reg [15:0] q17, q18, q19, q20;
     reg [15:0] q_afmt;
     reg        af_sel;
 
     always @(posedge clk) begin
         if (!io_enable) begin
-            wcnt   <= 4'd0;
+            wcnt   <= 5'd0;
             active <= 1'b0;
             af_sel <= 1'b0;
             dout_r <= 16'd0;
         end else if (io_strobe) begin
-            if (wcnt == 4'd0) begin
+            if (wcnt == 5'd0) begin
                 active <= (io_din == CMD) || (io_din == CMD_AF);
                 af_sel <= (io_din == CMD_AF);
                 q1 <= s_refresh;
@@ -247,31 +267,40 @@ module dvd_telem #(
                 q13 <= s_drift;
                 q14 <= s_sfl;
                 q15 <= s_sdu;
+                q17 <= s_ddisp;
+                q18 <= s_dstarve;
+                q19 <= s_dback;
+                q20 <= s_dref;
                 q_afmt <= s_afmt;
                 dout_r <= MAGIC;
             end else begin
-                if (af_sel) dout_r <= (wcnt == 4'd1) ? q_afmt : 16'd0;
+                if (af_sel) dout_r <= (wcnt == 5'd1) ? q_afmt : 16'd0;
                 else
                 case (wcnt)
-                    4'd1:    dout_r <= q1;
-                    4'd2:    dout_r <= q2;
-                    4'd3:    dout_r <= q3;
-                    4'd4:    dout_r <= q4;
-                    4'd5:    dout_r <= q5;
-                    4'd6:    dout_r <= q6;
-                    4'd7:    dout_r <= q7;
-                    4'd8:    dout_r <= q8;
-                    4'd9:    dout_r <= q9;
-                    4'd10:   dout_r <= q10;
-                    4'd11:   dout_r <= q11;
-                    4'd12:   dout_r <= q12;
-                    4'd13:   dout_r <= q13;
-                    4'd14:   dout_r <= q14;
-                    4'd15:   dout_r <= q15;
+                    5'd1:    dout_r <= q1;
+                    5'd2:    dout_r <= q2;
+                    5'd3:    dout_r <= q3;
+                    5'd4:    dout_r <= q4;
+                    5'd5:    dout_r <= q5;
+                    5'd6:    dout_r <= q6;
+                    5'd7:    dout_r <= q7;
+                    5'd8:    dout_r <= q8;
+                    5'd9:    dout_r <= q9;
+                    5'd10:   dout_r <= q10;
+                    5'd11:   dout_r <= q11;
+                    5'd12:   dout_r <= q12;
+                    5'd13:   dout_r <= q13;
+                    5'd14:   dout_r <= q14;
+                    5'd15:   dout_r <= q15;
+                    5'd16:   dout_r <= DUTY_MAGIC;
+                    5'd17:   dout_r <= q17;
+                    5'd18:   dout_r <= q18;
+                    5'd19:   dout_r <= q19;
+                    5'd20:   dout_r <= q20;
                     default: dout_r <= 16'd0;
                 endcase
             end
-            if (wcnt != 4'hF) wcnt <= wcnt + 4'd1;
+            if (wcnt != 5'h1F) wcnt <= wcnt + 5'd1;
         end
     end
 

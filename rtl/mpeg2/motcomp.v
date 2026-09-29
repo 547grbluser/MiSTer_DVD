@@ -50,13 +50,15 @@ module motcomp(
   bwd_wr_addr_clk_en, bwd_wr_addr_full, bwd_wr_addr_almost_full, bwd_wr_addr_en, bwd_wr_addr_ack, bwd_wr_addr, bwd_rd_dta_clk_en, bwd_rd_dta_empty, bwd_rd_dta_en, bwd_rd_dta_valid, bwd_rd_dta,
   recon_wr_full, recon_wr_almost_full, recon_wr_en, recon_wr_ack, recon_wr_addr, recon_wr_dta,
   output_frame, output_frame_valid, output_frame_rd, output_progressive_sequence, output_progressive_frame, output_top_field_first, output_repeat_first_field,
-  dbg_ref_stall                                                  // DVD-FORK DEBUG (stage profiler)
+  dbg_ref_stall,                                                 // DVD-FORK DEBUG (stage profiler)
+  dbg_picbuf_busy                                                // DVD-FORK DEBUG (dec_duty): VLD parked on the display
   );
 
   input              clk;                      // clock
   input              clk_en;                   // clock enable
   input              rst;                      // synchronous active low reset
   output             dbg_ref_stall;            // DVD-FORK DEBUG (stage profiler): recon ref-feed stall
+  output             dbg_picbuf_busy;          // DVD-FORK DEBUG (dec_duty): picbuf_busy -- VLD parked at the next header until the display picks up
   output reg         busy;                     // addrgen freezes vld while processing motion vectors 
 
   input         [2:0]picture_coding_type;      // identifies whether a picture is an I, P or B picture.
@@ -281,6 +283,8 @@ module motcomp(
     if (~ rst) busy <= 1'b0;
     else if (update_picture_buffers) busy <= 1'b1;
     else busy <= flush_mvec_fifo || picbuf_busy;
+
+  assign dbg_picbuf_busy = picbuf_busy;                          // DVD-FORK DEBUG (dec_duty)
 
 `include "fifo_size.v"
 `include "vld_codes.v"

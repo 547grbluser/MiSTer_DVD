@@ -156,6 +156,8 @@ set_global_assignment -name SYSTEMVERILOG_FILE dvd/dvd_vm.sv
 # DVD-FORK (frame-drop governor O[19]): catch-up credit controller. See
 # dvd/frame_drop_ctl.sv / docs/motcomp_throughput.md.
 set_global_assignment -name SYSTEMVERILOG_FILE dvd/frame_drop_ctl.sv
+# dec_duty: where the decoder's time goes (telemetry words 16-19), docs/decode_pacing.md.
+set_global_assignment -name SYSTEMVERILOG_FILE dvd/dec_duty.sv
 set_global_assignment -name SYSTEMVERILOG_FILE dvd/mem_shim.sv
 set_global_assignment -name SYSTEMVERILOG_FILE dvd/mem_shim_burst.sv
 set_global_assignment -name SYSTEMVERILOG_FILE dvd/sys_pll.sv
@@ -1513,5 +1515,14 @@ set_global_assignment -name PHYSICAL_SYNTHESIS_COMBO_LOGIC OFF
 # DSP, all 12 of its altsyncrams still inferred; bit-identical in sim (run_reader_regress.sh).
 #   Removing the reader's dead debug_state port let Quartus extract its main `state` FSM
 #   (one-hot) for the first time -- a real netlist change from a "dead port" removal.
+
+# RELEASE v0.8.0 (2026-09-28, the shipping netlist): SEED 9 held FIRST roll --
+# clk_dec 87.18 MHz @100C / 86.54 MHz @-40C (gate 86.0, PASS both corners,
+# non-marginal), 38,762 / 41,910 ALMs (92 %), 52,903 registers, 508 / 553 M10K
+# (92 %), 94 / 112 DSP. Build releases/DVD_20260928.rbf, commit f473247.
+#   Main at PR #124 (#135's GPRM M10K was the last RTL change, 89.02/87.42 there) plus
+#   CORE_VERSION dev-irremote -> v0.8.0. ⚠ The -40C corner cleared the gate by only
+#   0.54 MHz, the thinnest release margin in this ledger: expect the next netlist to
+#   need a seed sweep rather than assuming SEED 9 holds.
 
 set_global_assignment -name SEED 9

@@ -23,11 +23,11 @@ Settings are saved to `/media/fat/config/DVD_v3.CFG` and persist across core rel
 | **Video Standard** | **Auto** / NTSC / PAL | Auto detects from the stream's vertical size (480 = NTSC, 576 = PAL). |
 | **Screensaver** | **5min** / Off / 2min / 10min | How long a paused or stopped disc sits still before the bouncing idle logo takes over. The picture goes with it, and so do the status line, the seek bar and any subtitle or disc menu highlight — nothing is left standing still, which is the whole point. Any button or key brings it all straight back, exactly as it was. It protects CRTs from burn-in and changes nothing about playback — your place is kept. |
 
-!!! note "Deinterlace replaces two settings"
-    **Deinterlace** replaces the separate `480i Deint` and `Progressive Deint` settings.
-    Your other settings are kept, but whatever you had chosen for those two returns to the
-    default, **Weave**, once. If you watch the **Interlaced** output over HDMI and liked the
-    old default (Bob), set `Deinterlace = Bob`.
+!!! note "Deinterlace replaces `480i Deint` (v0.8.0)"
+    **Deinterlace** replaces the `480i Deint` setting and adds Bob and Blend for the
+    Progressive output. Your other settings are kept, but whatever you had chosen for
+    `480i Deint` returns to the default, **Weave**, once. If you watch the **Interlaced**
+    output over HDMI and liked the old default (Bob), set `Deinterlace = Bob`.
 
 !!! warning "New in v0.4.0 — your settings reset once"
     **Video Output** replaces the previous `Interlaced Out` and `Analog Out` settings
@@ -69,10 +69,11 @@ problems.
 
 Default **On**, and it should stay on.
 
-The inherited MPEG-2 decoder has a motion-compensation and IDCT throughput ceiling, and on
-the heaviest content it can fall behind the display cadence. The frame-rate governor
+On busy content the decoder can fall behind the display cadence, mostly with **Video
+Output = Progressive**, where the display's own memory reads compete with the decoder (see
+[Compatibility](../reference/compatibility.md#known-limitations)). The frame-rate governor
 absorbs this by dropping a B-frame to stay in step. B-frames are never used as references,
-so the picture cannot be corrupted by this, and in practice it is not something you notice.
+so the picture cannot be corrupted by this.
 
 It is also how the player catches up when it has fallen behind the disc's own timeline:
 advancing past a frame is the only way to recover time that has already been lost. With

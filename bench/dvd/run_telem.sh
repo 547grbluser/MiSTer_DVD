@@ -27,11 +27,53 @@ run_py() {
 
 echo "== RTL =="
 run_iv dvd_telem dvd/dvd_telem.sv bench/dvd/dvd_telem_tb.sv
+run_iv dec_duty  dvd/dec_duty.sv  bench/dvd/dec_duty_tb.sv
+
+echo "== dec_duty wiring (docs/decode_pacing.md) =="
+if python3 tools/check_decode_duty_wiring.py >/dev/null 2>&1; then echo "  PASS check_decode_duty_wiring"
+else echo "  FAIL check_decode_duty_wiring"; python3 tools/check_decode_duty_wiring.py | grep FAIL; fail=1; fi
+
+# Mutations: each must turn its own arm RED, or that arm cannot see the defect.
+mut_tmp=$(mktemp -d)
+mutate() {   # <src> <old> <new> <dst>: exactly-once textual replace
+    python3 - "$@" <<'PYEOF'
+import sys
+src, old, new, dst = sys.argv[1:5]
+s = open(src).read()
+assert s.count(old) == 1, f'mutation anchor not unique in {src}: {old!r}'
+open(dst, 'w').write(s.replace(old, new))
+PYEOF
+    [ $? = 0 ] || { echo "  FAIL mutation anchor missing -- the arm below is VOID"; fail=1; return 1; }
+}
+expect_red_iv() {   # <name> <files...>
+    local name=$1; shift
+    if iverilog -g2012 -o "$mut_tmp/sim" "$@" 2>/dev/null && vvp "$mut_tmp/sim" 2>&1 | grep -q "ALL GREEN"; then
+        echo "  FAIL mutation $name survived (the arm cannot see it)"; fail=1
+    else echo "  ok   mutation $name caught"; fi
+}
+echo "== mutations =="
+mutate dvd/dec_duty.sv "wire is_starve = ~picbuf_busy & ~getbits_valid;" \
+       "wire is_starve = ~getbits_valid;" "$mut_tmp/dd.sv"
+expect_red_iv "M1 starve-ignores-disp" "$mut_tmp/dd.sv" bench/dvd/dec_duty_tb.sv
+mutate dvd/dvd_telem.sv "assign src[17] = dec_disp;" "assign src[17] = dec_starve;" "$mut_tmp/tl.sv"
+expect_red_iv "M2 word17-swapped" "$mut_tmp/tl.sv" bench/dvd/dvd_telem_tb.sv
+mutate dvd/emu.sv ".dec_disp   (core_duty_disp)," ".dec_disp   (core_duty_starve)," "$mut_tmp/emu.sv"
+if python3 tools/check_decode_duty_wiring.py --emu "$mut_tmp/emu.sv" >/dev/null 2>&1; then
+    echo "  FAIL mutation M3 emu-duty-swap survived the wiring check"; fail=1
+else echo "  ok   mutation M3 emu-duty-swap caught"; fi
+mutate rtl/mpeg2/mpeg2video.v $'.rst(hard_rst),\n    .picbuf_busy(picbuf_busy_dbg)' \
+       $'.rst(sync_rst),\n    .picbuf_busy(picbuf_busy_dbg)' "$mut_tmp/mv.v" && \
+if python3 tools/check_decode_duty_wiring.py --mpeg "$mut_tmp/mv.v" >/dev/null 2>&1; then
+    echo "  FAIL mutation M4 flush-resets-duty survived the wiring check"; fail=1
+else echo "  ok   mutation M4 flush-resets-duty caught"; fi
+rm -rf "$mut_tmp"
 
 echo "== host tools (no hardware) =="
 run_py hud_read     python3 tools/hud_read.py selftest
 run_py lipsync      python3 tools/lipsync_measure.py selftest
 run_py dvd_explore  python3 tools/dvd_explore.py selftest
+if python3 tools/test_telem_unwrap.py 2>&1 | grep -q "RESULT: PASS"; then echo "  PASS telem_unwrap"
+else echo "  FAIL telem_unwrap"; python3 tools/test_telem_unwrap.py | tail -8; fail=1; fi
 
 echo "== derived tables (CONF_STR / kbd_map) =="
 if ./tools/tests/run_tests.sh 2>&1 | grep -q "ALL GREEN"; then

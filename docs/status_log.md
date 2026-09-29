@@ -22,6 +22,60 @@ predate later confirmations; the `CLAUDE.md` index carries the reconciled status
 
 ## Hardware status (THIS fork, verified 2026-06-21)
 
+- 🔧 **DECODE PACING × OUTPUT MODE: THE PROGRESSIVE-ONLY LATES ARE DDR3 CONTENTION FROM
+  THE DISPLAY'S FRAME RE-READS, NOT A COMPUTE CEILING (2026-09-28, branch
+  `feature/decode-pacing`, investigation + instrument; fix proposed, not built).**
+  Full record: `docs/decode_pacing.md`.
+
+  **Field report (v0.8.0 smoke test):**
+  - Thayer's Quest on Progressive: 7.4 lates/s, 7.4 drops/s, 26.3 fps, and "67 kHz" audio.
+  - 0 lates on Interlaced; MiB and PAL BBB 0 on Progressive.
+
+  ★ **The "67 kHz" was the instrument.** `mister.py telem --watch` unwrapped a mid-window
+  counter RESET as a 16-bit wrap. `aud_play` is zeroed by every seek, `~keep_vbuf` jump,
+  mode switch and non-seamless re-anchor, and cannot physically exceed 48 kHz. Fixed:
+  reset-aware `telem_count()`, gated by `tools/test_telem_unwrap.py`.
+
+  ★★ **The matrix** (`tools/pacing_matrix.py`: interleaved live-OSD cells, 8 discs chosen
+  by census):
+  - Every busy 29.97i or 25p/25i source lates **4–10/s on Progressive** and ~0 on
+    Interlaced.
+  - That holds for frame-coded (ROGER_WATERS, Thayer VTS_09) and field-coded (Thayer
+    VTS_08, Angel) sources, for Weave, Bob and Blend, and for title and menu domain.
+  - Film is mostly spared: MiB 0.2–3.5/s.
+  - PAL with Film 24p On (a 25 Hz raster) reads **0**: Office 8.3 → 0, BBB 5 → 0.
+  - The v0.7.0 control is identical.
+
+  ★★★ **The decode-vs-scheduling separation** (new `dvd/dec_duty.sv`, telemetry words
+  16–20; Main reads 21 words):
+  - The same pictures cost **+30–50 % decode time on Progressive**. For Office:
+    Interlaced 17 ms, Progressive 24 ms, Film-On 13 ms per picture.
+  - Nearly all of the rise is reference-fetch wait, so it follows the display's frame
+    re-read rate on the shared f2sdram port (strict display priority).
+  - The VLD is still **parked ~50 % on every raster**. The lates are the heavy pictures
+    that miss a one-frame budget the one-deep picbuf handoff cannot bank.
+  - `tools/pacing_model.py` shows scheduling alone cannot produce the asymmetry at equal
+    decode cost.
+
+  **Refuted:**
+  - field-picture pairing as the cause (frame-coded content shows the same asymmetry);
+  - Deinterlace mode;
+  - a v0.8.0 regression;
+  - for the menu FMV, starvation, a reader/link stall and a drop/late feedback loop.
+    Frame Drop Off gives the same 28.4 fps with more lates.
+
+  **Open:**
+  - Thayer boot-FMV Interlaced lates (3.4/s, deterministic from boot). Needs a
+    per-picture maximum decode-time instrument.
+  - Thayer VTS_08 audio has real 5–13 % gaps after non-seamless re-anchors (both modes).
+
+  **Next:** F1, drop the dead OSD display reads (`docs/decode_pacing.md` §7; then F2
+  chroma-row reuse, F3 `ram2` port, F4 a deeper output queue).
+  **Gates:** `bench/dvd/run_telem.sh` (`dec_duty_tb`, `dvd_telem_tb` [6],
+  `check_decode_duty_wiring.py`, M1–M4, `test_telem_unwrap`).
+  **Manual updated:** compatibility limitation, the Frame Drop setting, and a
+  troubleshooting entry.
+
 - ✅ **AN IR / MEDIA REMOTE'S KEYS NEVER REACHED THE CORE — THREE STACKED CEILINGS IN
   STOCK MAIN, NOT THE ONE EVERYONE POINTS AT (2026-09-24, PR #124);
   host-proven, ARM cross-compile clean, 17 + 9 + 2 mutations each caught by its own

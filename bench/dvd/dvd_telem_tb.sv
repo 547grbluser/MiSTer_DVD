@@ -12,6 +12,9 @@
 //       milliseconds apart and the refresh/pickup ratio this exists to measure
 //       becomes noise rather than a number.
 //   [4] the CDC stability filter never commits a mid-increment value
+//   [6] words 11..20: the phase/scheduler words, the DUTY_MAGIC marker, and the
+//       four dec_duty counters in order (docs/decode_pacing.md). Every input is
+//       driven with a distinct value, so a swapped or unwired word cannot pass.
 //============================================================================
 module dvd_telem_tb;
     reg clk = 0;
@@ -27,9 +30,13 @@ module dvd_telem_tb;
     reg [15:0] aud_frames = 16'h8888;
     reg  [7:0] vbuf_fill = 8'h77, flags = 8'h07;
     reg [15:0] aud_play = 16'h9999, aud_gate = 16'hA0A0;
+    // Tie-offs for every remaining input (a new INPUT left unconnected floats Z).
+    reg [15:0] disp_lag = 16'hB1B1, play_err = 16'hB2B2, av_drift = 16'hB3B3;
+    reg [15:0] sched_flags = 16'hB4B4, sched_dur = 16'hB5B5;
+    reg [15:0] dec_disp = 16'hC1C1, dec_starve = 16'hC2C2, dec_back = 16'hC3C3, dec_ref = 16'hC4C4;
 
     integer errors = 0;
-    reg [15:0] got [0:11];
+    reg [15:0] got [0:20];
 
     // CMD_AF inputs. Tied off explicitly: a new INPUT left unconnected floats Z
     // and quietly poisons whatever reads it (see CLAUDE.md's note on new ports).
@@ -45,6 +52,9 @@ module dvd_telem_tb;
         .drops(drops), .vid_err(vid_err), .drop_costs(drop_costs),
         .vbuf_fill(vbuf_fill), .aud_frames(aud_frames), .flags(flags),
         .aud_play(aud_play), .aud_gate(aud_gate),
+        .disp_lag(disp_lag), .play_err(play_err), .av_drift(av_drift),
+        .sched_flags(sched_flags), .sched_dur(sched_dur),
+        .dec_disp(dec_disp), .dec_starve(dec_starve), .dec_back(dec_back), .dec_ref(dec_ref),
         .af_passthru(af_pt), .af_pcm_session(af_pcm), .af_bs_session(af_bs),
         .rq_eject_tgl(rq_ej), .rq_volup_seq(rq_up), .rq_voldn_seq(rq_dn));
 
@@ -69,9 +79,9 @@ module dvd_telem_tb;
             if (disturb) begin
                 refreshes = 16'hAAAA; pickups = 16'hBBBB; lates = 16'hCCCC;
                 drops = 16'hDDDD; vid_err = 16'hEEEE;
-                repeat (64) @(negedge clk);    // let the sampler walk all 19 sources (57 cycles since the 2026-09-10 area pass)
+                repeat (72) @(negedge clk);    // let the sampler walk all 19 sources (57 cycles since the 2026-09-10 area pass)
             end
-            for (i = 1; i <= 10; i = i + 1) begin
+            for (i = 1; i <= 20; i = i + 1) begin
                 strobe(16'd0);
                 got[i] = dout;
                 if (drive) drove = 1;
@@ -93,7 +103,7 @@ module dvd_telem_tb;
 
     reg drove;
     initial begin
-        repeat (64) @(negedge clk);   // sampler rotation is 57 cycles (2026-09-10 area pass)
+        repeat (72) @(negedge clk);   // sampler rotation is 57 cycles (2026-09-10 area pass)
 
         $display("[1] matching command returns MAGIC then the counters");
         run_xact(16'h007A, 1'b0, drove);
@@ -124,7 +134,7 @@ module dvd_telem_tb;
         $display("[3] snapshot is atomic across a disturbed transaction");
         refreshes = 16'h1111; pickups = 16'h2222; lates = 16'h3333;
         drops = 16'h4444; vid_err = 16'h5555;
-        repeat (64) @(negedge clk);   // sampler rotation is 57 cycles
+        repeat (72) @(negedge clk);   // sampler rotation is 57 cycles
         run_xact(16'h007A, 1'b1, drove);       // counters change mid-readout
         check("refreshes", got[1], 16'h1111);
         check("pickups",   got[2], 16'h2222);
@@ -142,21 +152,21 @@ module dvd_telem_tb;
         // not: Main uses it to tell a core that reports bs_session from one that
         // predates it, and both answer bs=0 when nothing is playing.
         af_pt = 1; af_pcm = 0; af_bs = 1;      // Passthru, an AC-3/DTS track
-        repeat (64) @(negedge clk);   // sampler rotation is 57 cycles
+        repeat (72) @(negedge clk);   // sampler rotation is 57 cycles
         run_xact(16'h007B, 1'b0, drove);
         if (!drove) begin
             $display("  FAIL: CMD_AF did not drive the bus"); errors = errors + 1; end
         check("afmt-bitstream", got[1], 16'h9005);
         af_pcm = 1; af_bs = 0;                 // ...now an LPCM/MP2 track
-        repeat (64) @(negedge clk);   // sampler rotation is 57 cycles
+        repeat (72) @(negedge clk);   // sampler rotation is 57 cycles
         run_xact(16'h007B, 1'b0, drove);
         check("afmt-pcm", got[1], 16'h9003);
         af_pt = 1; af_pcm = 0; af_bs = 0;      // Passthru, nothing playing yet
-        repeat (64) @(negedge clk);   // sampler rotation is 57 cycles
+        repeat (72) @(negedge clk);   // sampler rotation is 57 cycles
         run_xact(16'h007B, 1'b0, drove);
         check("afmt-idle", got[1], 16'h9001);
         af_pt = 0; af_pcm = 0; af_bs = 0;      // back to Decode
-        repeat (64) @(negedge clk);   // sampler rotation is 57 cycles
+        repeat (72) @(negedge clk);   // sampler rotation is 57 cycles
         run_xact(16'h007B, 1'b0, drove);
         check("afmt-decode", got[1], 16'h9000);
         // ---- [5b] the DVD-remote request fields share this word -----------
@@ -166,29 +176,45 @@ module dvd_telem_tb;
         // like a bitstream session, or vice versa.
         $display("[5b] CMD_AF also carries the Eject/Volume requests");
         rq_ej = 1; rq_up = 4'd0; rq_dn = 4'd0;
-        repeat (64) @(negedge clk);
+        repeat (72) @(negedge clk);
         run_xact(16'h007B, 1'b0, drove);
         check("rq eject toggle -> bit 3", got[1], 16'h9008);
         rq_ej = 0; rq_up = 4'd5; rq_dn = 4'd0;
-        repeat (64) @(negedge clk);
+        repeat (72) @(negedge clk);
         run_xact(16'h007B, 1'b0, drove);
         check("rq vol-up 5 -> bits 7:4", got[1], 16'h9050);
         rq_up = 4'd0; rq_dn = 4'd9;
-        repeat (64) @(negedge clk);
+        repeat (72) @(negedge clk);
         run_xact(16'h007B, 1'b0, drove);
         check("rq vol-down 9 -> bits 11:8", got[1], 16'h9900);
         // All at once, WITH a live bitstream session: the fields must coexist.
         rq_ej = 1; rq_up = 4'd15; rq_dn = 4'd15;
         af_pt = 1; af_bs = 1;
-        repeat (64) @(negedge clk);
+        repeat (72) @(negedge clk);
         run_xact(16'h007B, 1'b0, drove);
         check("all fields together", got[1], 16'h9FFD);
         rq_ej = 0; rq_up = 4'd0; rq_dn = 4'd0; af_pt = 0; af_bs = 0;
-        repeat (64) @(negedge clk);
+        repeat (72) @(negedge clk);
 
         // ...and the diagnostic snapshot is untouched by any of it.
         run_xact(16'h007A, 1'b0, drove);
         check("0x7A still reports counters", got[1], 16'hAAAA);
+
+        $display("[6] words 11..20: phase words, DUTY_MAGIC, dec_duty counters");
+        check("disp_lag",    got[11], 16'hB1B1);
+        check("play_err",    got[12], 16'hB2B2);
+        check("av_drift",    got[13], 16'hB3B3);
+        check("sched_flags", got[14], 16'hB4B4);
+        check("sched_dur",   got[15], 16'hB5B5);
+        check("DUTY_MAGIC",  got[16], 16'hDD01);
+        check("dec_disp",    got[17], 16'hC1C1);
+        check("dec_starve",  got[18], 16'hC2C2);
+        check("dec_back",    got[19], 16'hC3C3);
+        check("dec_ref",     got[20], 16'hC4C4);
+        // the duty words are snapshotted atomically like the rest
+        dec_disp = 16'h0101; repeat (72) @(negedge clk);
+        run_xact(16'h007A, 1'b0, drove);
+        check("dec_disp follows its input", got[17], 16'h0101);
 
         if (errors == 0) $display("dvd_telem_tb: ALL GREEN");
         else             $display("dvd_telem_tb: FAILURES");

@@ -768,94 +768,244 @@ def cmd_capture(args):
     return 0
 
 
-def cmd_telem(args):
-    """Read the core's pacing counters (dvd/dvd_telem.sv -> dvd_ctl -> JSON).
+# Highest rate each counter can physically reach, per second. A per-row delta
+# above twice this over the row's dt is not a 16-bit wrap -- the counter was
+# RESET mid-window, and unwrapping it as a wrap invents up to 65535 counts.
+# That is not hypothetical: aud_play is zeroed by every seek, ~keep_vbuf jump,
+# mode switch and non-seamless re-anchor (flush_ctl.sv aud_rst_n), and a
+# Thayer's Quest window read "67 kHz" audio that way (docs/decode_pacing.md).
+# The counters live in three reset domains, so each is judged on its own:
+#   refreshes                        reset_n only (never resets in play)
+#   pickups / lates / drops          sync_rst: mount, ~keep_vbuf jump, watchdog
+#   aud_play / aud_gate              aud_rst_n: seek, jump, mode switch, re-anchor
+TELEM_MAX_RATE = {
+    'refreshes': 61.0,          # 59.94 Hz raster is the fastest
+    'pickups':   61.0,          # at most one per refresh
+    'lates':     125.0,         # late_ext counts a field-path miss twice
+    'drops':     125.0,         # a field pair drop acks per field
+    'aud_play':  48000 / 16.0 * 1.01,   # 48 kHz NCO, prescaled by 16
+    'aud_gate':  100.0,         # drain-gate closures; generous
+    # dec_duty (words 17..20, docs/decode_pacing.md): clk_dec cycles / 4096, so at
+    # 100 % duty 81e6/4096 = 19775/s. Pin-reset only, so a reset here is a bug.
+    'dec_disp':   20500.0,
+    'dec_starve': 20500.0,
+    'dec_back':   20500.0,
+    'dec_ref':    20500.0,
+}
+DEC_CLK_HZ = 81.0e6             # clk_dec (dvd/emu.sv PLL outclk_3)
 
-    `--watch N` samples for N seconds in ONE ssh session and reports rates. The
-    number this exists for is refreshes/pickups: the governor is supposed to
-    show each content frame for exactly show_next refreshes, so for 29.97
-    content on a 59.94 Hz raster it must be 2.000. A measured ~450 ppm
-    video-fast A/V drift says it may be slightly under.
+
+def telem_count(rows, key, max_rate=None):
+    """Sum a 16-bit counter's deltas across rows, excluding RESET intervals.
+
+    Returns (count, valid_span_s, resets). A wrapped delta larger than
+    2 * max_rate * dt + 2 cannot be a wrap and is a reset; that interval is
+    dropped from BOTH the count and the span, so the rate is taken over the
+    time the counter was trustworthy. With max_rate None this is the old
+    plain modulo-65536 unwrap (kept for the test's mutation arm).
     """
-    if not args.watch:
-        _, out = ssh('cat /tmp/dvd_telem.json 2>/dev/null\n')
-        if not out.strip():
-            sys.exit('mister: no telemetry. Needs a core build with dvd_telem '
-                     'and a Main with dvd_ctl (mister.py state).')
-        print(out.strip())
-        return 0
+    total, span, resets = 0, 0.0, 0
+    for a, b in zip(rows, rows[1:]):
+        d = (b[key] - a[key]) & 0xFFFF
+        dt = b['t'] - a['t']
+        if max_rate is not None and d > 2 * max_rate * max(dt, 0.0) + 2:
+            resets += 1
+            continue
+        total += d
+        span += dt
+    return total, span, resets
 
-    n = int(args.watch / 0.5)
-    _, out = ssh(f'for i in $(seq 1 {n}); do cat /tmp/dvd_telem.json 2>/dev/null; '
-                 f'sleep 0.5; done\n', timeout=args.watch + 60)
-    rows = []
-    for line in out.splitlines():
-        line = line.strip()
-        if line.startswith('{'):
-            try:
-                rows.append(json.loads(line))
-            except ValueError:
-                pass
-    if len(rows) < 4:
-        sys.exit(f'mister: only {len(rows)} telemetry samples -- is the core playing?')
 
-    def unwrap(key):
-        """16-bit counters wrap; sum the deltas modulo 65536."""
-        total, prev = 0, rows[0][key]
-        for r in rows[1:]:
-            total += (r[key] - prev) & 0xFFFF
-            prev = r[key]
-        return total
+def _flag(r, name):
+    return int(r.get('flags', {}).get(name, 0))
 
+
+def _mode(vals):
+    return max(set(vals), key=vals.count) if vals else None
+
+
+def _median(vals):
+    s = sorted(vals)
+    return s[len(s) // 2] if s else None
+
+
+def telem_summary(rows):
+    """Reduce a list of dvd_telem.json rows to one window's figures (a dict).
+
+    Pure: no I/O, so tools/test_telem_unwrap.py can drive it with synthetic rows.
+    """
     span = rows[-1]['t'] - rows[0]['t']
-    refr, pick = unwrap('refreshes'), unwrap('pickups')
-    late, drop = unwrap('lates'), unwrap('drops')
-    errs = [r['vid_err'] for r in rows]
-    print(f'telemetry over {span:.1f} s ({len(rows)} samples)')
-    print(f'  refreshes {refr:6d}  ({refr / span:7.3f}/s)')
-    print(f'  pickups   {pick:6d}  ({pick / span:7.3f}/s)')
-    if pick:
-        print(f'  refreshes per picked-up frame: {refr / pick:.5f}')
+    s = {'span_s': span, 'samples': len(rows), 'resets': {}, 'rate': {}, 'count': {}}
+    for key, mx in TELEM_MAX_RATE.items():
+        if key not in rows[0]:
+            continue
+        n, sp, rs = telem_count(rows, key, mx)
+        s['count'][key] = n
+        s['resets'][key] = rs
+        s['rate'][key] = n / sp if sp > 0 else 0.0
+    r = s['rate']
+    s['raster_hz'] = r.get('refreshes', 0.0)
+    s['content_fps'] = r.get('pickups', 0.0)
+    s['audio_hz'] = r['aud_play'] * 16 if 'aud_play' in r else None
+    s['lates_per_s'] = r.get('lates', 0.0)
+    s['drops_per_s'] = r.get('drops', 0.0)
+    s['gate_closures'] = s['count'].get('aud_gate')
+    # Where the decoder's time went, as fractions of clk_dec time. The four VLD
+    # classes are exclusive (dec_duty_tb), so active is what is left; ref is
+    # independent (a motion-comp stall, overlapping the VLD classes).
+    if 'dec_disp' in r:
+        d = {k[4:]: r[k] * 4096 / DEC_CLK_HZ for k in ('dec_disp', 'dec_starve', 'dec_back', 'dec_ref')}
+        d['active'] = 1.0 - d['disp'] - d['starve'] - d['back']
+        s['duty'] = d
+    # What the window actually measured -- a cell must assert its own coding
+    # and domain from these, not from what the disc was chosen to contain.
+    s['sched'] = {k: _mode([x.get(k) for x in rows if k in x])
+                  for k in ('sched_frc', 'sched_ps', 'sched_pf', 'sched_tff', 'sched_rff')}
+    s['frac'] = {f: sum(_flag(x, f) for x in rows) / len(rows)
+                 for f in ('menu', 'still', 'video_live', 'pause', 'blend', 'bob')}
+    s['tagged'] = {k: _mode([x.get(k) for x in rows if k in x])
+                   for k in ('first_tagged', 'first_seen', 'prov_seen')}
+    # disp_lag / av_drift are [19:4] slices of a wider difference: +-5825 ms is
+    # the whole range, so a value near it has probably aliased.
+    for k in ('disp_lag_ms', 'av_drift_ms', 'play_err_ms'):
+        vals = [x[k] for x in rows if k in x]
+        s[k] = {'median': _median(vals),
+                'alias_suspect': any(abs(v) > 5000 for v in vals)}
+    # word 5 is {skip[7:0], catch[3:0], rearm[3:0]} (the JSON key kept its old
+    # name, vid_err, and dvd_ctl decodes it SIGNED).
+    # word 5 lives in the aud_rst_n domain with aud_play: across a reset its
+    # difference is meaningless, so it is only reported on a reset-free window.
+    if 'vid_err' in rows[0] and not s['resets'].get('aud_play'):
+        w0, w1 = rows[0]['vid_err'] & 0xFFFF, rows[-1]['vid_err'] & 0xFFFF
+        s['aud_disc'] = {'skip': ((w1 >> 8) - (w0 >> 8)) & 0xFF,
+                         'catch': (((w1 >> 4) & 0xF) - ((w0 >> 4) & 0xF)) & 0xF,
+                         'rearm': ((w1 & 0xF) - (w0 & 0xF)) & 0xF}
+    return s
+
+
+def telem_print(s):
+    span = s['span_s']
+    print(f"telemetry over {span:.1f} s ({s['samples']} samples)")
+    rs = {k: v for k, v in s['resets'].items() if v}
+    if rs:
+        print(f'  ⚠ counter RESETS mid-window (interval excluded from that rate): {rs}')
+    c = s['count']
+    print(f"  refreshes {c.get('refreshes', 0):6d}  ({s['raster_hz']:7.3f}/s)")
+    print(f"  pickups   {c.get('pickups', 0):6d}  ({s['content_fps']:7.3f}/s)")
+    if s['content_fps']:
+        print(f"  refreshes per picked-up frame: {s['raster_hz'] / s['content_fps']:.5f}")
     # pickups/s IS the content display rate, and comparing it to the rate the
     # disc was authored at is the whole measurement -- no assumed ratio needed.
-    # (A ratio of 2.000 only holds for 29.97 progressive; 23.976 film displayed
-    # via 3:2 on a 59.94 raster averages 2.5.)
-    rate = pick / span
+    rate = s['content_fps']
     print(f'  content display rate: {rate:.5f} fps')
     for name, ideal in (('29.97 (30000/1001)', 30000 / 1001.0),
                         ('23.976 (24000/1001)', 24000 / 1001.0),
                         ('25 (PAL)', 25.0)):
         if abs(rate - ideal) / ideal < 0.02:
             print(f'    vs authored {name}: {(rate / ideal - 1) * 1e6:+.0f} ppm')
-    rrate = refr / span
+    rrate = s['raster_hz']
     print(f'  raster refresh rate:  {rrate:.5f} Hz')
     for name, ideal in (('59.94', 60000 / 1001.0), ('50', 50.0),
-                        ('23.976', 24000 / 1001.0)):
+                        ('23.976', 24000 / 1001.0), ('25', 25.0)):
         if abs(rrate - ideal) / ideal < 0.02:
             print(f'    vs nominal {name} Hz: {(rrate / ideal - 1) * 1e6:+.0f} ppm')
-    # --- audio, and the ratio that needs no external reference ------------
-    if 'aud_play' in rows[0]:
-        samples = unwrap('aud_play') * 16          # counter is prescaled by 16
-        gates = unwrap('aud_gate')
-        print(f'  audio samples {samples}  ({samples / span:9.3f} Hz)')
-        print(f'    vs nominal 48000 Hz: {(samples / span / 48000 - 1) * 1e6:+.0f} ppm')
-        if refr:
-            per = samples / refr
-            ideal = 48000.0 / (60000 / 1001.0)     # 800.8008 samples per refresh
-            print(f'  samples per raster refresh: {per:.4f}  (ideal {ideal:.4f})')
-            print(f'    -> AUDIO vs RASTER: {(per / ideal - 1) * 1e6:+.0f} ppm'
-                  '   <-- internal ratio, no external clock')
-        print(f'  drain-gate closures: {gates}'
-              + ('   <-- audio is being held' if gates else ''))
-    print(f'  lates {late} ({late / span:.2f}/s)   drops {drop} ({drop / span:.2f}/s)')
-    print(f'  vid_err {min(errs):+d} .. {max(errs):+d} refreshes')
+    if s['audio_hz'] is not None:
+        ahz = s['audio_hz']
+        print(f'  audio rate {ahz:9.3f} Hz')
+        print(f'    vs nominal 48000 Hz: {(ahz / 48000 - 1) * 1e6:+.0f} ppm'
+              '  (reads 44.1/32 kHz on MP2 / CD-DA by design)')
+        if rrate:
+            per, ideal = ahz / rrate, 48000.0 / rrate
+            print(f'  samples per raster refresh: {per:.4f}  (48 kHz ideal on this '
+                  f'raster {ideal:.4f})')
+        g = s['gate_closures']
+        print(f'  drain-gate closures: {g}' + ('   <-- audio is being held' if g else ''))
+    print(f"  lates {c.get('lates', 0)} ({s['lates_per_s']:.2f}/s)   "
+          f"drops {c.get('drops', 0)} ({s['drops_per_s']:.2f}/s)")
+    if 'aud_disc' in s:
+        print(f"  aud_disc (word 5, JSON 'vid_err'): {s['aud_disc']}")
+    if 'duty' in s:
+        d = s['duty']
+        print(f"  decoder time: parked-on-display {d['disp']:.3f}  starved {d['starve']:.3f}  "
+              f"pipe-stalled {d['back']:.3f}  active {d['active']:.3f}   ref-wait {d['ref']:.3f}")
+    sc = s['sched']
+    print(f"  sched (modal): frc={sc['sched_frc']} ps={sc['sched_ps']} pf={sc['sched_pf']} "
+          f"tff={sc['sched_tff']} rff={sc['sched_rff']}   tagged={s['tagged']}")
+    print('  flags (fraction of samples): '
+          + ' '.join(f'{k}={v:.2f}' for k, v in s['frac'].items()))
+    for k in ('disp_lag_ms', 'av_drift_ms', 'play_err_ms'):
+        m = s[k]
+        if m['median'] is not None:
+            print(f"  {k} median {m['median']:+.1f}"
+                  + ('   ⚠ |v|>5000 seen: [19:4] slice, likely aliased' if m['alias_suspect'] else ''))
+
+
+def _flatten(r):
+    out = {k: v for k, v in r.items() if k != 'flags'}
+    for k, v in r.get('flags', {}).items():
+        out[f'flags.{k}'] = v
+    return out
+
+
+def cmd_telem(args):
+    """Read the core's pacing counters (dvd/dvd_telem.sv -> dvd_ctl -> JSON).
+
+    `--watch N` samples for N seconds in ONE ssh session and reports rates;
+    `--from FILE` summarises rows already captured (a launch --telem-log JSONL,
+    or a --jsonl from an earlier watch) without touching the rig. Counter
+    RESETS are detected and excluded rather than unwrapped (TELEM_MAX_RATE).
+    """
+    if args.src:
+        rows = []
+        with open(args.src) as f:
+            for line in f:
+                line = line.strip()
+                if line.startswith('{'):
+                    try:
+                        rows.append(json.loads(line))
+                    except ValueError:
+                        pass
+    elif not args.watch:
+        _, out = ssh('cat /tmp/dvd_telem.json 2>/dev/null\n')
+        if not out.strip():
+            sys.exit('mister: no telemetry. Needs a core build with dvd_telem '
+                     'and a Main with dvd_ctl (mister.py state).')
+        print(out.strip())
+        return 0
+    else:
+        n = int(args.watch / 0.5)
+        _, out = ssh(f'for i in $(seq 1 {n}); do cat /tmp/dvd_telem.json 2>/dev/null; '
+                     f'sleep 0.5; done\n', timeout=args.watch + 60)
+        rows = []
+        for line in out.splitlines():
+            line = line.strip()
+            if line.startswith('{'):
+                try:
+                    rows.append(json.loads(line))
+                except ValueError:
+                    pass
+    if len(rows) < 4:
+        sys.exit(f'mister: only {len(rows)} telemetry samples -- is the core playing?')
+
+    s = telem_summary(rows)
+    telem_print(s)
     if args.csv:
-        cols = [k for k in rows[0] if k != 'flags']      # dict order, not a set
+        flat = [_flatten(r) for r in rows]
+        cols = list(flat[0])                               # dict order, not a set
         with open(args.csv, 'w') as f:
             f.write(','.join(cols) + '\n')
-            for r in rows:
-                f.write(','.join(str(r[k]) for k in cols) + '\n')
+            for r in flat:
+                f.write(','.join(str(r.get(k, '')) for k in cols) + '\n')
         print(f'  wrote {args.csv}')
+    if args.jsonl:
+        with open(args.jsonl, 'w') as f:
+            for r in rows:
+                f.write(json.dumps(r) + '\n')
+        print(f'  wrote {args.jsonl}')
+    if args.json:
+        with open(args.json, 'w') as f:
+            json.dump(s, f, indent=1)
+        print(f'  wrote {args.json}')
     return 0
 
 
@@ -982,7 +1132,10 @@ def main():
 
     p = sub.add_parser('telem', help="read the core's pacing counters")
     p.add_argument('--watch', type=float, help='sample for N seconds and report rates')
-    p.add_argument('--csv')
+    p.add_argument('--csv', help='raw rows, flags flattened')
+    p.add_argument('--jsonl', help='raw rows as captured (re-readable with --from)')
+    p.add_argument('--json', help='the window summary, machine-readable')
+    p.add_argument('--from', dest='src', help='summarise a saved JSONL instead of the rig')
     p.set_defaults(fn=cmd_telem)
 
     p = sub.add_parser('osd', help='set an OSD option live (no relaunch)')
