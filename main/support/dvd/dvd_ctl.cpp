@@ -39,6 +39,10 @@
 // follow. A core built before them answers strobes past 15 with word 15 AGAIN
 // (its word counter saturates), so 17..20 are meaningless without this marker.
 #define DVD_TELEM_DUTY_MAGIC 0xDD01
+// Word 21 of a core with dec_duty's per-picture words (docs/decode_pacing.md §7
+// "Instrument"): words 22..24 follow. A separate marker, so word 16 keeps meaning
+// what an older Main expects; cores without it answer 0 past word 20.
+#define DVD_TELEM_PIC_MAGIC 0xDD02
 
 #define TELEM_PERIOD_MS 250
 
@@ -76,9 +80,9 @@ static void telem_read()
 	// Words 11-13 (A/V phase) were added with the PTS-scheduled display work.
 	// Reading them from an OLDER core is safe: dvd_telem's readout mux answers
 	// 16'd0 for any index it does not implement, so they read 0, not garbage.
-	uint16_t w[21];
+	uint16_t w[25];
 	w[0] = spi_uio_cmd_cont(UIO_DVD_TELEM);
-	for (int i = 1; i < 21; i++) w[i] = spi_w(0);
+	for (int i = 1; i < 25; i++) w[i] = spi_w(0);
 	DisableIO();
 
 	if (w[0] != DVD_TELEM_MAGIC) return;      // no bridge in this core build
@@ -98,11 +102,21 @@ static void telem_read()
 	// stalled by the decode pipe, recon waiting on reference pixels. 16-bit,
 	// they WRAP; the host differences them. Absent (not zero) on a core
 	// without them, so a reader cannot mistake "old core" for "idle decoder".
-	char duty[128] = "";
+	// Per picture (words 22..24, behind the word-21 marker): the longest single
+	// picture decode in the core's last 0.83 s window (cycles/4096, a LEVEL, not a
+	// counter), and two wrapping counters -- pictures decoded, and those that took
+	// longer than one frame period. Absent on a core without them.
+	char duty[224] = "";
 	if (w[16] == DVD_TELEM_DUTY_MAGIC)
-		snprintf(duty, sizeof(duty),
+	{
+		int n = snprintf(duty, sizeof(duty),
 			"\"dec_disp\":%u,\"dec_starve\":%u,\"dec_back\":%u,\"dec_ref\":%u,",
 			w[17], w[18], w[19], w[20]);
+		if (w[21] == DVD_TELEM_PIC_MAGIC && n > 0 && n < (int)sizeof(duty))
+			snprintf(duty + n, sizeof(duty) - n,
+				"\"pic_max\":%u,\"pic_n\":%u,\"pic_over\":%u,",
+				w[22], w[23], w[24]);
+	}
 	fprintf(f,
 		"{\"t\":%.6f,%s\"refreshes\":%u,\"pickups\":%u,\"lates\":%u,"
 		"\"drops\":%u,\"vid_err\":%d,\"debt\":%d,\"drop_req\":%u,"

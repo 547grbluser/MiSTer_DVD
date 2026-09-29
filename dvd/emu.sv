@@ -1190,6 +1190,10 @@ dvd_telem dvd_telem_inst (
     .dec_starve (core_duty_starve),
     .dec_back   (core_duty_back),
     .dec_ref    (core_duty_ref),
+    // words 21..24, clk_dec: dec_duty per picture (docs/decode_pacing.md §7 "Instrument")
+    .dec_pic_max  (core_pic_max),
+    .dec_pic_n    (core_pic_n),
+    .dec_pic_over (core_pic_over),
     // CMD_AF: what the audio wire is really carrying, so Main can put the ADV7513
     // into PCM mode for an LPCM/MP2 track in Passthru.
     .af_passthru    (pass_mode),
@@ -5128,6 +5132,9 @@ mpeg2video mpeg2video_inst (
     .dbg_prof1       (core_duty_starve), // no bitstream
     .dbg_prof2       (core_duty_back),   // parse stalled by the decode pipeline
     .dbg_prof3       (core_duty_ref),    // recon waiting on reference pixels
+    .dbg_pic_max     (core_pic_max),     // longest picture decode, last window (telemetry word 22)
+    .dbg_pic_n       (core_pic_n),       // pictures decoded (word 23)
+    .dbg_pic_over    (core_pic_over),    // ... over one frame period (word 24)
     // DVD-FORK (line-21 CC): EIA-608 pairs sniffed from user_data, in clk_dec.
     // They cross to clk_sys inside dvd/cc_line21.sv's own fifo_dc.
     .cc_pair_valid     (core_cc_valid),
@@ -5186,6 +5193,7 @@ assign film_det_pal_sync  = film_det_pal_s2;
 // dvd_telem (tools/mister.py telem). See docs/motcomp_throughput.md.
 wire [15:0] core_frames_late, core_frames_dropped;
 wire [15:0] core_pickups;   // DVD-FORK (telemetry): content frames picked up for display (clk_dec, free-running)
+wire [15:0] core_pic_max, core_pic_n, core_pic_over;   // DVD-FORK DEBUG (dec_duty per picture): telemetry words 22..24
 wire [15:0] core_duty_disp, core_duty_starve, core_duty_back, core_duty_ref;   // DVD-FORK DEBUG (dec_duty): clk_dec cycles/4096, telemetry words 16..19
 wire [15:0] aud_play_cnt;   // DVD-FORK (telemetry): audio play ticks/16 (clk_sys, free-running)
 wire [15:0] aud_gate_cnt;   // DVD-FORK (telemetry): audio drain-gate closures (clk_sys)

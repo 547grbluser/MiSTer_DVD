@@ -89,6 +89,23 @@ s = mister.telem_summary(rows_for(30, aud_reset_at=10.0, aud0=20000, dup=True))
 check('audio ~48 kHz with duplicates', near(s['audio_hz'], 48000, 0.01), f"{s['audio_hz']:.0f}")
 check('reset still counted once', s['resets']['aud_play'] == 1, str(s['resets']))
 
+print('== [4] per picture: pic_max is a LEVEL, pic_n / pic_over are counters ==')
+rows = rows_for(30)
+for i, r in enumerate(rows):
+    el = r['t'] - rows[0]['t']
+    r['pic_n'] = (65530 + int(el * 30000 / 1001)) & 0xFFFF      # wraps a few rows in
+    r['pic_over'] = int(el * 0.5) & 0xFFFF                     # one over-budget picture / 2 s
+    r['pic_max'] = 700 if 10.0 <= el < 11.0 else 300           # one 0.83 s window reads long
+s = mister.telem_summary(rows)
+p = s.get('pic', {})
+check('pic present', bool(p))
+check('longest = the peak level, in ms', abs(p.get('max_ms', 0) - 700 * 4096 / 81e6 * 1000) < 0.01,
+      f"{p.get('max_ms', 0):.2f} ms")
+check('pictures across the wrap', abs(p.get('n', 0) - 30 * 30000 / 1001) <= 2, str(p.get('n')))
+check('over-budget rate', near(p.get('over_per_s', 0), 0.5, 0.05), f"{p.get('over_per_s', 0):.2f}/s")
+check('over fraction', near(p.get('over_frac', 1), 15 / (30 * 30000 / 1001), 0.1), f"{p.get('over_frac', 0):.4f}")
+check('a core without the words has no pic block', 'pic' not in mister.telem_summary(rows_for(30)))
+
 print('== RED: the old plain unwrap reports the phantom rate ==')
 rows = rows_for(30, aud_reset_at=10.0, aud0=20000)
 n, sp, _ = mister.telem_count(rows, 'aud_play', None)
