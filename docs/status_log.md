@@ -22,6 +22,21 @@ predate later confirmations; the `CLAUDE.md` index carries the reconciled status
 
 ## Hardware status (THIS fork, verified 2026-06-21)
 
+- ✅ **PER-PICTURE DECODE-TIME INSTRUMENT (2026-09-29,
+  ✅ MERGED PR #140; sim-gated, HW DATA TAKEN 2026-09-29).**
+  ★ **§6c answered:** Thayer's boot FMV on Interlaced reads 0 lates from its first
+  picture for two minutes, in two clean launches. 0 of ~3,300 pictures exceeded one frame
+  period (longest 21.1 ms / 33.4). The first minute's "lates" are all counted during the
+  First Play still (`flags.still`), one per refresh. **F4 is not justified.**
+  - **Why:** the duty words are averages, and §6c's lates come from individual slow
+    pictures that a 0.5 s row cannot resolve. It decides whether F4 is worth building.
+  - **What:** telemetry words 21–24, behind a second marker (`0xDD02`): the longest
+    single-picture decode per 0.83 s window, pictures decoded, and pictures over one
+    frame period of the content (exact at 81 MHz).
+  - **Gates:** `run_telem.sh` all green, M5–M8. Trap: an `always @*` threshold read X
+    in iverilog, since its input never changes after time zero.
+  - Detail: `docs/decode_pacing.md` §7 "Instrument".
+
 - ✅ **DECODE PACING F2: THE DISPLAY REUSES CHROMA ROWS (2026-09-29,
   ✅ MERGED PR #139, bit-exact in sim, HW-MEASURED 2026-09-29).**
   ★ **Progressive lates now read 0 on every disc measured:** ROGER 3.58 → 0 (control arm:

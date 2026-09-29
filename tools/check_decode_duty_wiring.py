@@ -24,7 +24,12 @@ WHAT IS PINNED
   dvd_telem.sv   src[17..20] = dec_{disp,starve,back,ref}; word 16 = DUTY_MAGIC.
   DVD.qsf        names dvd/dec_duty.sv (a file it does not name is invisible to
                  Quartus and to tools/lint_undriven.sh).
-  dvd_ctl.cpp    reads 21 words and trusts 17..20 only behind the marker.
+  dvd_ctl.cpp    reads 25 words; trusts 17..20 only behind the word-16 marker and
+                 22..24 only behind the word-21 marker.
+  PER PICTURE (docs/decode_pacing.md §7 "Instrument"): dec_duty .frame_rate_code <-
+  the decoder's frame_rate_code (the over-budget threshold); pic_max/pic_n/pic_over ->
+  dbg_pic_* -> core_pic_* -> dvd_telem .dec_pic_* -> src[21..23] -> words 22..24,
+  word 21 = PIC_MAGIC.
 
 strip_comments() first; every test is over tokens; a missing instance is a named
 FAIL, never a skip.
@@ -87,8 +92,13 @@ def main():
     pin(dd, 'dec_duty', 'vld_en', 'vld_en')
     pin(dd, 'dec_duty', 'ref_stall', 'recon_ref_stall')
     for port, net in (('disp_cnt', 'dbg_prof0'), ('starve_cnt', 'dbg_prof1'),
-                      ('back_cnt', 'dbg_prof2'), ('ref_cnt', 'dbg_prof3')):
+                      ('back_cnt', 'dbg_prof2'), ('ref_cnt', 'dbg_prof3'),
+                      ('pic_max', 'dbg_pic_max'), ('pic_n', 'dbg_pic_n'),
+                      ('pic_over', 'dbg_pic_over')):
         pin(dd, 'dec_duty', port, net)
+    pin(dd, 'dec_duty', 'frame_rate_code', 'frame_rate_code')
+    vl = connections(mv, 'vld')
+    pin(vl, 'vld', 'frame_rate_code', 'frame_rate_code')
     mco = connections(mv, 'motcomp')
     pb = None if dd is None else norm(dd.get('picbuf_busy'))
     pin(mco, 'motcomp', 'dbg_picbuf_busy', pb or '<dec_duty.picbuf_busy>')
@@ -106,6 +116,9 @@ def main():
     for i, cls in enumerate(('disp', 'starve', 'back', 'ref')):
         pin(mp, 'mpeg2video', f'dbg_prof{i}', f'core_duty_{cls}')
         pin(tl, 'dvd_telem', f'dec_{cls}', f'core_duty_{cls}')
+    for f in ('max', 'n', 'over'):
+        pin(mp, 'mpeg2video', f'dbg_pic_{f}', f'core_pic_{f}')
+        pin(tl, 'dvd_telem', f'dec_pic_{f}', f'core_pic_{f}')
 
     print('== dvd_telem.sv ==')
     te = rd(a.telem)
@@ -114,6 +127,16 @@ def main():
            f'src[{i}] = dec_{cls}')
     ok(re.search(r"5'd16\s*:\s*dout_r\s*<=\s*DUTY_MAGIC\s*;", te) is not None,
        'word 16 = DUTY_MAGIC')
+    for i, f in zip(range(21, 24), ('max', 'n', 'over')):
+        ok(re.search(r'\bassign\s+src\[%d\]\s*=\s*dec_pic_%s\s*;' % (i, f), te) is not None,
+           f'src[{i}] = dec_pic_{f}')
+    ok(re.search(r"5'd21\s*:\s*dout_r\s*<=\s*PIC_MAGIC\s*;", te) is not None, 'word 21 = PIC_MAGIC')
+    for w, qn in ((22, 'q22'), (23, 'q23'), (24, 'q24')):
+        ok(re.search(r"5'd%d\s*:\s*dout_r\s*<=\s*%s\s*;" % (w, qn), te) is not None, f'word {w} = {qn}')
+    for qn, sn, i in (('q22', 's_pmax', 21), ('q23', 's_pn', 22), ('q24', 's_pover', 23)):
+        ok(re.search(r'\b%s\s*<=\s*%s\s*;' % (qn, sn), te) is not None
+           and re.search(r'\b%s\s*=\s*q\[%d\]' % (sn, i), te) is not None,
+           f'{qn} <= {sn} = q[{i}]')
 
     print('== DVD.qsf ==')
     q = open(a.qsf).read()
@@ -122,7 +145,10 @@ def main():
 
     print('== dvd_ctl.cpp ==')
     c = strip_comments(open(a.ctl).read())
-    ok(re.search(r'uint16_t\s+w\[\s*21\s*\]', c) is not None, 'reads 21 words')
+    ok(re.search(r'uint16_t\s+w\[\s*25\s*\]', c) is not None, 'reads 25 words')
+    ok(re.search(r'w\[21\]\s*==\s*DVD_TELEM_PIC_MAGIC', c) is not None,
+       'words 22..24 trusted only behind w[21] == DVD_TELEM_PIC_MAGIC')
+    ok(re.search(r'#define\s+DVD_TELEM_PIC_MAGIC\s+0xDD02', c) is not None, 'DVD_TELEM_PIC_MAGIC 0xDD02')
     ok(re.search(r'w\[16\]\s*==\s*DVD_TELEM_DUTY_MAGIC', c) is not None,
        'words 17..20 trusted only behind w[16] == DVD_TELEM_DUTY_MAGIC')
 

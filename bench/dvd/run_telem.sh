@@ -66,6 +66,18 @@ mutate rtl/mpeg2/mpeg2video.v $'.rst(hard_rst),\n    .picbuf_busy(picbuf_busy_db
 if python3 tools/check_decode_duty_wiring.py --mpeg "$mut_tmp/mv.v" >/dev/null 2>&1; then
     echo "  FAIL mutation M4 flush-resets-duty survived the wiring check"; fail=1
 else echo "  ok   mutation M4 flush-resets-duty caught"; fi
+# per picture (docs/decode_pacing.md §7 "Instrument")
+mutate dvd/dec_duty.sv "else if (~picbuf_busy & getbits_valid & ~&c_pic)" \
+       "else if (~picbuf_busy & ~&c_pic)" "$mut_tmp/dd5.sv"
+expect_red_iv "M5 starved-cycles-count-as-decode" "$mut_tmp/dd5.sv" bench/dvd/dec_duty_tb.sv
+mutate dvd/dec_duty.sv "if (c_pic > {5'd0, thr})" "if (c_pic >= {5'd0, thr})" "$mut_tmp/dd6.sv"
+expect_red_iv "M6 exactly-one-period-counts-as-over" "$mut_tmp/dd6.sv" bench/dvd/dec_duty_tb.sv
+mutate dvd/dvd_telem.sv "5'd22:   dout_r <= q22;" "5'd22:   dout_r <= q23;" "$mut_tmp/tl7.sv"
+expect_red_iv "M7 word22-swapped" "$mut_tmp/tl7.sv" bench/dvd/dvd_telem_tb.sv
+mutate dvd/emu.sv ".dec_pic_n    (core_pic_n)," ".dec_pic_n    (core_pic_over)," "$mut_tmp/emu8.sv"
+if python3 tools/check_decode_duty_wiring.py --emu "$mut_tmp/emu8.sv" >/dev/null 2>&1; then
+    echo "  FAIL mutation M8 emu-pic-swap survived the wiring check"; fail=1
+else echo "  ok   mutation M8 emu-pic-swap caught"; fi
 rm -rf "$mut_tmp"
 
 echo "== host tools (no hardware) =="

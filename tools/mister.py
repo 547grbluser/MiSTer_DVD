@@ -791,6 +791,10 @@ TELEM_MAX_RATE = {
     'dec_starve': 20500.0,
     'dec_back':   20500.0,
     'dec_ref':    20500.0,
+    # dec_duty per picture (words 23/24, docs/decode_pacing.md §7 "Instrument"):
+    # at most one picture per refresh; pin-reset only, like the duty words.
+    'pic_n':      125.0,
+    'pic_over':   125.0,
 }
 DEC_CLK_HZ = 81.0e6             # clk_dec (dvd/emu.sv PLL outclk_3)
 
@@ -857,6 +861,16 @@ def telem_summary(rows):
         d = {k[4:]: r[k] * 4096 / DEC_CLK_HZ for k in ('dec_disp', 'dec_starve', 'dec_back', 'dec_ref')}
         d['active'] = 1.0 - d['disp'] - d['starve'] - d['back']
         s['duty'] = d
+    # Per picture. pic_max is a LEVEL (the core's longest single-picture decode in
+    # its last completed 0.83 s window), so the window's figure is the max over its
+    # rows, not a difference. over_frac = pictures that took longer than one frame
+    # period of the content / pictures decoded.
+    if 'pic_max' in rows[0]:
+        pm = max(x['pic_max'] for x in rows if 'pic_max' in x)
+        n, o = s['count'].get('pic_n', 0), s['count'].get('pic_over', 0)
+        s['pic'] = {'max_ms': pm * 4096 / DEC_CLK_HZ * 1000.0, 'n': n, 'over': o,
+                    'over_frac': (o / n) if n else 0.0,
+                    'over_per_s': s['rate'].get('pic_over', 0.0)}
     # What the window actually measured -- a cell must assert its own coding
     # and domain from these, not from what the disc was chosen to contain.
     s['sched'] = {k: _mode([x.get(k) for x in rows if k in x])
@@ -928,6 +942,10 @@ def telem_print(s):
         d = s['duty']
         print(f"  decoder time: parked-on-display {d['disp']:.3f}  starved {d['starve']:.3f}  "
               f"pipe-stalled {d['back']:.3f}  active {d['active']:.3f}   ref-wait {d['ref']:.3f}")
+    if 'pic' in s:
+        p = s['pic']
+        print(f"  per picture: longest {p['max_ms']:.1f} ms   over one frame period "
+              f"{p['over']}/{p['n']} ({p['over_per_s']:.2f}/s)")
     sc = s['sched']
     print(f"  sched (modal): frc={sc['sched_frc']} ps={sc['sched_ps']} pf={sc['sched_pf']} "
           f"tff={sc['sched_tff']} rff={sc['sched_rff']}   tagged={s['tagged']}")

@@ -73,6 +73,11 @@ domain) shows 0–1 resets per window and 48 kHz. Also observed and not investig
 
 ### 2c. Other fields that lie if read naively
 
+- **`lates` during a still** (found 2026-09-29): while the VM holds a PGC still
+  (`flags.still = 1`), `lates` rises by one per refresh, although the picture on screen
+  is exactly the one intended. A boot capture of Thayer's First Play counts ~300 "lates"
+  in 5 s this way. Exclude still rows before reading lates as decode lateness.
+
 - **`vid_err`** (the JSON key) is word 5, `{skip[7:0], catch[3:0], rearm[3:0]}`: audio
   discard counters, not a video error. `mister.py` decodes it as `aud_disc`, and only on
   a window without audio resets, since it shares `aud_play`'s reset domain.
@@ -271,7 +276,15 @@ the scarce resource is arbitration occupancy, not bandwidth.
   push many more of them over it.
 - A per-picture maximum is not yet measured (§7, instrument).
 
-### 6c. Open: Interlaced lates in Thayer's boot FMV (labelled hypothesis, not a root cause)
+### 6c. Interlaced lates in Thayer's boot FMV — ✅ resolved 2026-09-29, see the end of this section
+
+**Answer (per-picture instrument, §7):** after F2 the FMV reads **0 lates on Interlaced**
+for two minutes from boot, in two clean launches; **no picture** took longer than one
+frame period (0 of ~3,300; the longest 21.1 ms of a 33.4 ms budget). The only lates left
+are **counted during the disc's First Play still** (`flags.still = 1`, pickups flat, one
+per refresh for ~5 s), which is bookkeeping, not a visible miss. The slow-picture
+hypothesis below is refuted for the post-F2 build. The pre-F2 bursts were the same
+display-read contention as §6b. The original analysis follows, unchanged.
 
 On a clean launch straight into Interlaced (Disc Menus = On), the boot FMV reads
 **3.4 lates/s, then 0.9 lates/s** in the next minute. v0.8.0 is identical (3.39 / 0.89):
@@ -518,13 +531,62 @@ structural fix, not a fallback.
 - **Gates:** `motcomp_picbuf_tb`, `run_field_order.sh`, `run_disp_sched.sh`, plus the
   full stc/pts suite.
 
-**Instrument (next, small, can ride F1's build): the per-picture maximum.**
-- The longest `picbuf_busy`-low stretch per telemetry period (the decode time of the
-  slowest picture) and the count of pictures over one frame period.
-- Spare room: word 16's marker carries a version, so it can grow to 22 words the way
-  17–20 were added.
-- It settles §6c, and it checks each of F1–F4 against the budget directly rather than
-  through lates.
+**Instrument: the per-picture maximum.** ✅ **Built, sim-gated and HW-measured
+2026-09-29** (✅ MERGED PR #140). The result, below: §6c resolved, F4 not justified.
+- **What a picture is:** one `picbuf_busy`-low stretch. `picbuf_busy` falls when the
+  picbuf lets the VLD start a picture and rises at the next picture's header
+  (`update_picture_buffers`, once per frame: a field pair is one picture). Its decode
+  time is the stretch's **non-starved** cycles (back + active, the average "decode ms"
+  above, per picture).
+- **Telemetry words 21–24** (`dvd/dec_duty.sv` → `dvd_telem.sv`), behind a second marker,
+  so a Main that knows only word 16's `DD01` keeps reading 17–20:
+
+  | Word | Field | Meaning |
+  |---|---|---|
+  | 21 | `PIC_MAGIC` | `0xDD02`: words 22–24 exist (older cores answer 0 past word 20) |
+  | 22 | `pic_max` | longest single-picture decode in the last completed 2^26-cycle window (0.83 s, longer than the 250 ms poll), cycles/4096. A level, held a whole window |
+  | 23 | `pic_n` | pictures decoded (wraps) |
+  | 24 | `pic_over` | … whose decode took longer than **one frame period** of the content: `frame_rate_code`'s period as an exact 81 MHz cycle count (29.97 → 2,702,700) |
+
+- **Host:** `dvd_ctl.cpp` reads 25 words and emits `pic_max`/`pic_n`/`pic_over`.
+  `mister.py telem_summary` reduces `pic_max` as a level (the max over the window's rows)
+  and the counters as reset-aware rates, into `s['pic']` = `{max_ms, n, over,
+  over_frac, over_per_s}`. `pacing_matrix.py` prints `picmax` and `over/s` per cell.
+- **A dropped B picture** fires no update, so its skipped parse folds into the previous
+  stretch: the max can read long there, never short.
+- **Gates** (`bench/dvd/run_telem.sh`, all green):
+  - `dec_duty_tb` [6]–[9]: the threshold is exact to the cycle (2,702,700 is not over,
+    2,702,701 is); starved cycles are excluded; the threshold follows
+    `frame_rate_code`; `pic_max` reads 0 until its window closes, then the window's
+    longest picture, then 0 after an empty window;
+  - `dvd_telem_tb` [7]; `test_telem_unwrap` [4]; `check_decode_duty_wiring` (the new
+    seams, `frame_rate_code` from the VLD, both markers in the Main);
+  - mutations M5–M8, each caught by its own arm.
+- **Trap hit on the way:** the threshold was first written as an `always @*` case. The
+  bench holds `frame_rate_code` constant from time zero, iverilog never evaluated the
+  block, and `thr` stayed X, so `pic_over` never counted. It is a continuous assign now.
+- **HW result (2026-09-29, `releases/DVD_pictime_20260929_1432.rbf` = F2 + the
+  instrument; `clk_dec` 89.3 / 87.2 MHz; `dec_duty` 290 ALUT / 243 regs).** Two clean
+  launches of Thayer's boot FMV straight into Interlaced with Disc Menus = On, telemetry
+  logged from before the core loads (`mister.py launch --telem-log`, 130 s):
+
+  | Launch | 0–60 s lates/s | 60–120 s | pic_max | Pictures over one frame period |
+  |---|---|---|---|---|
+  | 1 | 4.99 | **0.00** | 21.1 / 20.6 ms | **0 / 1649**, 0 / 1786 |
+  | 2 | 5.36 | **0.00** | 21.1 / 20.7 ms | **0 / 1501**, 0 / 1794 |
+
+  - **All** of the first minute's lates fall in the 5 s before the FMV starts, while the
+    VM holds the First Play still: `flags.menu = 1, still = 1`, pickups flat at 1, VBUF
+    empty, decoder starved, and `lates` +1 per refresh. From the FMV's first picture to
+    the end of the capture: **0**.
+  - The earlier captures (§6c) started after launch and never saw the still. The
+    sustained FMV lates they did see (up to 58 per 5 s at 40–45 s) are gone.
+  - **Decision: F4 is not justified.** Its premise is single heavy pictures that the
+    one-deep handoff cannot absorb. No picture on this content exceeds 64 % of its budget,
+    and the VLD is parked 54–62 % of the time.
+- **Caveat for every reader of `lates`:** the governor counts a late on every refresh
+  while a PGC **still** holds the picture. Filter `flags.still` before reading a
+  startup or menu window as decode lateness (added to §2c).
 
 **Workarounds available today (manual):**
 - Video Output = **Interlaced** removes these lates on every disc measured.
@@ -544,7 +606,7 @@ structural fix, not a fallback.
 | `tools/pacing_model.py` | the pickup-discipline model (§6b) |
 | `dvd/dec_duty.sv` | where the decoder's time goes (telemetry words 16–20); instrument only, `DVD-FORK DEBUG` |
 | `bench/dvd/dec_duty_tb.sv`, `dvd_telem_tb` [6] | exclusive classes and exact scale; the words in order with every input tied off |
-| `tools/check_decode_duty_wiring.py` | motcomp → mpeg2video → emu → telem → qsf → dvd_ctl |
+| `tools/check_decode_duty_wiring.py` | motcomp → mpeg2video → emu → telem → qsf → dvd_ctl, plus the per-picture words 21–24 |
 | `bench/dvd/run_osd_read.sh`, `tools/check_osd_read_wiring.py` | F1: bit-exact without the OSD reads, 8 → 6 words |
 | `bench/dvd/run_chroma_reuse.sh`, `tools/check_chroma_reuse_wiring.py` | F2: bit-exact chroma row reuse in 14 arms, exact words per scan, M1–M5 |
 | `resample_chain_tb` `+addrhash` / `+weave` / `+croptog` | address-hashed memory, the PIXSUM / RSUM / RQS lines, interlaced content on the progressive raster, a logical-point mid-line crop toggle |

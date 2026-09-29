@@ -62,6 +62,7 @@ module mpeg2video(clk, mem_clk, dot_clk, dot_ce,
              init_cnt_out, sync_rst_out, vbw_almost_full_out,
              dbg_lines_displayed, dbg_first_vpos, dbg_last_vpos,   // DVD-FORK DEBUG (256-line strobe)
              dbg_prof0, dbg_prof1, dbg_prof2, dbg_prof3,           // DVD-FORK DEBUG (dec_duty, docs/decode_pacing.md)
+             dbg_pic_max, dbg_pic_n, dbg_pic_over,             // DVD-FORK DEBUG (dec_duty per picture)
              cc_pair_valid, cc_pair, cc_pair_field,               // DVD-FORK (line-21 CC): EIA-608 pairs from user_data (clk domain)
              vertical_size_out,                                   // DVD-FORK FIX (PAL auto-detect): sequence-header frame height
              horizontal_size_out,                                 // DVD-FORK (CRT anamorphic overlay align): sequence-header frame width
@@ -157,6 +158,10 @@ module mpeg2video(clk, mem_clk, dot_clk, dot_ce,
   output     [15:0]dbg_prof1;            // starve: no bitstream (getbits not valid)
   output     [15:0]dbg_prof2;            // back:   parse stalled by rld/mvec/motcomp
   output     [15:0]dbg_prof3;            // ref:    recon waiting on reference pixels (DDR3)
+  /* DVD-FORK DEBUG (dec_duty per picture, docs/decode_pacing.md §7 "Instrument"). */
+  output     [15:0]dbg_pic_max;          // longest picture decode in the last 0.83 s window, cycles/4096
+  output     [15:0]dbg_pic_n;            // pictures decoded (wraps)
+  output     [15:0]dbg_pic_over;         // ... that took longer than one frame period (wraps)
   /* DVD-FORK FIX (PAL auto-detect): the decoded frame's vertical_size from the MPEG-2
    * sequence header (clk domain). 480 => NTSC, 576 => PAL. emu derives a 1-bit PAL flag
    * and CDC's it to clk_sys to drive the modeline + av_sync + interlace selection. */
@@ -1430,10 +1435,14 @@ module mpeg2video(clk, mem_clk, dot_clk, dot_ce,
     .getbits_valid(getbits_valid),                           // from getbits
     .vld_en(vld_en),                                         // from getbits
     .ref_stall(recon_ref_stall),                             // from motcomp
+    .frame_rate_code(frame_rate_code),                       // from vld (the per-picture threshold)
     .disp_cnt(dbg_prof0),
     .starve_cnt(dbg_prof1),
     .back_cnt(dbg_prof2),
-    .ref_cnt(dbg_prof3)
+    .ref_cnt(dbg_prof3),
+    .pic_max(dbg_pic_max),
+    .pic_n(dbg_pic_n),
+    .pic_over(dbg_pic_over)
     );
 
   /* motion compensation */

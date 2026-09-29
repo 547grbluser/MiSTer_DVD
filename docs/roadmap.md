@@ -657,7 +657,9 @@ HW-confirmed on a real PAL DVD: correct 720×576 geometry, 50 Hz lock, A/V in sy
 1. **F1:** drop the dead OSD display reads (25 % of display requests; the OSD is tied
    off). ✅ MERGED (PR #138), bit-exact in sim, HW-measured 2026-09-29:
    Progressive lates ROGER 9.2→3.8/s, Office 8.2→1.0, Thayer VTS_09 7.3→0.1, MiB 1.4→0.
-2. **Per-picture maximum decode-time instrument.** It can ride F1's build.
+2. **Per-picture maximum decode-time instrument.** ✅ Built, gated and measured
+   2026-09-29, ✅ MERGED (PR #140), telemetry words 21–24. §6c resolved: 0
+   pictures over budget, 0 lates after the First Play still.
 3. **F2:** chroma-row reuse (display 6 → 3 words per macroblock-line on Progressive).
    ✅ Bit-exact in sim, HW-measured 2026-09-29, ✅ MERGED (PR #139): Progressive
    lates 0 on ROGER (3.6), Office (1.0), Thayer VTS_09 and MiB, then on the rest of the
@@ -666,7 +668,9 @@ HW-confirmed on a real PAL DVD: correct 720×576 geometry, 50 Hz lock, A/V in sy
    lates, or for a new display-side master.
 4. **F3:** display reads on the idle `ram2` port, with an explicit write-drain handshake
    at pickup.
-5. **F4:** a deeper output queue (the VLD is parked ~50 %).
+5. **F4:** a deeper output queue (the VLD is parked ~50 %). **Not justified** (2026-09-29):
+   the per-picture instrument found no picture over its frame budget on any measured
+   content. Revisit only if a disc shows `pic_over > 0` beside real lates.
 
 **Also open:** Thayer boot-FMV Interlaced lates (3.4/s, deterministic from boot). Not
 starvation, not the drop loop (Frame Drop Off refuted it). Needs the per-picture

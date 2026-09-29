@@ -48,6 +48,14 @@
 //                               recon waiting on reference pixels (dvd/dec_duty.sv,
 //                               docs/decode_pacing.md). They move at most once per
 //                               4096 clk_dec cycles, so the two-agree sampler holds.
+//     word 21 PIC_MAGIC      -- says words 22..24 exist. A SECOND marker rather than a
+//                               new value at word 16, so a Main that knows only DD01
+//                               keeps reading 17..20; a core built before these words
+//                               answers 0 past word 20 (wcnt is 5 bits), never the marker.
+//     word 22 pic_max        -- longest single-picture decode in the last 0.83 s
+//                               window, cycles/4096 (dec_duty; changes once a window)
+//     word 23 pic_n          -- pictures decoded (wraps)
+//     word 24 pic_over       -- ... that took longer than one frame period (wraps)
 //   Word 11 is the measurement docs/av_sync.md "THE STC IS A CLOCK" is built
 //   on: the picture on SCREEN against the clock the audio is scheduled by. It
 //   is ~0 when the display is scheduled by PTS (Stage 1) and reads the whole
@@ -86,7 +94,8 @@ module dvd_telem #(
     // only on a rig set up for hardware-in-the-loop testing.
     parameter [15:0] CMD_AF = 16'h007B,
     parameter [15:0] MAGIC = 16'hD7D1,
-    parameter [15:0] DUTY_MAGIC = 16'hDD01   // word 16: dec_duty words 17..20 follow
+    parameter [15:0] DUTY_MAGIC = 16'hDD01,  // word 16: dec_duty words 17..20 follow
+    parameter [15:0] PIC_MAGIC  = 16'hDD02   // word 21: dec_duty per-picture words 22..24 follow
 ) (
     input         clk,
 
@@ -121,6 +130,9 @@ module dvd_telem #(
     input  [15:0] dec_starve,            // word 18: no bitstream to parse
     input  [15:0] dec_back,              // word 19: parse stalled by the decode pipeline
     input  [15:0] dec_ref,               // word 20: recon waiting on reference pixels
+    input  [15:0] dec_pic_max,           // word 22: longest picture decode, last window (cycles/4096)
+    input  [15:0] dec_pic_n,             // word 23: pictures decoded
+    input  [15:0] dec_pic_over,          // word 24: ... over one frame period
 
     // --- audio link format (CMD_AF) -------------------------------------
     // What the wire is actually carrying, which is NOT what the OSD bit says: in
@@ -157,14 +169,14 @@ module dvd_telem #(
     // This used to be 19 telem_sync instances, each holding s1/s2/q = three
     // copies of its word (864 flops for 288 bits of data). The filter needs
     // two consecutive samples of ONE source to agree; nothing here changes
-    // faster than ~60 Hz, so one sampler can walk the 19 sources in turn --
-    // sample source n at cycle A, sample it again at cycle B, commit q[n] at
-    // C if the two registered samples agree -- and every q is refreshed every
-    // 57 cycles (2.1 us at 27 MHz) instead of every cycle. Same filter, same
+    // faster than ~60 Hz, so one sampler can walk the sources in turn (19
+    // then; NSRC now) -- sample source n at cycle A, sample it again at cycle
+    // B, commit q[n] at C if the two registered samples agree -- and every q
+    // is refreshed every 3*NSRC cycles (72 = 2.7 us at 27 MHz). Same filter, same
     // registered-sample commit (never the raw asynchronous input), 1/3 the
     // flops. The atomic snapshot below is untouched: q[] is latched together
     // on the command strobe exactly as the 19 outputs were.
-    localparam int NSRC = 21;
+    localparam int NSRC = 24;
     wire [15:0] src [0:NSRC-1];
     assign src[0]  = refreshes;
     assign src[1]  = pickups;
@@ -199,6 +211,9 @@ module dvd_telem #(
     assign src[18] = dec_starve;
     assign src[19] = dec_back;
     assign src[20] = dec_ref;
+    assign src[21] = dec_pic_max;
+    assign src[22] = dec_pic_n;
+    assign src[23] = dec_pic_over;
 
     reg  [4:0]  cur;                        // source being sampled
     reg  [1:0]  sph;                        // 0: sample A, 1: sample B, 2: compare+commit
@@ -231,6 +246,7 @@ module dvd_telem #(
     wire [15:0] s_sfl     = q[14], s_sdu    = q[15];
     wire [15:0] s_afmt    = q[16];
     wire [15:0] s_ddisp   = q[17], s_dstarve = q[18], s_dback = q[19], s_dref = q[20];
+    wire [15:0] s_pmax    = q[21], s_pn      = q[22], s_pover = q[23];
 
     reg  [4:0] wcnt;
     reg        active;
@@ -238,7 +254,7 @@ module dvd_telem #(
 
     // the atomic snapshot
     reg [15:0] q1, q2, q3, q4, q5, q6, q7, q8, q9, q10, q11, q12, q13, q14, q15;
-    reg [15:0] q17, q18, q19, q20;
+    reg [15:0] q17, q18, q19, q20, q22, q23, q24;
     reg [15:0] q_afmt;
     reg        af_sel;
 
@@ -271,6 +287,9 @@ module dvd_telem #(
                 q18 <= s_dstarve;
                 q19 <= s_dback;
                 q20 <= s_dref;
+                q22 <= s_pmax;
+                q23 <= s_pn;
+                q24 <= s_pover;
                 q_afmt <= s_afmt;
                 dout_r <= MAGIC;
             end else begin
@@ -297,6 +316,10 @@ module dvd_telem #(
                     5'd18:   dout_r <= q18;
                     5'd19:   dout_r <= q19;
                     5'd20:   dout_r <= q20;
+                    5'd21:   dout_r <= PIC_MAGIC;
+                    5'd22:   dout_r <= q22;
+                    5'd23:   dout_r <= q23;
+                    5'd24:   dout_r <= q24;
                     default: dout_r <= 16'd0;
                 endcase
             end

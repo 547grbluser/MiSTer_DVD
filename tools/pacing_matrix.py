@@ -155,7 +155,11 @@ def main():
               f"{s['raster_hz']:6.3f} aud {s['audio_hz'] or 0:7.0f} resets "
               f"{sum(s['resets'].values())} ps={s['sched']['sched_ps']} "
               f"pf={s['sched']['sched_pf']} frc={s['sched']['sched_frc']} "
-              f"menu={s['frac']['menu']:.2f} still={s['frac']['still']:.2f}")
+              f"menu={s['frac']['menu']:.2f} still={s['frac']['still']:.2f}"
+              # per picture (a core with dec_duty's words 22..24): the longest single
+              # picture decode, and pictures over one frame period per second
+              + (f" picmax {s['pic']['max_ms']:5.1f}ms over/s {s['pic']['over_per_s']:4.2f}"
+                 if 'pic' in s else ''))
 
     # put the three mode options back to the launch values
     apply(cur, {k: DEFAULTS[k] for k in ('Video Output', 'Film 24p Out', 'Deinterlace')})
