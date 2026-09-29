@@ -95,6 +95,20 @@ module resample_chain_tb;
   // weave). +tff sets top_field_first; +rff sets repeat_first_field (3:2 pulldown
   // 3rd field); +pfr sets progressive_frame (1=film, 0=true interlaced).
   integer il = 0, tff = 0, rff = 0, pfr = 1;
+  // ---- +weave=1 : interlaced content on the PROGRESSIVE raster (F2 gate) ----
+  // progressive_sequence = 0, progressive_frame = +pfr (default 0 here), deinterlace = 1,
+  // interlaced = 0: FRAME scans with INTERLACED chroma upsampling -- what a true-interlaced
+  // disc (ROGER, Office) runs on Video Output = Progressive. +il reaches the interlaced
+  // upsampling only on field scans.
+  integer weave = 0;
+  // ---- +croptog=K : toggle the ADDRGEN's hcrop_en mid-line (F2 gate) ----
+  // Flips the crop seen by resample_addrgen (only -- disp_hstretch keeps its own) when the
+  // address generator opens macroblock 2 of source line K, once per scan: a LOGICAL scan
+  // point, so every build toggles at the same macroblock whatever its request timing. The
+  // cropped window changes the column range mid-line; chroma row reuse must not serve a
+  // row cached under the old range.
+  integer croptog = 0;
+  reg     croptog_st = 1'b0;
   reg     il_disp = 0;   // syncgen interlaced
 
   // ---- +crt=1 : CRT 480i mode (native-width 13.5 MHz CE + N64-model interlace) ----
@@ -227,7 +241,7 @@ module resample_chain_tb;
     .position_out(px_position), .pixel_wr_en(px_wr_en),
     .video_live(), .pickup_hold(1'b0), .pause(1'b0), .step_req(1'b0),
     .raster_par_err(1'b0), .vscale_mode(rs_vscale_mode),              // DVD-FORK (CRT anamorphic vscale: letterbox)
-    .hcrop_en(rs_hcrop_en),                    // DVD-FORK (CRT anamorphic horizontal crop)
+    .hcrop_en(rs_hcrop_en ^ croptog_st),       // DVD-FORK (CRT anamorphic horizontal crop); +croptog flips it
     .sched_due(1'b1),                          // THE STC IS A CLOCK: free-run (every picture due at once) -- pacing is not what this bench measures
     .sched_next_due(1'b1),
     .still_en(1'b0), .blend_en(1'b0), .bob_en(1'b0), .scan_start(), .scan_half()   // pause field still: not exercised here (bench/dvd/pause_still_tb.sv)
@@ -355,6 +369,10 @@ module resample_chain_tb;
   endfunction
 `ifdef OSDR
   defparam resample.OSD_READS = `OSDR;
+`endif
+  // F2 gate (bench/dvd/run_chroma_reuse.sh): CHR=0 builds the F1 structure, the baseline.
+`ifdef CHR
+  defparam resample.CHROMA_REUSE = `CHR;
 `endif
   // ---- BLEND PROOF (+vgrad=S) : vertical gradient with a step > 1 -----------------
   // linetag returns the source line index, which increments by 1 per source line — so a
@@ -720,6 +738,35 @@ module resample_chain_tb;
     if (resample.disp_wr_addr_en)                              rq_words = rq_words + 1;
     if (resample.resample_addrgen.resample_wr_en)              rq_mbl   = rq_mbl + 1;
   end
+  // ---- F2 gate instrument (+addrhash): the RESAMPLE OUTPUT stream, per scan ----
+  // An order-sensitive checksum of every pixel resample emits (y, u, v, position), printed
+  // at each frame-top code. It does not depend on raster timing, so two builds that emit
+  // the same pixels print the same RSUM lines even when their request timing differs.
+  reg  [63:0] rs_sum = 64'd0;
+  integer     rs_n = 0, rs_no = 0;
+  always @(posedge clk) if (rst && addrhash != 0 && px_wr_en) begin
+    if (px_position == 3'b000) begin           // ROW_0_COL_0: a new scan's first pixel
+      if (rs_n > 0) $display("RSUM s%0d %016h n=%0d", rs_no, rs_sum, rs_n);
+      rs_no = rs_no + 1; rs_sum = 64'd0; rs_n = 0;
+    end
+    rs_sum = (rs_sum * 64'd1000003) ^ {37'd0, px_y, px_u, px_v, px_position};
+    rs_n   = rs_n + 1;
+  end
+  // Requests per SCAN, counted from the address generator's request states (one request
+  // each), so a scan's count is exact rather than straddling the memory_address pipeline.
+  integer sq_words = 0, sq_mbl = 0, sq_no = 0;
+  always @(posedge clk) if (rst && addrhash != 0) begin
+    if (resample.resample_addrgen.scan_begin) begin
+      if (sq_mbl > 0) $display("RQS s%0d words=%0d mblines=%0d", sq_no, sq_words, sq_mbl);
+      sq_no = sq_no + 1; sq_words = 0; sq_mbl = 0;
+    end
+    if (resample.resample_addrgen.state >= 4'h5 && resample.resample_addrgen.state <= 4'hc) sq_words = sq_words + 1;
+    if (resample.resample_addrgen.resample_wr_en) sq_mbl = sq_mbl + 1;
+  end
+  always @(posedge clk)
+    if (rst && croptog != 0 && resample.resample_addrgen.state == 4'h7 &&   // STATE_WR_Y_MSB
+        resample.resample_addrgen.disp_y == croptog && resample.resample_addrgen.disp_mb == 8'd2)
+      croptog_st <= ~croptog_st;
   reg v_sync_out_q = 1'b0;
   always @(posedge dot_clk) begin
     if (addrhash != 0 && v_sync_out && ~v_sync_out_q) begin
@@ -794,6 +841,15 @@ module resample_chain_tb;
       V_RES = 12'd512; V_SS = 12'd496; V_SE = 12'd499; V_LEN = 12'd505;
     end
     // ---- interlaced/field mode (native 480i) ----
+    void'($value$plusargs("weave=%d",    weave));
+    void'($value$plusargs("croptog=%d",  croptog));
+    if (weave) begin
+      if (!$value$plusargs("pfr=%d", pfr)) pfr = 0;
+      progressive_sequence = 0;
+      progressive_frame    = pfr[0];
+      deinterlace          = 1;
+      interlaced           = 0;
+    end
     if (il) begin
       progressive_sequence = 0;     // interlaced sequence
       progressive_frame    = pfr[0];
