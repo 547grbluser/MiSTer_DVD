@@ -531,8 +531,8 @@ structural fix, not a fallback.
 - **Gates:** `motcomp_picbuf_tb`, `run_field_order.sh`, `run_disp_sched.sh`, plus the
   full stc/pts suite.
 
-**Instrument: the per-picture maximum.** 🔧 **Built 2026-09-29** (branch
-`feature/pic-time-instrument`, on top of F2), sim-gated, ⏳ HW data pending.
+**Instrument: the per-picture maximum.** ✅ **Built, sim-gated and HW-measured
+2026-09-29** (✅ MERGED PR #140). The result, below: §6c resolved, F4 not justified.
 - **What a picture is:** one `picbuf_busy`-low stretch. `picbuf_busy` falls when the
   picbuf lets the VLD start a picture and rises at the next picture's header
   (`update_picture_buffers`, once per frame: a field pair is one picture). Its decode

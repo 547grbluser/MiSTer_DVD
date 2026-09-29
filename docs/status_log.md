@@ -22,8 +22,8 @@ predate later confirmations; the `CLAUDE.md` index carries the reconciled status
 
 ## Hardware status (THIS fork, verified 2026-06-21)
 
-- ✅ **PER-PICTURE DECODE-TIME INSTRUMENT (2026-09-29, branch
-  `feature/pic-time-instrument`, on F2; sim-gated, HW DATA TAKEN 2026-09-29).**
+- ✅ **PER-PICTURE DECODE-TIME INSTRUMENT (2026-09-29,
+  ✅ MERGED PR #140; sim-gated, HW DATA TAKEN 2026-09-29).**
   ★ **§6c answered:** Thayer's boot FMV on Interlaced reads 0 lates from its first
   picture for two minutes, in two clean launches. 0 of ~3,300 pictures exceeded one frame
   period (longest 21.1 ms / 33.4). The first minute's "lates" are all counted during the

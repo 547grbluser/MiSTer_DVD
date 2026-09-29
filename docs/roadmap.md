@@ -658,7 +658,7 @@ HW-confirmed on a real PAL DVD: correct 720×576 geometry, 50 Hz lock, A/V in sy
    off). ✅ MERGED (PR #138), bit-exact in sim, HW-measured 2026-09-29:
    Progressive lates ROGER 9.2→3.8/s, Office 8.2→1.0, Thayer VTS_09 7.3→0.1, MiB 1.4→0.
 2. **Per-picture maximum decode-time instrument.** ✅ Built, gated and measured
-   2026-09-29 (`feature/pic-time-instrument`, telemetry words 21–24). §6c resolved: 0
+   2026-09-29, ✅ MERGED (PR #140), telemetry words 21–24. §6c resolved: 0
    pictures over budget, 0 lates after the First Play still.
 3. **F2:** chroma-row reuse (display 6 → 3 words per macroblock-line on Progressive).
    ✅ Bit-exact in sim, HW-measured 2026-09-29, ✅ MERGED (PR #139): Progressive

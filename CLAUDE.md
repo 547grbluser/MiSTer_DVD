@@ -420,7 +420,7 @@ otherwise; `--red` runs its mutation arms).
 | Logic reclaim E: VM GPRMs in an M10K (−1,129 ALUTs) | ✅ | `logic_reclaim.md` §9 | `run_gprm_ram.sh`, `check_gprm_ram.py` |
 | Decode pacing × output mode: Progressive lates = display re-read contention; `dec_duty` telemetry (PR #137) | ✅ fixed by F1 + F2 (whole census 0; §6c resolved) | `decode_pacing.md` | `run_telem.sh`, `check_decode_duty_wiring.py` |
 | F1: no OSD display reads (8 → 6 words per MB-line, bit-exact; Prog lates ROGER 9.2→3.8, Office 8.2→1.0, Thayer 7.3→0.1; PR #138) | ✅ HW-measured | `decode_pacing.md` §7 | `run_osd_read.sh`, `check_osd_read_wiring.py` |
-| Per-picture decode-time instrument: telemetry words 21–24 (`pic_max`, `pic_n`, `pic_over`); settled §6c, F4 not justified; `feature/pic-time-instrument` | ✅ HW data | `decode_pacing.md` §7 "Instrument" | `run_telem.sh` (M5–M8), `check_decode_duty_wiring.py` |
+| Per-picture decode-time instrument: telemetry words 21–24 (`pic_max`, `pic_n`, `pic_over`); settled §6c, F4 not justified; PR #140 | ✅ HW data | `decode_pacing.md` §7 "Instrument" | `run_telem.sh` (M5–M8), `check_decode_duty_wiring.py` |
 | F2: chroma row reuse (6 → 3 words per MB-line on Progressive, bit-exact; Prog lates ROGER 3.6→0, Office 1.0→0; PR #139) | ✅ HW-measured | `decode_pacing.md` §7 F2 | `run_chroma_reuse.sh`, `check_chroma_reuse_wiring.py` |
 
 ### Audio and A/V sync
