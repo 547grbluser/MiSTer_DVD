@@ -69,11 +69,12 @@ problems.
 
 Default **On**, and it should stay on.
 
-On busy content the decoder can fall behind the display cadence, mostly with **Video
-Output = Progressive**, where the display's own memory reads compete with the decoder (see
-[Compatibility](../reference/compatibility.md#known-limitations)). The frame-rate governor
-absorbs this by dropping a B-frame to stay in step. B-frames are never used as references,
-so the picture cannot be corrupted by this.
+If the decoder ever falls behind the display cadence (for example with **Film 24p Out =
+On** over 29.97 fps video, which a 23.976 Hz raster cannot show), the frame-rate governor
+absorbs it by dropping a B-frame to stay in step. B-frames are never used as references,
+so the picture cannot be corrupted by this. On every disc measured the decoder keeps up
+on both Video Output settings (see
+[Compatibility](../reference/compatibility.md#video)).
 
 It is also how the player catches up when it has fallen behind the disc's own timeline:
 advancing past a frame is the only way to recover time that has already been lost. With
