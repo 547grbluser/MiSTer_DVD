@@ -141,8 +141,13 @@ module resample(
 
 `include "fifo_size.v"
 
+  /* DVD-FORK FIX (F1): ONE knob for both ends of the display read -- the address
+   * generator's requests and resample_dta's reads must agree word for word. 0 = no OSD
+   * reads (the OSD layer is tied off); 1 = the original structure (bench baseline). */
+  parameter OSD_READS = 0;
+
   // Generates the memory read requests for displaying a frame
-  resample_addrgen resample_addrgen (
+  resample_addrgen #(.OSD_READS(OSD_READS)) resample_addrgen (
     .clk(clk), 
     .clk_en(1'b1),
     .rst(rst), 
@@ -213,7 +218,7 @@ module resample(
   wire   [2:0]fifo_position;     /* position of pixels, as in  resample_codes */
 
   // Reads the pixels from memory fifo
-  resample_dta resample_dta (
+  resample_dta #(.OSD_READS(OSD_READS)) resample_dta (
     .clk(clk), 
     .clk_en(1'b1),
     .rst(rst), 

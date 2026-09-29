@@ -342,6 +342,20 @@ module resample_chain_tb;
   // addr fifo (disp_wr_addr_en && disp_wr_addr_ack); pop when the memory reads an
   // address out (rd_addr_en && ~rd_addr_empty). In-order => exact correspondence.
   integer linetag = 0;
+  // ---- ADDRESS-HASH mode (+addrhash=1), F1 gate (docs/decode_pacing.md §7) ----------
+  // Every read returns a word derived from its OWN ADDRESS, so each fetched word is
+  // distinguishable: a dropped, extra, reordered or misaligned word changes the pixels.
+  // The constant word above cannot see any of that (every word is the same). The bench
+  // prints a per-frame order-sensitive checksum of every displayed Y/U/V pixel (PIXSUM)
+  // and the display read words per macroblock-line (RQW); bench/dvd/run_osd_read.sh
+  // builds OSD_READS = 1 (original) and 0 (F1) and requires identical PIXSUM lines.
+  integer addrhash = 0;
+  function automatic [63:0] ahash(input [21:0] a);
+    ahash = {42'd0, a} * 64'h9E37_79B9_7F4A_7C15;
+  endfunction
+`ifdef OSDR
+  defparam resample.OSD_READS = `OSDR;
+`endif
   // ---- BLEND PROOF (+vgrad=S) : vertical gradient with a step > 1 -----------------
   // linetag returns the source line index, which increments by 1 per source line — so a
   // 2-tap blend of two ADJACENT integers rounds back to the nearest integer, INDISTINGUISH-
@@ -394,7 +408,8 @@ module resample_chain_tb;
       serving     <= 1'b1;
     end else begin
       wr_dta_en <= rd_addr_valid;          // one-cycle pipe after fifo read
-      wr_dta    <= linetag      ? {8{ (vgrad != 0) ? (popped_line[7:0] * vgrad[7:0])
+      wr_dta    <= (addrhash != 0) ? ahash(rd_addr)       // F1 gate: the word names its address
+                 : linetag      ? {8{ (vgrad != 0) ? (popped_line[7:0] * vgrad[7:0])
                                                    : popped_line[7:0] }}
                  : (hgrad != 0) ? {4{HG_MEM_LO, HG_MEM_HI}}   // per-column square wave
                                 : 64'h4040_4040_4040_4040;
@@ -694,6 +709,32 @@ module resample_chain_tb;
     h_sync_out_d <= h_sync_out;
   end
 
+  // ---- F1 gate instruments (+addrhash): pixel checksum and read words per MB-line ----
+  reg  [63:0] px_sum = 64'd0;
+  integer     px_n = 0, af_no = 0;
+  integer     rq_words = 0, rq_mbl = 0;
+  always @(posedge clk) if (rst) begin
+    // Count the REQUESTS (memory_address valid_out), not en && ack: the address fifo's
+    // ack lags by a cycle, so a same-cycle AND counts a burst of k back-to-back
+    // requests as k-1 (it read 7 per macroblock-line where 8 are issued).
+    if (resample.disp_wr_addr_en)                              rq_words = rq_words + 1;
+    if (resample.resample_addrgen.resample_wr_en)              rq_mbl   = rq_mbl + 1;
+  end
+  reg v_sync_out_q = 1'b0;
+  always @(posedge dot_clk) begin
+    if (addrhash != 0 && v_sync_out && ~v_sync_out_q) begin
+      if (af_no > 0)
+        $display("PIXSUM f%0d %016h n=%0d", af_no, px_sum, px_n);
+      $display("RQW f%0d words=%0d mblines=%0d", af_no, rq_words, rq_mbl);
+      af_no = af_no + 1; px_sum = 64'd0; px_n = 0;
+    end
+    if (addrhash != 0 && pixel_en_out) begin
+      px_sum = (px_sum * 64'd1000003) ^ {40'd0, y_out, u_out, v_out};
+      px_n   = px_n + 1;
+    end
+    v_sync_out_q <= v_sync_out;
+  end
+
   // ---- pace_driver: owns output_frame_valid/output_frame when +pace=N (see decl) ----
   always @(negedge v_sync)
     if (rst && (pace != 0)) begin
@@ -716,6 +757,7 @@ module resample_chain_tb;
     void'($value$plusargs("stallon=%d",  stallon));
     void'($value$plusargs("stalloff=%d", stalloff));
     void'($value$plusargs("linetag=%d",  linetag));
+    void'($value$plusargs("addrhash=%d", addrhash));
     void'($value$plusargs("pace=%d",     pace));
     void'($value$plusargs("wide=%d",     wide));
     void'($value$plusargs("il=%d",       il));

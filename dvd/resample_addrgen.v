@@ -492,6 +492,23 @@ module resample_addrgen (
   reg         [3:0]state;
   reg         [3:0]next;
 
+  /* DVD-FORK FIX (F1, docs/decode_pacing.md §7): NO OSD READS. Every macroblock-line used
+   * to open with two read requests for the upstream OSD frame (STATE_WR_OSD_MSB/LSB) --
+   * 2 of its 8 words, a quarter of ALL display reads -- but this fork ties the OSD layer
+   * off (mpeg2video.v dot_osd_enable = 1'b0), so osd.v never shows an OSD pixel and the
+   * data was fetched for nothing. On the Progressive raster those dead reads alone are
+   * ~21 MB/s of top-priority traffic on the decoder's DDR3 port, and display reads are
+   * what raise motion-comp's reference-fetch wait 30-50 % there (MEASURED, decode_pacing).
+   * OSD_READS = 0 starts each macroblock at STATE_WR_Y_MSB instead; resample_dta skips
+   * its OSD word in step (resample.v passes ONE parameter to both, so they cannot
+   * disagree -- a mismatch would shift every word by one and scramble the picture).
+   * FIRST_RQ carries the duties that were keyed on the OSD state: scan_begin and the
+   * per-macroblock position code written to the resample fifo.
+   * OSD_READS = 1 rebuilds the original structure exactly; bench/dvd/run_osd_read.sh
+   * builds both and requires bit-identical pixels. */
+  parameter OSD_READS = 0;
+  localparam [3:0] FIRST_RQ = OSD_READS ? STATE_WR_OSD_MSB : STATE_WR_Y_MSB;
+
   /* DVD-FORK (PTS scheduling): the deadline is the picture's own PTS against the
    * free-running STC, decided in dvd/disp_sched.sv. */
   reg               det_ntsc, det_pal;      // film detector verdicts (logic below)
@@ -764,7 +781,7 @@ module resample_addrgen (
   wire       pin_bot_now = pin_valid ? pin_bot
                          : ((just_shown == TOP) || (just_shown == BOTTOM)) ? (just_shown == BOTTOM)
                          : (image_0 == BOTTOM);
-  wire       scan_begin  = (state == STATE_NEXT_IMG) && (next == STATE_WR_OSD_MSB);
+  wire       scan_begin  = (state == STATE_NEXT_IMG) && (next == FIRST_RQ);   // DVD-FORK FIX (F1): the first request state, OSD or Y
   /* The scan being started is the OFF-parity slot of a locked still. */
   wire       half_now    = still_want && ((image_0 == BOTTOM) != pin_bot_now);
   always @(posedge clk)
@@ -823,7 +840,7 @@ module resample_addrgen (
 
       STATE_NEXT_IMG:     if ((image_0 == NO_OUTPUT) && (image_1 == NO_OUTPUT) && (image_2 == NO_OUTPUT) &&
                               (image_3 == NO_OUTPUT) && (image_4 == NO_OUTPUT) && (image_5 == NO_OUTPUT)) next = STATE_REPEAT; 
-                          else next = STATE_WR_OSD_MSB; 
+                          else next = FIRST_RQ;  // DVD-FORK FIX (F1): Y when OSD_READS = 0
 
       STATE_REPEAT:       if (repeat_cnt != 5'd0) next = STATE_NEXT_IMG; // repeat frame 
                           else if (~ofv_paced && persistence && (last_image != NO_OUTPUT)) next = STATE_NEXT_IMG; // DVD-FORK: repeat last image while next frame not due (or none yet)
@@ -833,7 +850,7 @@ module resample_addrgen (
                           else next = STATE_WAIT;
 
       STATE_WAIT:         if (disp_wr_addr_almost_full || resample_wr_almost_full) next = STATE_WAIT;
-                          else next = STATE_WR_OSD_MSB;
+                          else next = FIRST_RQ;  // DVD-FORK FIX (F1): Y when OSD_READS = 0
 
       STATE_WR_OSD_MSB:   next = STATE_WR_OSD_LSB; // output osd read requests - 16 pixels
 
@@ -1491,16 +1508,16 @@ module resample_addrgen (
     /* DVD-FORK FIX: use the 2-bit saturating disp_y_sat (cannot wrap at 256) instead of
      * the wide disp_y==0/==1 compares, so no SPURIOUS frame-top (ROW_0_COL_0) can be
      * emitted at line 256. This is the 256-line strobe fix (see disp_y_sat above). */
-    else if (clk_en && (state == STATE_WR_OSD_MSB) && (disp_mb == mb_first_c) && (disp_y_sat == 2'd0)) resample_wr_dta <= ROW_0_COL_0;
-    else if (clk_en && (state == STATE_WR_OSD_MSB) && (disp_mb == mb_first_c) && (disp_y_sat == 2'd1)) resample_wr_dta <= ROW_1_COL_0;
-    else if (clk_en && (state == STATE_WR_OSD_MSB) && (disp_mb == mb_first_c)) resample_wr_dta <= ROW_X_COL_0;
-    else if (clk_en && (state == STATE_WR_OSD_MSB) && (disp_mb == mb_last_c)) resample_wr_dta <= ROW_X_COL_LAST;
-    else if (clk_en && (state == STATE_WR_OSD_MSB)) resample_wr_dta <= ROW_X_COL_X;
+    else if (clk_en && (state == FIRST_RQ) && (disp_mb == mb_first_c) && (disp_y_sat == 2'd0)) resample_wr_dta <= ROW_0_COL_0;
+    else if (clk_en && (state == FIRST_RQ) && (disp_mb == mb_first_c) && (disp_y_sat == 2'd1)) resample_wr_dta <= ROW_1_COL_0;
+    else if (clk_en && (state == FIRST_RQ) && (disp_mb == mb_first_c)) resample_wr_dta <= ROW_X_COL_0;
+    else if (clk_en && (state == FIRST_RQ) && (disp_mb == mb_last_c)) resample_wr_dta <= ROW_X_COL_LAST;
+    else if (clk_en && (state == FIRST_RQ)) resample_wr_dta <= ROW_X_COL_X;   // DVD-FORK FIX (F1): FIRST_RQ, not the OSD state
     else resample_wr_dta <= resample_wr_dta;
 
   always @(posedge clk)
     if (~rst) resample_wr_en <= 1'b0;
-    else if (clk_en) resample_wr_en <= (state == STATE_WR_OSD_MSB);
+    else if (clk_en) resample_wr_en <= (state == FIRST_RQ);   // DVD-FORK FIX (F1): one position code per macroblock, whichever state opens it
     else resample_wr_en <= resample_wr_en;
 
   /* display address generator */

@@ -406,8 +406,8 @@ later.
 
 ### Busy video skips frames on Progressive output
 
-Concerts, TV discs, laserdisc-sourced game discs and busy PAL material look slightly
-jerky, a few frames a second, while film discs play smoothly. That happens with **Video
+The busiest concert or TV discs look slightly jerky in busy scenes, a frame or two a
+second, while film discs play smoothly. That happens with **Video
 Output = Progressive**, or with **Auto** when `MiSTer.ini` does not set up an analog TV,
 since Auto lands on Progressive then.
 

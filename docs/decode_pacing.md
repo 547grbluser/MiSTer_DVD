@@ -1,7 +1,8 @@
 # Decode pacing: content coding × output mode
 
-**Status:** investigation done 2026-09-28 on branch `feature/decode-pacing`. Nothing here
-changes playback. The fix is proposed (§7), not built. Measured on the rig with v0.8.0
+**Status:** investigation ✅ MERGED (PR #137, 2026-09-28). The fix is being built one stage
+per branch (§7). **F1** (no OSD display reads) ✅ MERGED (PR #138), bit-exact in sim and
+HW-measured: Progressive lates ROGER 9.2→3.8/s, Office 8.2→1.0, Thayer 7.3→0.1. Next: F2. Measured on the rig with v0.8.0
 (`DVD_20260928.rbf`), the v0.7.0 control (`DVD_20260924.rbf`) and an instrument build
 (`dev-pacing`, which adds `dvd/dec_duty.sv`).
 
@@ -299,7 +300,41 @@ Ranked by cost against payoff. Each stage is measured on the rig with
 `tools/pacing_matrix.py`, on ROGER, Office and Thayer VTS_08, Progressive against
 Interlaced, before the next stage starts.
 
-**F1. Stop the dead OSD reads.**
+**F1. Stop the dead OSD reads.** ✅ **Built and HW-measured 2026-09-29**
+(PR #138, `releases/DVD_osdread_20260929_0343.rbf`, clk_dec 86.0 MHz at
+both slow corners). `OSD_READS = 0`
+in `resample.v`, one parameter for both `resample_addrgen` and `resample_dta`.
+`bench/dvd/run_osd_read.sh` proves the pixels bit-identical against `OSD_READS = 1`
+in four geometries (progressive, interlaced, 720-wide, bursty stall), and 8 → 6 read
+words per macroblock-line. Three mutations are each caught.
+`tools/check_osd_read_wiring.py` pins the seams and the premise
+(`dot_osd_enable = 1'b0`).
+
+**Hardware result.** Same script (`tools/pacing_matrix.py`, interleaved, `--no-variants`)
+and same discs. "Before" is the `dev-pacing` build, which has the same `dec_duty`
+instrument. A **control re-run of that build right after the F1 run** reproduced it: ROGER
+Prog 9.22 lates/s (identical), Thayer VTS_09 7.30 (vs 7.32).
+
+| Disc | Mode | Lates/s (before → F1) | fps | Decode ms/picture | Ref-wait ms/picture | Parked |
+|---|---|---|---|---|---|---|
+| ROGER | Prog | 9.22 → **3.76** | 25.37 → 28.09 | 20.9 → 17.2 | 18.4 → 14.7 | 0.47 → 0.52 |
+| ROGER | Ilace | 0.50 → **0.00** | 29.72 → 29.97 | 15.4 → 14.1 | 12.4 → 11.1 | 0.54 → 0.58 |
+| Office PAL | Prog | 8.21 → **1.01** | 20.92 → 24.49 | 23.4 → 19.3 | 20.0 → 16.1 | 0.51 → 0.52 |
+| Office PAL | Ilace | 0.10 → **0.00** | 24.94 → 25.01 | 17.4 → 15.8 | 13.8 → 12.2 | 0.56 → 0.60 |
+| Thayer VTS_09 | Prog | 7.32 → **0.08** | 26.32 → 29.94 | 17.7 → 15.1 | 13.5 → 11.3 | 0.53 → 0.54 |
+| Thayer VTS_09 | Ilace | 0.00 → **0.00** | 29.96 → 29.98 | 13.4 → 12.5 | 9.2 → 8.2 | 0.60 → 0.62 |
+| MiB | Prog | 1.44 → **0.00** | 23.27 → 24.00 | 16.1 → 13.0 | 13.3 → 10.2 | 0.62 → 0.69 |
+| MiB | Ilace | 0.00 → **0.00** | 23.98 → 23.98 | 13.1 → 11.9 | 10.0 → 8.9 | 0.68 → 0.71 |
+
+- **Mechanism.** Removing a quarter of the display reads cut per-picture reference-fetch
+  wait by 2.2–3.9 ms on every disc, and on Interlaced too, which reads less but still
+  read OSD words. That is the same mechanism §6b measured, run in reverse.
+- **What is left.** Only ROGER, the busiest disc measured, still lates meaningfully on
+  Progressive: 3.8/s, about 1.9 dropped frames/s, down from about 4.6. Its windows range
+  0.85–5.95 by scene. Office is at 1.0/s (about 0.5 frames/s); Thayer VTS_09 and MiB
+  are at about 0.
+- **Next.** F2 (chroma-row reuse, a further 6 → 3 words) targets that residue.
+
 - **What:** `resample_addrgen` issues 8 words per macroblock per line: OSD × 2, Y × 2,
   and U, V × 2 rows each. The upstream OSD layer is tied off in this fork
   (`dot_osd_enable = 1'b0`, `mpeg2video.v`), so the OSD words fetch data nothing uses:

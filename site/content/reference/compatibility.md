@@ -108,9 +108,9 @@ earlier than the bar showed if the target falls in a gap between two parts.
     how the disc is authored; a real player and libdvdnav do the same thing. Let the intro
     play.
 
-**Busy interlaced video skips frames on Progressive output.** Concert and TV discs,
-laserdisc-sourced game discs and busy PAL material can lose a few frames a second
-(roughly 3–5) when **Video Output** is **Progressive**. That includes **Auto**, unless
+**The busiest interlaced video can skip frames on Progressive output.** The most
+demanding concert and TV discs can lose a frame or two a second in busy scenes when
+**Video Output** is **Progressive**. That includes **Auto**, unless
 `MiSTer.ini` sets up an analog TV (Auto lands on Progressive otherwise). On a progressive raster the player
 re-reads the whole picture from memory at every refresh, and those reads compete with the
 decoder for memory, so the heaviest pictures miss their slot. The frame-rate governor then
