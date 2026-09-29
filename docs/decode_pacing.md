@@ -66,7 +66,10 @@ counters do not reset because the VBUF is kept. After excluding the reset interv
 audio still plays only **41–46 kHz worth per wall-second**. So there are real gaps after
 each re-anchor, about 5–13 % of the time silent.
 
-This is *not* the pacing defect and was not investigated further. The boot FMV (menu
+This is *not* the pacing defect. **Investigation handed off to
+[`docs/nonseamless_audio.md`](nonseamless_audio.md)** (2026-09-29): each restart is a
+flush at a non-seamless cell join followed by ~1.5–2 s of silence while the clock walks
+up to the new cell's audio. The boot FMV (menu
 domain) shows 0–1 resets per window and 48 kHz. Also observed and not investigated:
 `av_drift_ms` medians of about +1500 in two Thayer VTS_08 windows. That is inside the
 ±5825 ms range, so it is not an alias.

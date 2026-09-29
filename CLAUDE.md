@@ -459,6 +459,9 @@ otherwise; `--red` runs its mutation arms).
 - ❌ Chapters/PTT exactness (Phase 6, `VTS_PTT_SRPT`), UDF-only images, parental control,
   GPRM counter mode, dual-mono AC-3 (acmod 0, rejected deliberately).
 - ❌ Trick play (continuous 2×/4×): needs a flush-free I-frame splice (`docs/dvd_nav.md` §2d).
+- ⏳ ~1.5–2 s audio gaps at non-seamless cell joins inside a title (Thayer VTS_08): the
+  flush at each re-anchor, then a wait for the new cell's audio. Plan and data:
+  `docs/nonseamless_audio.md` (branch `feature/nonseamless-audio`).
 - ⚠ `lates` counts one per refresh while a PGC still is held (`flags.still`), so boot and
   menu windows over-report (`docs/decode_pacing.md` §2c). The Progressive lates and the
   Thayer boot-FMV Interlaced lates are fixed by F1 + F2: 0 on the whole census set, and no

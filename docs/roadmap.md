@@ -672,6 +672,10 @@ HW-confirmed on a real PAL DVD: correct 720×576 geometry, 50 Hz lock, A/V in sy
    the per-picture instrument found no picture over its frame budget on any measured
    content. Revisit only if a disc shows `pic_over > 0` beside real lates.
 
+**Next (separate from pacing):** audio gaps of ~1.5–2 s at non-seamless cell joins
+(Thayer VTS_08), plan and data in `docs/nonseamless_audio.md`, branch
+`feature/nonseamless-audio`.
+
 **Also open:** Thayer boot-FMV Interlaced lates (3.4/s, deterministic from boot). Not
 starvation, not the drop loop (Frame Drop Off refuted it). Needs the per-picture
 instrument (`docs/decode_pacing.md` §6c).
