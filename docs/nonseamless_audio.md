@@ -1,6 +1,6 @@
 # Audio gaps at non-seamless cell joins (Thayer's Quest VTS_08) — investigation
 
-**Status:** ⏳ open, not started (hand-off written 2026-09-29). Branch
+**Status:** ⏳ open. Offline analysis done 2026-09-29 (§2a); event-level rig capture next. Branch
 `feature/nonseamless-audio` (`CORE_VERSION dev-nsaudio`, set in its first commit).
 Symptom first recorded in `docs/decode_pacing.md` §2b.
 
@@ -50,6 +50,92 @@ the author marked **seamless** (`cell_playback_t` byte 0 bit 3, exported as
 `cell_seamless`; `flush_ctl` now withholds the audio flush there). Thayer's joins are
 presumably genuinely **non-seamless**, so they still take the flush. **Confirm that from
 the IFO first** (§4 step 1).
+
+## 2a. Findings, 2026-09-29 (no rig time yet)
+
+Scripts are in `.sim/nsaudio/` (gitignored): `ifo_cells.py` (cell table),
+`cell_pts.py` (per-cell PTS extents), `join_pics.py` (pictures across a join),
+`rows.py` (one character per telemetry row), `census.py` / `census2.py` (library).
+
+**The IFO confirms the joins are authored non-seamless.** VTS_08 PGC 1 has 63 cells in
+two kinds that alternate: a ~5–22 s clip cell with `byte0 = 0x03` (`stc_discontinuity`
+and `seamless_angle`, **no `seamless_play`**), then a ~1 s cell with `0x09`
+(`seamless_play`, `still = 255`). A cell scan puts numbers on it. Every `0x03` cell restarts
+video and audio at PTS ≈ 0.06–0.18 s. Every `0x09` cell continues the previous one
+(for example c1 video 0.094–15.443, then c2 15.576–16.511). All the other VTSes measure the
+same way (`census2.py`: 26–34 backward joins per PGC in VTS 2–8).
+
+**Q3 is answered: the lead is the parse-front / VBUF depth, not a mux lead.** At every
+`0x03` cell the first audio PTS in stream order equals the first video PTS (`firstA ≈
+firstV`, within 30 ms). So the new cell's audio is not muxed ahead. After the flush the
+ring has lost whatever the demux had already parsed past the join (the new cell's first
+~1.1–1.4 s). The next frame to arrive is that far ahead of the clock, which has just
+re-anchored to the displayed picture.
+
+**There are two defects, not one.** One character per 0.5 s row (`rows.py`):
+`p` = playing in phase, `s` = silent, `E` = playing with `av_drift` > +0.7 s, digit =
+re-anchors in that row.
+
+```
+f2wide auto_1   EEEEEEEEEEEEEEEEEE11sspppppppppppppppp2EEEEEEEELL
+f2wide ilace_1  ppppppppppp11ssspppppppL1spppppppppp2EEEEEEEEEEEE
+f2wide prog_1   EEEEEEEEEEEEEEEEEEEEEEEEEEELLL1sspppppppppppppppp
+```
+
+1. **Gap (`1ss` then `p`).** The known shape: `aud_resync`, the ring refills and stays silent
+   while `av_drift` walks down at wall-clock speed, then scheduled playback resumes in
+   phase (`play_err` 0, ring 33–34 frames). Gap ≈ 0.5–1.5 s.
+2. **Early audio (`E`), and it is the worse one.** After some joins, often those with two
+   re-anchors in one row, audio restarts **immediately** and keeps playing. The ring is
+   empty (`aud_frames` 0–3), `av_drift` is about +1.5 s, and `play_err` is frozen at
+   **−1.31 … −1.41 s**. By that field's own definition the audio is running **~1.4 s ahead
+   of the picture**. It stays that way for 10–15 s, until the next join's flush happens
+   to re-time it. Nothing corrects early audio in mid-play, because `head_catchup` only
+   discards LATE audio. The ring is empty because audio now plays at the parse front: the
+   demux is paced by the full VBUF, so audio arrives at exactly real-time rate and never
+   underruns. That makes the state stable.
+
+**What the counters rule out:**
+- **No `load_flush` / jump at these joins.** `reanchors` keeps counting across every event,
+  and `disp_sched` zeroes it on `flush` (= `load_flush`). So the audio resets are
+  `aud_resync` (disc_rephase), not `jump_ack`/`seek_ack`.
+- **`anch_bwd` / `anch_fwd` say nothing.** They are 2-bit saturating counters, pinned at
+  3/0 since before each window.
+- **Word 5 (`vid_err` in the JSON, = `{skip, catch-up, re-arms}`).** At an `E` event there is
+  one underrun re-arm after the reset, with no skip and no catch-up. At a `1ss` event there
+  are 0–2 re-arms. So "release → underrun → re-arm → release" occurs inside the event.
+  The 0.5 s rows cannot show which frame each release latched.
+- **The failure is deterministic.** `duty/thay08` and `v070/thay08` are different runs
+  (different `t`, different counter values), and they classify identically row for row.
+  The same launch reproduces the same joins at the same moments, which makes a rig
+  capture cheap to repeat.
+
+**How the `E` state arises is NOT settled.** A scheduled release needs `stc >= play_pts`,
+so `play_err` starts at ≥ 0. To reach −1.4 s, either the clock stepped back ~1.4 s after
+the release with no audio reset, or `play_pts` latched a frame from a different timeline
+than the clock. One candidate to test: **`cell_seamless` is a parse-front level, and it is
+sampled at a display-time event.** The reader sets it when it *starts streaming* a cell.
+`disc_rephase` fires when the *display* reaches the join, ~1.3 s later in content. With
+Thayer's 1 s `0x09` cells between clips, the reader can already be inside a
+`seamless_play` cell when the display crosses a `0x03` join. The flush is then withheld
+for the wrong cell, or the reverse. The Matrix never exposed this because its seamless
+cells are minutes long. The event-level capture (§4 step 3) decides it.
+
+**Library census (flag only, `census.py`, 1,527 ISOs parsed):** 1,064 discs have at least
+one in-title join flagged `stc_discontinuity && !seamless_play` (angle-block interiors
+skipped), and 299 have `seamless_play && stc_discontinuity` (the Matrix class). Many of these
+are play-all extras and episode joins, not the main feature. A flag is a claim, so
+`census2.py` MEASURES every join from the NAV packs (`vobu_s_ptm` of the new cell minus
+`vobu_e_ptm` of the previous one; backward = what trips `disc_jump_w`) and records each
+PGC's length. That is what separates main features from extras. ⏳ Running.
+
+**Design requirement (recorded before choosing a mechanism).** Withholding the flush alone
+is not a fix. §12.2's seamless carve-out works because a seamless cell's audio really does
+continue sample for sample. At a non-seamless join, playing on without a re-time is exactly
+how the `E` state keeps audio 1.4 s early. Whatever the fix, it must (a) keep the new cell's
+opening audio rather than discard it, (b) let the old cell's tail play out, and (c) re-time
+audio to the new timeline **at the new cell's first audio frame**. It must also cope with
+the clock not yet having re-anchored when that frame reaches the head of the queue.
 
 ## 3. Questions to answer
 
