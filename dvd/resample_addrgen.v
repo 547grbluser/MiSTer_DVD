@@ -100,7 +100,7 @@ module resample_addrgen (
   input              disp_wr_addr_ack;
   output       [21:0]disp_wr_addr;
 
-  output reg    [2:0]resample_wr_dta;
+  output reg    [7:0]resample_wr_dta;          // DVD-FORK FIX (F2): [2:0] position code, [7:3] chroma reuse flags
   output reg         resample_wr_en;
 
   input              disp_wr_addr_almost_full;
@@ -509,6 +509,22 @@ module resample_addrgen (
   parameter OSD_READS = 0;
   localparam [3:0] FIRST_RQ = OSD_READS ? STATE_WR_OSD_MSB : STATE_WR_Y_MSB;
 
+  /* DVD-FORK FIX (F2, docs/decode_pacing.md §7): CHROMA ROW REUSE. Every macroblock-line
+   * requested two chroma rows ("upper", "lower") for each of U and V, although one chroma
+   * row serves several luma lines. With CHROMA_REUSE = 1 resample_dta keeps the last two
+   * rows of each plane in a small RAM (2 slots x 64 columns), and this module skips the
+   * request for any row a slot already holds. Per line it decides, for each of the two
+   * rows, fetch (and into which slot) or reuse (from which slot), and sends that decision
+   * to resample_dta with every position code (resample_wr_dta[7:3], below), so the two
+   * halves cannot disagree about which words exist. Progressive raster: 6 -> 3 words per
+   * macroblock-line. Pixels are bit-identical (bench/dvd/run_chroma_reuse.sh).
+   * CHROMA_REUSE = 0 rebuilds the F1 structure exactly (the bench baseline). It requires
+   * OSD_READS = 0: resample_dta's reuse path has no OSD read. */
+  parameter CHROMA_REUSE = 1;
+  /* This macroblock's flags, as written to the resample fifo at FIRST_RQ (logic below). */
+  wire              cr_fu = resample_wr_dta[3];   // fetch the upper row
+  wire              cr_fl = resample_wr_dta[5];   // fetch the lower row
+
   /* DVD-FORK (PTS scheduling): the deadline is the picture's own PTS against the
    * free-running STC, decided in dvd/disp_sched.sv. */
   reg               det_ntsc, det_pal;      // film detector verdicts (logic below)
@@ -858,13 +874,20 @@ module resample_addrgen (
 
       STATE_WR_Y_MSB:     next = STATE_WR_Y_LSB; // output luminance read requests - 16 pixels
 
-      STATE_WR_Y_LSB:     next = STATE_WR_U_UPPER; 
+      /* DVD-FORK FIX (F2): with CHROMA_REUSE a chroma request is issued only for a row
+       * that is fetched (cr_fu / cr_fl, this macroblock's flags, written at FIRST_RQ). */
+      STATE_WR_Y_LSB:     if ((CHROMA_REUSE == 0) || cr_fu) next = STATE_WR_U_UPPER;
+                          else if (cr_fl) next = STATE_WR_U_LOWER;
+                          else next = STATE_NEXT_MB;
 
-      STATE_WR_U_UPPER:   next = STATE_WR_U_LOWER; // output chroma read requests - 2 rows of 8 
+      STATE_WR_U_UPPER:   if ((CHROMA_REUSE == 0) || cr_fl) next = STATE_WR_U_LOWER; // output chroma read requests - 2 rows of 8
+                          else next = STATE_WR_V_UPPER;
 
-      STATE_WR_U_LOWER:   next = STATE_WR_V_UPPER;
+      STATE_WR_U_LOWER:   if ((CHROMA_REUSE == 0) || cr_fu) next = STATE_WR_V_UPPER;
+                          else next = STATE_WR_V_LOWER;
 
-      STATE_WR_V_UPPER:   next = STATE_WR_V_LOWER; // output chroma read requests - 2 rows of 8
+      STATE_WR_V_UPPER:   if ((CHROMA_REUSE == 0) || cr_fl) next = STATE_WR_V_LOWER; // output chroma read requests - 2 rows of 8
+                          else next = STATE_NEXT_MB;
 
       STATE_WR_V_LOWER:   next = STATE_NEXT_MB;
 
@@ -1503,16 +1526,136 @@ module resample_addrgen (
    Write to resample fifo.
    */
 
+  /* ================= DVD-FORK FIX (F2): CHROMA ROW REUSE -- see the parameter =========
+   *
+   * KEY. A slot is tagged with the chroma row it holds, computed EXACTLY as
+   * memory_address (mem_addr.v) computes the row it fetches: delta_y plus the chroma-scaled
+   * integer part of mv_y, ((mv + sign) >>> 1) >>> 1, before the clip to the picture
+   * height. The address of a word is a function of (frame, component, column, this key,
+   * mb_width, horizontal_size, vertical_size), so an equal key under an equal signature
+   * (cr_sig) is an equal word. Two keys that clip to the same row are merely a missed
+   * reuse, never a wrong one.
+   *   ⚠ That arithmetic halves mv_y a second time for chroma, so the "lower" row is NOT
+   *   the one bilinear.txt describes: mv +-2 lands on rows +0/-1 and mv +-4 on +-1 (the
+   *   opposite field's row on the field path). This is upstream behaviour and F2 keeps it
+   *   bit for bit; see docs/decode_pacing.md §7 F2.
+   * DECISION, once per line, at the line's first FIRST_RQ: each of the two rows is either
+   * in a slot (reuse) or fetched into a slot the line does not need. U and V share it. With
+   * two slots every distinct row is fetched once per scan in every walk measured (frame,
+   * field, weave), because consecutive lines share a row or step by one -- plus the two
+   * fetches of the scan's first line, which skips (TIMING, below).
+   * INVALIDATION: at every STATE_NEXT_IMG (a new scan may show a rewritten frame slot), and
+   * whenever the signature changes. A change is sticky until the next line start and
+   * forces every remaining macroblock of the line to fetch both rows; the next line then
+   * starts from empty slots. A line wider than 64 macroblocks (the cache's column range;
+   * DVD maxes out at 45) fetches everything, as before F2.
+   * TIMING (the first build missed clk_dec at -40C by 4 MHz, every top path ending here):
+   * the keys, c_same and cr_ok are REGISTERED every cycle and the decision reads the
+   * registers. disp_y moves at STATE_NEXT_MB and STATE_WAIT always follows, so at a line's
+   * FIRST_RQ the registers already hold that line -- except straight after STATE_NEXT_IMG,
+   * which enters FIRST_RQ directly (ck_stale), and after a signature change (their inputs
+   * may have moved in the last cycle). Such a line SKIPS: it fetches both rows and stores
+   * nothing, so a stale key can never be filed. Cost: two row fetches per scan.
+   * FLAGS to resample_dta, resample_wr_dta[7:3] = {lcp, sl, fl, su, fu}:
+   *   fu/fl  fetch the upper/lower row (and store it in slot su/sl); else read slot su/sl
+   *   lcp    the lower row IS the upper row (top/bottom clamp) and is being fetched this
+   *          macroblock: copy the fetched word, with no RAM read-after-write. */
+  wire signed [12:0] ck_up     = progressive_upscaling ? {2'b0, disp_y[11:1]} : {2'b0, disp_y[11:2], disp_y[0]};
+  wire signed [12:0] ck_mv     = progressive_upscaling ? (disp_y[0] ? disp_mv_y_plus_2 : disp_mv_y_minus_2)
+                                                       : (disp_y[1] ? disp_mv_y_plus_4 : disp_mv_y_minus_4);
+  wire signed [12:0] ck_mv_sgn = {12'b0, ck_mv[12]};
+  wire signed [12:0] ck_mv_c   = (ck_mv + ck_mv_sgn) >>> 1;      // memory_address stage 1 (chroma)
+  wire signed [12:0] ck_mv_p   = ck_mv_c >>> 1;                  // memory_address stage 2 (integer part)
+  wire signed [12:0] ck_lo     = ck_up + ck_mv_p;
+  wire         [7:0] cr_span   = mb_last_c - mb_first_c;
+  wire               cr_ok     = (cr_span[7:6] == 2'b00);          // <= 64 macroblocks (6-bit column)
+
+  reg signed  [12:0] ck_up_q, ck_lo_q;        // the registered key (see TIMING)
+  reg                ck_same_q, cr_ok_q, ck_stale;
   always @(posedge clk)
-    if (~rst) resample_wr_dta <= 2'b0;
+    if (~rst) begin
+      ck_up_q <= 13'sd0; ck_lo_q <= 13'sd0; ck_same_q <= 1'b0; cr_ok_q <= 1'b0; ck_stale <= 1'b1;
+    end else if (clk_en) begin
+      ck_up_q   <= ck_up;
+      ck_lo_q   <= ck_lo;
+      ck_same_q <= (ck_up == ck_lo);
+      cr_ok_q   <= cr_ok;
+      ck_stale  <= (state == STATE_NEXT_IMG);  // disp_y moved at this edge; FIRST_RQ may be next
+    end
+
+  /* everything the address of a word depends on besides the key, plus mb_height (the key's
+   * bottom clamp reads it) */
+  wire        [47:0] cr_sig    = {output_frame_sav, hcrop_en, mb_width, mb_height, horizontal_size, vertical_size};
+  reg         [47:0] cr_sig_q;
+  reg                cr_chg;                  // the signature changed since this line's start (sticky)
+  wire               cr_chg_now = cr_chg | (cr_sig != cr_sig_q);
+  wire               cr_skip   = ~cr_ok_q | ck_stale | cr_chg_now;   // fetch both, file nothing
+
+  reg                cr_line_first;           // the next FIRST_RQ opens a line
+  reg          [1:0] ct_v;                    // slot valid
+  reg signed  [12:0] ct_k0, ct_k1;            // slot keys
+  reg                ct_la;                   // slot allocated last (the victim for a lone miss is the other)
+  reg          [4:0] cr_ln;                   // this line's flags {lcp, sl, fl, su, fu}
+
+  wire               cv0   = ct_v[0];       // a line that is not skipped has no pending change
+  wire               cv1   = ct_v[1];
+  wire               hu0   = cv0 & (ct_k0 == ck_up_q);
+  wire               hu1   = cv1 & (ct_k1 == ck_up_q);
+  wire               hl0   = cv0 & (ct_k0 == ck_lo_q);
+  wire               hl1   = cv1 & (ct_k1 == ck_lo_q);
+  wire               c_same = ck_same_q;
+  wire               c_hu  = hu0 | hu1;
+  wire               c_hl  = hl0 | hl1;
+  wire               c_su  = c_hu ? hu1 : (c_hl & ~c_same) ? ~hl1 : ~ct_la;
+  wire               c_sl  = c_hl ? hl1 : c_same ? c_su : ~c_su;
+  wire               c_fu  = ~c_hu;
+  wire               c_fl  = ~c_hl & ~c_same;
+  wire               c_lcp = c_same & ~c_hu;
+  wire         [4:0] cr_dec   = cr_skip ? 5'b01101 : {c_lcp, c_sl, c_fl, c_su, c_fu};  // skip: fetch both (slots 0/1)
+  wire         [4:0] cr_force = {1'b0, cr_ln[3], 1'b1, cr_ln[1], 1'b1};             // fetch both, same slots
+  wire         [4:0] cr_flags = (CHROMA_REUSE == 0) ? 5'b0
+                              : cr_line_first ? cr_dec
+                              : cr_chg_now    ? cr_force : cr_ln;
+
+  always @(posedge clk)
+    if (~rst) cr_line_first <= 1'b1;
+    else if (clk_en && (state == STATE_NEXT_IMG)) cr_line_first <= 1'b1;
+    else if (clk_en && (state == STATE_NEXT_MB) && last_mb) cr_line_first <= 1'b1;
+    else if (clk_en && (state == FIRST_RQ)) cr_line_first <= 1'b0;
+
+  wire               cr_decide = clk_en && (state == FIRST_RQ) && cr_line_first;
+  always @(posedge clk)
+    if (~rst) begin
+      cr_sig_q <= 48'd0; cr_chg <= 1'b1; cr_ln <= 5'd0;
+      ct_v <= 2'b00; ct_k0 <= 13'sd0; ct_k1 <= 13'sd0; ct_la <= 1'b1;
+    end else if (clk_en && (state == STATE_NEXT_IMG)) begin
+      ct_v <= 2'b00;                                   // a new scan starts from empty slots
+    end else if (cr_decide) begin
+      cr_sig_q <= cr_sig;
+      cr_chg   <= 1'b0;
+      cr_ln    <= cr_dec;
+      if (cr_skip) ct_v <= 2'b00;
+      else begin
+        ct_v <= ct_v | {(c_fu & c_su) | (c_fl & c_sl), (c_fu & ~c_su) | (c_fl & ~c_sl)};
+        if (c_fu &  c_su) ct_k1 <= ck_up_q;
+        if (c_fu & ~c_su) ct_k0 <= ck_up_q;
+        if (c_fl &  c_sl) ct_k1 <= ck_lo_q;
+        if (c_fl & ~c_sl) ct_k0 <= ck_lo_q;
+        if (c_fl) ct_la <= c_sl;
+        else if (c_fu) ct_la <= c_su;
+      end
+    end else if (clk_en && (cr_sig != cr_sig_q)) cr_chg <= 1'b1;
+
+  always @(posedge clk)
+    if (~rst) resample_wr_dta <= 8'b0;
     /* DVD-FORK FIX: use the 2-bit saturating disp_y_sat (cannot wrap at 256) instead of
      * the wide disp_y==0/==1 compares, so no SPURIOUS frame-top (ROW_0_COL_0) can be
      * emitted at line 256. This is the 256-line strobe fix (see disp_y_sat above). */
-    else if (clk_en && (state == FIRST_RQ) && (disp_mb == mb_first_c) && (disp_y_sat == 2'd0)) resample_wr_dta <= ROW_0_COL_0;
-    else if (clk_en && (state == FIRST_RQ) && (disp_mb == mb_first_c) && (disp_y_sat == 2'd1)) resample_wr_dta <= ROW_1_COL_0;
-    else if (clk_en && (state == FIRST_RQ) && (disp_mb == mb_first_c)) resample_wr_dta <= ROW_X_COL_0;
-    else if (clk_en && (state == FIRST_RQ) && (disp_mb == mb_last_c)) resample_wr_dta <= ROW_X_COL_LAST;
-    else if (clk_en && (state == FIRST_RQ)) resample_wr_dta <= ROW_X_COL_X;   // DVD-FORK FIX (F1): FIRST_RQ, not the OSD state
+    else if (clk_en && (state == FIRST_RQ) && (disp_mb == mb_first_c) && (disp_y_sat == 2'd0)) resample_wr_dta <= {cr_flags, ROW_0_COL_0};
+    else if (clk_en && (state == FIRST_RQ) && (disp_mb == mb_first_c) && (disp_y_sat == 2'd1)) resample_wr_dta <= {cr_flags, ROW_1_COL_0};
+    else if (clk_en && (state == FIRST_RQ) && (disp_mb == mb_first_c)) resample_wr_dta <= {cr_flags, ROW_X_COL_0};
+    else if (clk_en && (state == FIRST_RQ) && (disp_mb == mb_last_c)) resample_wr_dta <= {cr_flags, ROW_X_COL_LAST};
+    else if (clk_en && (state == FIRST_RQ)) resample_wr_dta <= {cr_flags, ROW_X_COL_X};   // DVD-FORK FIX (F1): FIRST_RQ, not the OSD state
     else resample_wr_dta <= resample_wr_dta;
 
   always @(posedge clk)

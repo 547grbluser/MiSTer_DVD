@@ -333,7 +333,8 @@ Prog 9.22 lates/s (identical), Thayer VTS_09 7.30 (vs 7.32).
   Progressive: 3.8/s, about 1.9 dropped frames/s, down from about 4.6. Its windows range
   0.85–5.95 by scene. Office is at 1.0/s (about 0.5 frames/s); Thayer VTS_09 and MiB
   are at about 0.
-- **Next.** F2 (chroma-row reuse, a further 6 → 3 words) targets that residue.
+- **Next.** F2 (chroma-row reuse, a further 6 → 3 words) targets that residue. It took
+  it to 0 (below).
 
 - **What:** `resample_addrgen` issues 8 words per macroblock per line: OSD × 2, Y × 2,
   and U, V × 2 rows each. The upstream OSD layer is tied off in this fork
@@ -349,19 +350,144 @@ Prog 9.22 lates/s (identical), Thayer VTS_09 7.30 (vs 7.32).
   - a mutation that restores the OSD requests must fail exactly the counter arm;
   - `tools/check_osd_read_wiring.py` pins the `resample_dta` OSD feed.
 
-**F2. Reuse chroma rows.**
-- **What:** bilinear chroma upsampling (`resample_addrgen.v`, "see bilinear.txt") fetches
-  two chroma rows for each of U and V on **every** luma line, although each chroma row
-  serves several lines.
-- **Change:** a two-row line buffer per plane (720/2 × 2 × 2 bytes ≈ 1.4 KB, about 2
-  M10K) fetches each chroma row once per frame. That takes the display from 8 to about 3
-  words per macroblock-line together with F1: Progressive about 83 → 31 MB/s, below
-  today's Interlaced 41 MB/s, where lates are about 0.
-- **Quality cost:** none (the same samples).
-- **Gates:**
-  - pixel output bit-exact on progressive and field (interlaced) scans, including the
-    field row selection (`disp_mv_y ±4`) and the top and bottom edge clamps;
-  - mutations on the edge clamps.
+**F2. Reuse chroma rows.** ✅ **Built, bit-exact in sim and HW-measured 2026-09-29**
+(✅ MERGED PR #139, `releases/DVD_chromareuse_20260929_1223.rbf`).
+
+**Hardware result: 0 lates on Progressive on every disc measured.** Same script
+(`tools/pacing_matrix.py`, interleaved, `--no-variants`, `Disc Menus=Off`), same discs and
+rounds as F1. The **control arm** re-ran the F1 build on ROGER in the same session and
+reproduced it: Progressive 3.58 lates/s (F1's record: 3.76), 17.0 / 14.5 ms (17.2 / 14.7).
+The other discs' "before" is F1's own table.
+
+| Disc | Mode | Lates/s (F1 → F2) | fps | Decode ms/picture | Ref-wait ms/picture | Parked |
+|---|---|---|---|---|---|---|
+| ROGER | Prog | 3.58 → **0.00** (all 3 windows) | 28.18 → 29.97 | 17.0 → 14.7 | 14.5 → 12.3 | 0.52 → 0.56 |
+| ROGER | Ilace | 0.00 → **0.00** | 29.98 → 29.96 | 14.1 → 13.4 | 11.1 → 10.4 | 0.58 → 0.60 |
+| Office PAL | Prog | 1.01 → **0.00** | 24.49 → 24.99 | 19.3 → 16.7 | 16.1 → 13.5 | 0.52 → 0.58 |
+| Office PAL | Ilace | 0.00 → **0.00** | 25.01 → 25.01 | 15.8 → 15.1 | 12.2 → 11.4 | 0.60 → 0.62 |
+| Thayer VTS_09 | Prog | 0.08 → **0.00** | 29.94 → 29.97 | 15.1 → 13.2 | 11.3 → 9.3 | 0.54 → 0.60 |
+| Thayer VTS_09 | Ilace | 0.00 → **0.00** | 29.98 → 29.94 | 12.5 → 12.0 | 8.2 → 7.6 | 0.62 → 0.64 |
+| MiB | Prog | 0.00 → **0.00** | 24.00 → 24.00 | 13.1 → 11.4 | 10.2 → 8.5 | 0.68 → 0.73 |
+| MiB | Ilace | 0.00 → **0.00** | 23.98 → 23.97 | 11.9 → 11.6 | 8.9 → 8.5 | 0.71 → 0.72 |
+
+- **Mechanism, again in reverse:** per-picture ref-wait fell 1.7–2.6 ms on Progressive and
+  0.4–0.8 ms on Interlaced (fewer words there too). Progressive now costs ROGER 14.7 ms
+  of decode per picture, about what **Interlaced** cost before F1 (15.4).
+- Across F1 + F2, ROGER Progressive went 9.2 → 0 lates/s and 20.9 → 14.7 ms per picture.
+- The board shows a correct picture (ROGER, Progressive, screenshot checked). The sim
+  proves bit-identity; the shot only rules out a gross wiring fault the bench cannot see.
+- **The rest of the §3 census set, measured afterwards on the same F2 build** (same
+  script, 2 interleaved rounds; "before" is the pre-F1 `dev-pacing` run where it exists,
+  else v0.8.0 from §5):
+
+  | Disc | Prog lates/s (before → F2) | Ilace | F2 decode / ref-wait ms per picture (Prog) |
+  |---|---|---|---|
+  | Thayer VTS_08 (field-coded) | 6.77 → **0.00** | 0.15 → 0.00 | 18.8 / 15.5 → 13.8 / 10.2 |
+  | Angel (field-coded film) | 6.6 / 8.8 (v0.8.0) → **0.00** | 0 → 0 | 11.8 / 9.5 |
+  | BBB PAL (25p) | 5.1 / 0.8 (v0.8.0) → **0.00** | 0 → 0 | 13.7 / 9.7 |
+  | VCD (MPEG-1 SIF) | 0 → **0.00** | 0 → 0 | 3.7 / 2.8 |
+  | Thayer boot FMV (menu domain) | 6.70 → **0.05** (one 0.10 window) | 0.27 → 0.00 | 13.9 / 10.5 |
+  | ROGER, Film Off / Bob / Blend | 8.8 / 9.7 / 9.8 (v0.8.0) → **0.00 / 0.00 / 0.00** | — | — |
+  | ROGER, Film 24p **On** | 6.0 → 5.99 | — | structural (†): a 23.976 Hz raster cannot show 29.97 fps |
+
+  **Every Progressive cell of the census reads 0**, frame- and field-coded, NTSC and PAL,
+  title and menu domain, Weave, Bob and Blend. Thayer VTS_08's low audio rate (40–46 kHz
+  with 2–5 counter resets per window) is §2b's pre-existing cell re-anchor behaviour,
+  identical before F1.
+- **What was wrong:** bilinear chroma upsampling (`resample_addrgen.v`, "see
+  bilinear.txt") fetched two chroma rows for each of U and V on **every** macroblock-line
+  (4 of the 6 words left after F1), although each chroma row serves several lines.
+- **Change:** `resample_dta` keeps the last two rows of each plane in a 256 × 64 RAM
+  ({plane, slot, column}, 64 columns: DVD maxes out at 45 macroblocks). The address
+  generator decides once per line, for the upper and the lower row: reuse a slot, or fetch
+  into the slot this line does not need. It sends that decision to `resample_dta` with
+  every position code (the resample fifo grows 3 → 8 bits: `{lcp, sl, fl, su, fu, pos}`),
+  so the two halves cannot disagree about which words exist, however far ahead the address
+  generator runs. `CHROMA_REUSE` in `resample.v` is one parameter for both modules; `0`
+  rebuilds the F1 structure exactly (the bench baseline).
+- **The slot key** is the row `memory_address` actually fetches, computed with its own
+  arithmetic: `delta_y + ((mv + sign) >>> 1) >>> 1`, before the clip to the picture
+  height. The address of a word is a function of (frame, component, column, key,
+  `mb_width`, sizes), so an equal key under an equal signature is an equal word. Keys that
+  clip to the same row are only a missed reuse.
+- **Invalidation:** at every `STATE_NEXT_IMG`, and on any change of the signature {frame,
+  `hcrop_en`, `mb_width`, `horizontal_size`, `vertical_size`}. A change is sticky until
+  the next line start, and the rest of that line fetches both rows (the dta's column
+  counter restarts at each line's `COL_0`, so a mid-line crop change would otherwise
+  shift columns). A line wider than 64 macroblocks fetches everything, as before.
+- **Timing.** The first build missed `clk_dec` at −40 °C (82.1 MHz against 86.0). All 60
+  worst paths ran `mb_height` → the clamp → the key adders → the tag compare → the tag
+  write in the one `FIRST_RQ` cycle. The key, `c_same` and `cr_ok` are now registered
+  every cycle. `disp_y` holds for the whole line and `STATE_WAIT` always precedes
+  `FIRST_RQ`, **except** straight after `STATE_NEXT_IMG`. That line, and any line after a
+  signature change, *skips*: it fetches both rows and files neither, so a stale key is
+  never stored. Cost: two extra row fetches per scan.
+- **Measured in sim (words per macroblock-line, exact per scan; the bench's 256-line
+  geometry, so the two skip fetches weigh double what they do at 480):**
+
+  | Scan | F1 | F2 |
+  |---|---|---|
+  | Progressive raster, progressive or interlaced content (frame scan) | 6 | **3.016** (≈3.008 at 480 lines) |
+  | Interlaced raster, interlaced content (field scan) | 6 | **4.016** (129 rows per 128 lines) |
+  | Interlaced raster, progressive frame (field scan) | 6 | **4.016–4.031** (bottom / top field) |
+
+  At 720×480 and 60 Hz: Progressive 62 → **31 MB/s** (83 before F1), below the pre-F1
+  Interlaced 41 MB/s where lates were about 0. Interlaced 31 → 21 MB/s.
+- **Quality cost:** none. The pixels are bit-identical.
+- ⚠ **Finding, preserved deliberately:** the upstream "lower" chroma row is not the one
+  `bilinear.txt` describes. `memory_address` halves `mv_y` for chroma a second time, so
+  `mv ±2` (progressive upsampling) lands on rows **+0 / −1**: odd lines get no vertical
+  chroma interpolation at all. `mv ±4` (interlaced upsampling) lands on **±1**, the
+  *opposite field's* chroma row, where 4:2:0 interlaced needs ±2. F2 keeps it bit for
+  bit, so F2 can be proven by identity.
+  - **Pre-existing:** `mem_addr.v` and the upstream `rtl/mpeg2/resample_addrgen.v` are
+    unchanged since the upstream import (`30c8a75`). Upstream's own clamps (`plus_2` on the
+    last chroma row, `plus_4` on the last two) show that ±1 / ±2 rows was the intent.
+  - **Size, measured 2026-09-29.** Six decoded frames each, through a model of
+    `resample_bilinear`'s arithmetic, upstream rows against the intended rows. ROGER
+    (interlaced path): mean |Δchroma| 0.49, 99th percentile 3, max 20 of 255, 0.7 % of
+    pixels off by ≥ 4. MiB (progressive path): 0.14 / 1 / 10, 0.2 %. The worst 64×64
+    blocks look the same side by side, enlarged 4×. The difference is faint horizontal
+    streaks at colour edges; on interlaced content it grows with motion (25 % of the
+    chroma is from the other field).
+  - **Fix, if ever:** double the two offsets (`±2 → ±4`, `±4 → ±8`). It changes pixels, so
+    it needs a reference-filter bench, not an identity gate. The reuse cache absorbs it,
+    and field scans get cheaper (same-field rows repeat). Fixing it would be a separate, visible change,
+  and the reuse cache would absorb it (the key follows whatever row is fetched).
+- **Gates:** `bench/dvd/run_chroma_reuse.sh`:
+  - [1] Bit-exact across 14 arms, CHROMA_REUSE 0 vs 1, with memory words that hash
+    their own address. Two checksums: displayed pixels, and every pixel `resample` emits
+    per scan (independent of raster timing). The arms: progressive; **weave** (interlaced
+    content on the progressive raster, the case F2 targets; new `+weave` in
+    `resample_chain_tb`); fields with both upsamplings and both field orders; `vsz=300`
+    progressive and field (the clip against the `mb_height` clamps); 720 wide; Crop; SIF
+    2× repeat; bursty stalls; 30→60 pacing; a mid-line crop toggle at a *logical* scan
+    point (`+croptog`).
+  - [2] Words per scan, exactly as the key model derives them by hand: every distinct
+    row once, plus the two skip fetches (the runner header lists each).
+  - [3] `tools/check_chroma_reuse_wiring.py`: one knob; `OSD_READS = 0` beside it; the
+    fifo width; the key arithmetic pinned against `mem_addr.v`; the flag layout.
+  - Mutations M1–M5, each caught by its own arm. M2 (no geometry invalidation) fails
+    **only** the croptog arm, which shows that arm reaches it. The `NEXT_IMG`
+    invalidation is not gated and cannot be: a scan opens at the top rows while the slots
+    hold the previous scan's bottom rows.
+- **The other display benches:** `run_osd_read`, `run_field_blend`, `run_pause_still`,
+  `run_field_phase` and `run_field_parity` pass on F2. `run_prefetch_chain` (bursty memory
+  stalls) was compared against the F1 structure from a `main` worktree:
+  - 62 % average bandwidth (12,000-cycle stalls): the deep buffer is **clean on F2 (0
+    black frames) where F1 shows 9**, at every one of 5 stall phases. F2's buffer holds
+    about twice the lines.
+  - 30 % (45,000-cycle stalls, about 26 lines, longer than either buffer): F2 scores
+    **more** "BLACK" frames (13–14 against 7–12, at every phase). That is the metric: a
+    frame counts as BLACK for a gap *inside* the picture band, and one that shows no more
+    than a short unbroken band is not counted. Over the same 19 frames F2 shows **50 %
+    more video lines** (4,319 against 2,879), completes 9 scans against 6 and spends 28 %
+    fewer cycles in underflow. Both are unwatchable in that regime; it is not a
+    regression.
+- **Cost** (against the F1 build, same seed 9): **+285 ALMs** (38,963, 93 %), +135
+  registers, **+2 RAM blocks** (the 256 × 64 cache; the resample fifo's 3 → 8 bits fit
+  its existing block). `clk_dec` **90.6 MHz @100 °C, 91.5 MHz @−40 °C** (F1: 92.3 / 90.5),
+  `releases/DVD_chromareuse_20260929_1223.rbf`.
 
 F1 and F2 do not violate `hw_budget_and_lessons.md` §2's "do not reach for smaller data
 first": they remove *redundant* reads and cost no quality. The port move below stays the
@@ -419,6 +545,9 @@ structural fix, not a fallback.
 | `dvd/dec_duty.sv` | where the decoder's time goes (telemetry words 16–20); instrument only, `DVD-FORK DEBUG` |
 | `bench/dvd/dec_duty_tb.sv`, `dvd_telem_tb` [6] | exclusive classes and exact scale; the words in order with every input tied off |
 | `tools/check_decode_duty_wiring.py` | motcomp → mpeg2video → emu → telem → qsf → dvd_ctl |
+| `bench/dvd/run_osd_read.sh`, `tools/check_osd_read_wiring.py` | F1: bit-exact without the OSD reads, 8 → 6 words |
+| `bench/dvd/run_chroma_reuse.sh`, `tools/check_chroma_reuse_wiring.py` | F2: bit-exact chroma row reuse in 14 arms, exact words per scan, M1–M5 |
+| `resample_chain_tb` `+addrhash` / `+weave` / `+croptog` | address-hashed memory, the PIXSUM / RSUM / RQS lines, interlaced content on the progressive raster, a logical-point mid-line crop toggle |
 | `bench/dvd/run_telem.sh` | runs all of the above, plus mutations M1–M4, each caught |
 
 `dec_duty` costs 116 ALUT / 112 registers. `clk_dec` closes at 86.0 MHz at both slow

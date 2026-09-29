@@ -64,10 +64,11 @@ def main():
     print('== one knob (resample.v) ==')
     rs = rd(a.resample)
     ok(has(rs, r"\bparameter\s+OSD_READS\s*=\s*0\s*;"), 'resample: parameter OSD_READS = 0')
-    ok(has(rs, r"\bresample_addrgen\s*#\s*\(\s*\.OSD_READS\s*\(\s*OSD_READS\s*\)\s*\)"),
-       'resample_addrgen #(.OSD_READS(OSD_READS))')
-    ok(has(rs, r"\bresample_dta\s*#\s*\(\s*\.OSD_READS\s*\(\s*OSD_READS\s*\)\s*\)"),
-       'resample_dta #(.OSD_READS(OSD_READS))')
+    # (F2 appended .CHROMA_REUSE(...) to both parameter lists; checked by check_chroma_reuse_wiring.py)
+    ok(has(rs, r"\bresample_addrgen\s*#\s*\(\s*\.OSD_READS\s*\(\s*OSD_READS\s*\)\s*[,)]"),
+       'resample_addrgen #(.OSD_READS(OSD_READS) ...)')
+    ok(has(rs, r"\bresample_dta\s*#\s*\(\s*\.OSD_READS\s*\(\s*OSD_READS\s*\)\s*[,)]"),
+       'resample_dta #(.OSD_READS(OSD_READS) ...)')
 
     print('== resample_addrgen ==')
     ag = rd(a.addrgen)

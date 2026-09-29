@@ -41,7 +41,10 @@ build() {   # <out> <OSDR> [file substitutions: orig=mutated ...]
         local o=${m%%=*} n=${m#*=}
         for i in "${!files[@]}"; do [ "${files[$i]}" = "$o" ] && files[$i]=$n; done
     done
-    iverilog -g2012 -D__IVERILOG__ -DOSDR="$osdr" -I rtl/mpeg2 -o "$out" "${files[@]}" 2>"$out.log"
+    # -DCHR=0: F1 is measured on the F1 structure. F2's chroma reuse (on by default)
+    # requires OSD_READS = 0, so the OSD_READS = 1 baseline cannot be built with it;
+    # bench/dvd/run_chroma_reuse.sh gates F2 against this CHR=0 structure.
+    iverilog -g2012 -D__IVERILOG__ -DOSDR="$osdr" -DCHR=0 -I rtl/mpeg2 -o "$out" "${files[@]}" 2>"$out.log"
 }
 
 # geometries: name + plusargs. Each must render real frames in both arms.

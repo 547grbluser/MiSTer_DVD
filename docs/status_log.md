@@ -22,6 +22,36 @@ predate later confirmations; the `CLAUDE.md` index carries the reconciled status
 
 ## Hardware status (THIS fork, verified 2026-06-21)
 
+- ✅ **DECODE PACING F2: THE DISPLAY REUSES CHROMA ROWS (2026-09-29,
+  ✅ MERGED PR #139, bit-exact in sim, HW-MEASURED 2026-09-29).**
+  ★ **Progressive lates now read 0 on every disc measured:** ROGER 3.58 → 0 (control arm:
+  the F1 build re-run in the same session), Office 1.0 → 0, Thayer VTS_09 0.08 → 0, MiB 0.
+  ROGER Progressive decode fell 17.0 → 14.7 ms per picture, and ref-wait 14.5 → 12.3 ms.
+  ★ **The whole §3 census set, measured next on the same build:** Thayer VTS_08
+  (field-coded) 6.77 → 0, Angel → 0, BBB PAL → 0, VCD 0, the Thayer boot FMV 6.70 → 0.05,
+  ROGER Bob / Blend / Film Off → 0. The only non-zero cell is Film 24p On over 29.97
+  content (structural).
+  - **What:** after F1 the display still read 6 words per macroblock-line: 2 luma, plus an
+    upper and a lower chroma row for each of U and V, on every line. `resample_dta` now
+    keeps two rows per plane (a 256 × 64 RAM). `resample_addrgen` requests only the rows
+    no slot holds, and tells `resample_dta` which words exist through the resample fifo
+    (3 → 8 bits).
+  - **Result in sim:** Progressive raster 6 → **≈3.0** words per macroblock-line, for
+    both progressive content and interlaced content (weave). Interlaced raster 6 → ≈4.0
+    (field scans). Pixels are bit-identical in 14 geometries.
+  - **Timing:** the first build missed `clk_dec` at −40 °C (82.1 MHz): every worst path
+    was the unregistered key → tag compare → tag write. The key is now registered, and a
+    line whose registered key may be stale (the scan's first line, or a signature change)
+    fetches both rows and files nothing: two extra row fetches per scan.
+  - ⚠ **Finding (preserved, not fixed):** the upstream "lower" chroma row is `mv/2` off.
+    Odd progressive lines get no vertical chroma interpolation, and field scans
+    interpolate with the opposite field's row. F2 keeps this bit for bit.
+  - **Gates:** `bench/dvd/run_chroma_reuse.sh` (M1–M5) and
+    `tools/check_chroma_reuse_wiring.py`.
+  - **Next:** merge. F3/F4 are no longer needed for these discs; they stay recorded in
+    `docs/decode_pacing.md` §7. §6c (Thayer boot-FMV Interlaced tail) is still open.
+  - Full record: `docs/decode_pacing.md` §7 F2.
+
 - 🔧 **DECODE PACING × OUTPUT MODE: THE PROGRESSIVE-ONLY LATES ARE DDR3 CONTENTION FROM
   THE DISPLAY'S FRAME RE-READS, NOT A COMPUTE CEILING (2026-09-28, branch
   ✅ MERGED PR #137, investigation + instrument; fix F1 ✅ MERGED PR #138).**

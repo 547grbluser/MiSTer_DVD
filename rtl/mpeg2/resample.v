@@ -127,11 +127,11 @@ module resample(
   output             scan_bob_bot;                // DVD-FORK (progressive bob): ... and keeps the BOTTOM field
 
   /* resample fifo */
-  wire          [2:0]resample_wr_dta;
+  wire          [7:0]resample_wr_dta;                 // DVD-FORK FIX (F2): position code + chroma reuse flags
   wire               resample_wr_en;
   output             resample_wr_overflow;           // to probe
   wire               resample_wr_almost_full;
-  wire          [2:0]resample_rd_dta;
+  wire          [7:0]resample_rd_dta;
   wire               resample_rd_en;
   wire               resample_rd_valid;
 
@@ -145,9 +145,15 @@ module resample(
    * generator's requests and resample_dta's reads must agree word for word. 0 = no OSD
    * reads (the OSD layer is tied off); 1 = the original structure (bench baseline). */
   parameter OSD_READS = 0;
+  /* DVD-FORK FIX (F2): ONE knob for chroma row reuse, likewise shared: the address
+   * generator decides which chroma words exist, resample_dta must pop exactly those. 1 =
+   * reuse (requires OSD_READS = 0); 0 = the F1 structure (bench baseline). The resample
+   * fifo carries the reuse flags only when it is on. docs/decode_pacing.md §7 F2. */
+  parameter CHROMA_REUSE = 1;
+  localparam [8:0] RESAMPLE_WIDTH = CHROMA_REUSE ? 9'd8 : 9'd3;
 
   // Generates the memory read requests for displaying a frame
-  resample_addrgen #(.OSD_READS(OSD_READS)) resample_addrgen (
+  resample_addrgen #(.OSD_READS(OSD_READS), .CHROMA_REUSE(CHROMA_REUSE)) resample_addrgen (
     .clk(clk), 
     .clk_en(1'b1),
     .rst(rst), 
@@ -218,7 +224,7 @@ module resample(
   wire   [2:0]fifo_position;     /* position of pixels, as in  resample_codes */
 
   // Reads the pixels from memory fifo
-  resample_dta #(.OSD_READS(OSD_READS)) resample_dta (
+  resample_dta #(.OSD_READS(OSD_READS), .CHROMA_REUSE(CHROMA_REUSE)) resample_dta (
     .clk(clk), 
     .clk_en(1'b1),
     .rst(rst), 
@@ -266,24 +272,28 @@ module resample(
   // fifo between resample_addr and resample_dta
   fifo_sc 
     #(.addr_width(RESAMPLE_DEPTH),
-    .dta_width(9'd3),
+    .dta_width(RESAMPLE_WIDTH),                     // DVD-FORK FIX (F2): 8 with chroma reuse, else 3
     .prog_thresh(RESAMPLE_THRESHOLD))
     resample_fifo (
     .rst(rst), 
     .clk(clk), 
-    .din(resample_wr_dta), 
+    .din(resample_wr_dta[RESAMPLE_WIDTH-1:0]), 
     .wr_en(resample_wr_en), 
     .full(), 
     .wr_ack(), 
     .overflow(resample_wr_overflow), 
     .prog_full(resample_wr_almost_full), 
-    .dout(resample_rd_dta), 
+    .dout(resample_rd_dta[RESAMPLE_WIDTH-1:0]), 
     .rd_en(resample_rd_en), 
     .prog_empty(),
     .empty(), 
     .valid(resample_rd_valid), 
     .underflow()
     );
+
+  generate if (RESAMPLE_WIDTH < 9'd8) begin : g_rs_narrow
+    assign resample_rd_dta[7:RESAMPLE_WIDTH] = {(8-RESAMPLE_WIDTH){1'b0}};   // no flags without reuse
+  end endgenerate
 
 `ifdef CHECK
   always @(posedge clk)

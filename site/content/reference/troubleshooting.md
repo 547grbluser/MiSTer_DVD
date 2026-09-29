@@ -404,24 +404,17 @@ Also confirm **`Frame Drop` is On** — advancing past a frame is the only way t
 can recover time once it has fallen behind, so with it off the picture just runs later and
 later.
 
-### Busy video skips frames on Progressive output
+### Video skips frames in busy scenes
 
-The busiest concert or TV discs look slightly jerky in busy scenes, a frame or two a
-second, while film discs play smoothly. That happens with **Video
-Output = Progressive**, or with **Auto** when `MiSTer.ini` does not set up an analog TV,
-since Auto lands on Progressive then.
+This should not happen on either **Video Output** setting: every disc measured plays its
+busiest scenes without skipping, on Progressive and on Interlaced. If a disc does skip:
 
-On a progressive raster the player re-reads the whole picture from memory at every
-refresh. Those reads compete with the decoder for memory, so the heaviest pictures miss
-their slot and the governor skips a B-frame to stay in step. **Deinterlace** makes no
-difference, because Weave, Bob and Blend all read the same amount.
-
-**Fix:** set **Video Output = Interlaced**, which reads half as much. It removed the skipping
-on every film, concert and TV title measured, though a game disc's full-motion intro can
-still skip a frame or two a second. On a **PAL** disc, **Film 24p Out = On** also works on
-Progressive: it outputs 25 Hz and lets the scaler repeat each frame, at the cost of Bob. On
-an NTSC video disc, Film 24p Out = On does *not* help. That raster runs at 23.976 Hz and
-cannot show 29.97 frames a second. Keep **Frame Drop** On either way.
+- Check **Film 24p Out**. With it **On**, an NTSC *video* disc (29.97 frames a second)
+  skips by design: that raster runs at 23.976 Hz and cannot show 29.97 frames a second.
+  Set it to **Auto** or **Off**. On a PAL disc Film 24p Out = On is fine.
+- Keep **Frame Drop** **On**. Advancing past a frame is how the player catches up.
+- If it still skips, [report it](reporting-a-bug.md) with the disc's name and the scene. A
+  disc that is still too busy is exactly the case worth hearing about.
 
 ### Black & white picture over composite or S-video
 
