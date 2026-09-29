@@ -183,7 +183,9 @@ domain does not change the mechanism. It does carry one extra item, §6c.
 **What does not matter:**
 - field vs frame coding: Thayer VTS_08 and VTS_09 match, and Angel matches ROGER;
 - Deinterlace: Weave, Bob and Blend are equal within scene variance, since none of them
-  adds DDR3 reads;
+  adds DDR3 reads. Bob really engaged: 60 of 60 rows read `flags.bob = 1` on the
+  instrument build's Office Bob cell. The v0.8.0 run's Main predates that flag, so its
+  `bob` column reads 0 regardless;
 - the release (v0.7.0 = v0.8.0).
 
 **What matters:** the display's frame re-read rate, and how busy the content is.
@@ -235,10 +237,13 @@ ref-wait. **MiB:** the same direction, smaller on its lighter windows.
   denominator lean towards I/P. A GOP estimate puts that effect at a few percent, not
   +48 %. The Office rows carry the headline because Interlaced and Film-On there have
   zero drops and an identical mix.
-- **Film-On (13.1 ms) beats Interlaced (17.4 ms) at equal lines per second.** The film
-  raster's long vertical blank hands motion-comp contiguous DDR3 windows. That is the
-  occupancy mechanism `emu.sv`'s Film 24p comment already names, so it is evidence for
-  this reading, not an anomaly.
+- **Film-On (13.1 ms) beats Interlaced (17.4 ms) at equal lines per second.** That is
+  *consistent with* the Film 24p design rationale in `emu.sv`: the film raster's long
+  vertical blank hands motion-comp contiguous DDR3 windows. It was not measured
+  separately here.
+- **The instrument does not perturb what it measures.** The `dev-pacing` build's lates
+  match v0.8.0 cell for cell: ROGER Prog 8.9–9.9 vs 9.0–9.9, Office Prog 8.2 vs 8.2,
+  Thayer VTS_09 Prog 7.2–7.4 vs 7.3.
 
 **Conclusion: DDR3 arbitration occupancy.** What decides a picture's cost is how
 often the display re-reads the frame on the decoder's port, not the picture's content

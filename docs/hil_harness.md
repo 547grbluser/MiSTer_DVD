@@ -294,6 +294,21 @@ tools/mister.py telem --watch 120      # rates, incl. refreshes-per-pickup in pp
 tools/mister.py osd "A/V Offset=+50ms" # set an option LIVE, no relaunch
 ```
 
+**Decoder duty (words 16–20, 2026-09-28, `docs/decode_pacing.md`).**
+- **Fields:** `dec_disp`, `dec_starve`, `dec_back`, `dec_ref`.
+- **Units:** free-running clk_dec cycle counts ÷ 4096, 16-bit. They wrap about every
+  3.3 s at 100 % duty, well above the 0.5 s poll.
+- **Reset:** by the reset pin **only**, so no flush or seek ever zeroes them.
+- **What they mean:** the VLD parked on the display, starved of bitstream, stalled by the
+  decode pipe; plus the independent recon-waits-for-reference-pixels class.
+- **When they exist:** only when word 16 reads `DUTY_MAGIC` (`0xDD01`), in a Main that
+  reads 21 words. An older core answers past word 15 with word 15 again, so the Main
+  **omits** these keys rather than emitting garbage. An absent key means "old core or old
+  Main", never "idle decoder".
+- **Output:** `telem --watch` prints them as fractions of clk_dec time (`decoder time:
+  parked … active … ref-wait`).
+- **Gate:** `bench/dvd/run_telem.sh`.
+
 **The number it exists for is refreshes / pickups.** The governor is supposed to
 show each content frame for exactly `show_next` refreshes, so for 29.97 content
 on a 59.94 Hz raster that ratio must be 2.000. If it reads low by ~450 ppm the

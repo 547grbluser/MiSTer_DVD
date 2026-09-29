@@ -459,7 +459,8 @@ otherwise; `--red` runs its mutation arms).
 - ⚠ Busy interlaced/25p video lates 4–10/s on **Progressive** output (~0 on Interlaced).
   Not a compute ceiling: the display's frame re-reads contend with motion-comp's reference
   fetch (+30–50 % per picture), and the one-deep picbuf handoff wastes the VLD's ~50 %
-  idle. Measured in `docs/decode_pacing.md`; fix plan F1–F4 there.
+  idle. A heavy-picture tail remains on Interlaced (Thayer boot FMV 3.4/s, open, §6c).
+  Measured in `docs/decode_pacing.md`; fix plan F1–F4 there.
 
 `docs/roadmap.md` is the canonical "what's next".
 

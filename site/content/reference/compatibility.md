@@ -110,8 +110,8 @@ earlier than the bar showed if the target falls in a gap between two parts.
 
 **Busy interlaced video skips frames on Progressive output.** Concert and TV discs,
 laserdisc-sourced game discs and busy PAL material can lose a few frames a second
-(typically 4–8) when **Video Output** is **Progressive**. That includes **Auto** on an
-HDMI-only setup, where Auto resolves to Progressive. On a progressive raster the player
+(roughly 3–5) when **Video Output** is **Progressive**. That includes **Auto**, unless
+`MiSTer.ini` sets up an analog TV (Auto lands on Progressive otherwise). On a progressive raster the player
 re-reads the whole picture from memory at every refresh, and those reads compete with the
 decoder for memory, so the heaviest pictures miss their slot. The frame-rate governor then
 drops a B-frame to stay in step. B-frames are never used as references, so the picture

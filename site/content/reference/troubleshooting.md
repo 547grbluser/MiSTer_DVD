@@ -408,8 +408,8 @@ later.
 
 Concerts, TV discs, laserdisc-sourced game discs and busy PAL material look slightly
 jerky, a few frames a second, while film discs play smoothly. That happens with **Video
-Output = Progressive**, or with **Auto** on an HDMI-only setup, since Auto resolves to
-Progressive there.
+Output = Progressive**, or with **Auto** when `MiSTer.ini` does not set up an analog TV,
+since Auto lands on Progressive then.
 
 On a progressive raster the player re-reads the whole picture from memory at every
 refresh. Those reads compete with the decoder for memory, so the heaviest pictures miss
