@@ -178,6 +178,11 @@ module dvd_audio_decode #(
     // In-band timeline re-times (a discontinuity head dispatched into a re-armed
     // gate; docs/nonseamless_audio.md 4a). Saturating.
     output logic [3:0]  dbg_retime_cnt,
+    // One-cycle request for the audio-only re-phase (flush_ctl aud_resync): a
+    // re-time head is ALREADY LATCHED and has gone stale on the clock's own
+    // timeline (see IN-BAND TIMELINE RE-TIME, step 6). Frames already dispatched
+    // cannot be un-dispatched, so the reset is the only way to drop them.
+    output logic        resync_req,
     // Playback-position error vs STC: (stc - play_anchor) - samples*1.875,
     // in 90 kHz ticks >> 4 (same 178 us/unit scale as the drift row). Positive
     // = playback LATE. Starts ~av_ofs at each release; the SLOPE is the read
@@ -379,6 +384,15 @@ module dvd_audio_decode #(
     wire signed [34:0] arr_delta =
         $signed({2'b0, stc}) - $signed({2'b0, arr_pts_l}) - 35'($signed(av_ofs));
     wire arr_current = arr_seen && (arr_delta <= STALE_TICKS);
+    // TWO-SIDED "the arrivals and the clock are on the same timeline" (the re-time's
+    // discriminator, 2026-09-29). arr_current above is one-sided -- it was built
+    // for the catch-up, where the sign is known -- and reads "current" for an
+    // arrival any distance AHEAD of the clock, e.g. new-timeline audio seen
+    // against an old clock across a forward restart. The parse front normally
+    // leads the clock by the ring + dispatch depth (~1.1-1.6 s), so the lower
+    // bound is 3 s; the upper bound is the catch-up's own STALE.
+    localparam logic signed [34:0] ARR_LEAD_MAX = 35'sd270000;   // 3 s
+    wire arr_agree = arr_seen && (arr_delta <= STALE_TICKS) && (arr_delta > -ARR_LEAD_MAX);
     wire head_catchup = sched_en && draining && stc_anchored && video_live && arr_current &&
                         ( frame_pts_valid
                             ? (head_delta > (skip_run ? STALE_TICKS : CATCHUP_TICKS))
@@ -427,6 +441,13 @@ module dvd_audio_decode #(
     // first ~1.1-1.4 s. Every such flush threw that opening away (Thayer: ~1.3 s
     // of silence at every clip; Scooby-Doo 2's "good job" -> "job" was the same
     // loss behind a different trigger).
+    //   6. A STALE LATCH: a re-time head latched while the clock was elsewhere,
+    //      and then the clock arrived on a timeline where that head is RETIME_WIN
+    //      or more late while the arrivals agree with it. Nothing already in the
+    //      decoder can be dropped except by a reset, so the decoder asks for the
+    //      audio-only re-phase (resync_req -> flush_ctl aud_resync): the same
+    //      reset the old display-time path fired at every discontinuity, now only
+    //      on the decoder's own evidence that its latch is wrong.
     // Liveness: a hold that never sees its underrun (HOLD_W, ~0.6 s) forces the
     // re-arm; a retime arm that never reaches its window takes the ordinary
     // arm_timer fallback. Only with scheduling on (sched_en): the A/V Sync Off
@@ -453,8 +474,18 @@ module dvd_audio_decode #(
     //    exactly like the load-window stale-skip -- bounded by the overlap.
     //    Late by RETIME_WIN or more means the clock is still on the OTHER
     //    timeline: that head is kept and waits (step 4), never discarded.
+    //    ⚠ CORRECTED 2026-09-29 (HW, ULTIMATE_T2 boot -> menu): "late by
+    //    RETIME_WIN or more means the other timeline" is NOT always true. After
+    //    a still, the display re-anchored to the new menu segment and its first
+    //    audio then arrived 0.53 s LATE on that same new timeline, with current
+    //    audio queued behind it; held as "other timeline", it went out via the
+    //    2.5 s fallback and played 2.5 s late. The discriminator is the ARRIVALS:
+    //    if the demux's newest audio agrees with the clock (arr_agree), a late
+    //    head is stale on the clock's own timeline and is discarded at any
+    //    lateness; if the arrivals disagree too, the clock is elsewhere -> wait.
     assign head_retime_stale = head_disc && !draining && !play_pts_valid &&
-                               (head_delta > STALE_TICKS) && (head_delta < RETIME_WIN);
+                               (head_delta > STALE_TICKS) &&
+                               ((head_delta < RETIME_WIN) || arr_agree);
 
     // codec sink readiness for the byte currently offered
     logic        ac3_full;
@@ -1007,6 +1038,22 @@ module dvd_audio_decode #(
 
     // Held from reset; only O[13] A/V Sync Off bypasses (see comment above).
     assign drain_en = draining || !sched_en;
+
+    // ---- step 6: stale-latch re-phase request (one pulse per latch) ----------
+    logic resync_sent;
+    always_ff @(posedge clk) begin
+        if (rst || !sched_en) begin
+            resync_req  <= 1'b0;
+            resync_sent <= 1'b0;
+        end else begin
+            resync_req <= 1'b0;
+            if (draining || !play_pts_valid) resync_sent <= 1'b0;
+            else if (retime && !resync_sent && arr_agree && (start_delta >= RETIME_WIN)) begin
+                resync_req  <= 1'b1;
+                resync_sent <= 1'b1;
+            end
+        end
+    end
 
     // ---- Playback-position tracker (drift instrument; see dbg_play_err port) ----
     // Counts the playback position since the last release in whole 90 kHz ticks

@@ -23,6 +23,16 @@
 //    S5 continuous stream (control)                      -> no hold, no re-arm
 //    S6 the clock never re-anchors                       -> the fallback still
 //       plays the new audio (no silence wedge)
+//    S7 (HW, ULTIMATE_T2 boot -> menu) the clock is ALREADY on the new timeline
+//       after a still; the first new audio arrives 0.6 s late with current audio
+//       behind it -> the stale head is discarded, playback lands in phase (the
+//       first build held it as "other timeline" and played it 2.5 s late)
+//    S8 a head latched while the clock was elsewhere goes stale when the clock
+//       arrives (0.7 s late, arrivals agree) -> exactly one resync_req, and the
+//       fresh audio after that reset plays in phase
+//  S1-S7 must raise NO resync_req. The bench models the demux's arrival front
+//  (arr_pts = the newest committed frame) and, on resync_req, the flush_ctl
+//  aud_resync it causes (decoder reset + ring discard).
 //
 //  RED arms (bench/dvd/run_aud_retime.sh) each remove one step and must fail
 //  their own scenario.
@@ -43,10 +53,14 @@ module aud_retime_tb;
     logic        desc_ptsv [0:NDESC-1];
     integer      ndesc = 0, dptr = 0;
 
+    // STAGED: frames are built into mem/desc, then PUBLISHED (made visible to the
+    // dispatcher) only after the arrival front has moved -- in the core the demux
+    // parses a frame (arr_pts) before audio_ring commits it, never after.
+    integer      committed_pub = 0, ndesc_pub = 0;
     wire  [7:0]  ring_byte = mem[rd];
-    wire         ring_valid = (rd < committed);
+    wire         ring_valid = (rd < committed_pub);
     wire         ring_ready;
-    wire         frame_valid = (dptr < ndesc);
+    wire         frame_valid = (dptr < ndesc_pub);
     wire  [15:0] frame_len   = desc_len[dptr];
     wire  [32:0] frame_pts   = desc_pts[dptr];
     wire         frame_pts_valid = desc_ptsv[dptr];
@@ -71,6 +85,14 @@ module aud_retime_tb;
     end
 
     logic sched_en = 1, stc_anchored = 1, disp_anchored = 1, video_live = 1;
+    // the demux's arrival front: the newest frame committed to the ring
+    logic [32:0] arr_pts = '0;
+    logic        arr_pts_valid = 0;     // driven on NEGEDGES by publish (no NBA race)
+    // resync_req -> the aud_resync it causes in emu (flush_ctl): decoder reset +
+    // audio_ring discard. Counted per scenario.
+    wire  resync_req;
+    integer n_resync = 0;
+    always @(posedge clk) if (resync_req) n_resync <= n_resync + 1;
     wire signed [15:0] audio_l, audio_r;
     wire [3:0] dbg_rearm_cnt, dbg_fbrel_cnt, dbg_catch_cnt, dbg_retime_cnt;
     wire [7:0] dbg_skip_cnt;
@@ -88,13 +110,14 @@ module aud_retime_tb;
         .nco_trim(22'sd0), .dbg_play_cnt(), .dbg_gate_cnt(),
         .dispatch_pts(), .dispatch_pts_valid(),
         .sched_en(sched_en), .stc_anchored(stc_anchored), .disp_anchored(disp_anchored),
-        .arr_pts(33'd0), .arr_pts_valid(1'b0), .video_live(video_live), .stc(stc),
+        .arr_pts(arr_pts), .arr_pts_valid(arr_pts_valid), .video_live(video_live), .stc(stc),
         .anchor_pulse(1'b0), .anchor_delta(34'sd0), .av_ofs(18'sd0),
         .audio_l(audio_l), .audio_r(audio_r),
         .ac3_synced(), .ac3_err(), .dbg_ac3_resets(), .dbg_ac3_err_resets(),
         .dbg_draining(), .dbg_play_pts_valid(), .dbg_armed_data(), .dbg_skip_run(), .dbg_play_pts(),
         .dbg_rearm_cnt(dbg_rearm_cnt), .dbg_fbrel_cnt(dbg_fbrel_cnt), .dbg_skip_cnt(dbg_skip_cnt),
         .dbg_catch_cnt(dbg_catch_cnt), .dbg_retime_cnt(dbg_retime_cnt), .dbg_play_err(),
+        .resync_req(resync_req),
         .dbg_cur_codec(), .dbg_mp2_avalid(), .dbg_mp2_s_nz(), .dbg_mp2_pcm_nz()
     );
 
@@ -119,6 +142,18 @@ module aud_retime_tb;
             desc_ptsv[ndesc] = 1'b1;
             committed = committed + SPF * 4;
             ndesc = ndesc + 1;
+        end
+    endtask
+    // the demux's arrival front moves to the newest staged frame, THEN the ring
+    // commits everything staged
+    task automatic publish;
+        begin
+            if (ndesc > 0) begin
+                @(negedge clk); arr_pts = desc_pts[ndesc-1]; arr_pts_valid = 1;
+                @(negedge clk); arr_pts_valid = 0;
+            end
+            repeat (2) @(posedge clk);
+            committed_pub = committed; ndesc_pub = ndesc;
         end
     endtask
 
@@ -148,11 +183,24 @@ module aud_retime_tb;
     // fresh module state + empty model for each scenario
     task automatic fresh;
         begin
+            // every scenario before S8 must finish without a resync_req
+            if (n_resync != 0) fail("a scenario before S8 raised resync_req");
             rst_n = 0; stc_run = 0;
             repeat (10) @(posedge clk);
             committed = 0; rd = 0; ndesc = 0; dptr = 0; ncap = 0; prev_l = 16'h0;
+            committed_pub = 0; ndesc_pub = 0;
+            n_resync = 0;
             repeat (10) @(posedge clk);
             rst_n = 1;
+        end
+    endtask
+
+    // what emu does with resync_req: aud_resync = reset the decoder AND discard the ring
+    task automatic apply_resync;
+        begin
+            @(negedge clk); rst_n = 0;
+            rd = committed_pub; dptr = ndesc_pub;         // audio_ring reset: queued data gone
+            repeat (5) @(negedge clk); rst_n = 1;
         end
     endtask
 
@@ -206,6 +254,7 @@ module aud_retime_tb;
     // start the old timeline: the clock sits at the old head, video live
     task automatic start_old;
         begin
+            publish;
             stc = OLD_BASE; stc_run = 1;
         end
     endtask
@@ -325,7 +374,86 @@ module aud_retime_tb;
         if (f < 0) fail("S6: the new timeline never played without a re-anchor (silence wedge)");
         if (errs == r0) $display("  [S6] no re-anchor: the fallback released the new timeline (fbrel=%0d)", dbg_fbrel_cnt);
 
-        if (errs == 0) $display("PASS: aud_retime_tb (S1-S6)");
+        if (n_resync != 0) fail("S6: resync_req fired");
+
+        // ======================= S7: T2 -- late head, clock already new ============
+        r0 = errs;
+        fresh;
+        begin : s7
+            integer k, nf, skip0; logic [32:0] t_new;
+            for (k = 0; k < 4; k = k + 1) add_frame(1, k, OLD_BASE + k * FRAME_TICKS);
+            start_old;
+            run_until(4*SPF, 4_000_000);                   // old segment plays out
+            repeat (2000) @(posedge clk);                  // underrun: the gate re-arms (a still)
+            // the display crossed into the new segment 0.6 s before its audio arrives
+            stc = NEW_BASE + 33'd54000;
+            skip0 = dbg_skip_cnt;
+            nf = (54000 + 27000) / FRAME_TICKS;            // audio from 0.6 s late to 0.3 s ahead
+            for (k = 0; k < nf; k = k + 1) add_frame(2, k % 64, NEW_BASE + k * FRAME_TICKS);
+            publish;
+            run_until(4*SPF + 2*SPF, 6_000_000);
+            f = first_of(2);
+            if (f < 0) fail("S7: the new segment never played");
+            else begin
+                // its PTS = NEW_BASE + (frame index)*FRAME_TICKS; frame index mod 64 is in
+                // the sample value -- recover the absolute index from the time instead
+                late = cap_stc[f] - (NEW_BASE + 33'd54000);  // clock advance since the crossing
+                if (cap_v[f][7:0] != 0) fail("S7: first new sample is not a frame head");
+                // the frame played must be within STALE of the clock
+                begin : s7late
+                    integer fi, best; best = 1 << 30;
+                    for (fi = 0; fi < nf; fi = fi + 1)
+                        if ((fi % 64) == cap_v[f][13:8]) begin
+                            integer d; d = cap_stc[f] - (NEW_BASE + fi * FRAME_TICKS);
+                            if (d >= -60 && d < best) best = d;
+                        end
+                    late = best;
+                end
+                if (late > 4500 + 60) fail("S7: the new segment played LATE (stale head not discarded)");
+                if (dbg_skip_cnt == skip0) fail("S7: nothing was discarded although the head was 0.6 s late");
+            end
+            if (dbg_fbrel_cnt != 0) fail("S7: released by the fallback timer");
+            if (n_resync != 0) fail("S7: resync_req fired (the dispatch-side discard should suffice)");
+            if (errs == r0) $display("  [S7] T2 shape: stale head discarded, new segment in phase (%0d ticks late)", late);
+        end
+
+        // ======================= S8: a latched head goes stale ==================
+        r0 = errs;
+        fresh;
+        begin : s8
+            integer k, nf, c0;
+            for (k = 0; k < 4; k = k + 1) add_frame(1, k, OLD_BASE + k * FRAME_TICKS);
+            nf = 150;                                      // new timeline, 0..0.8 s
+            for (k = 0; k < nf; k = k + 1) add_frame(2, k % 64, NEW_BASE + k * FRAME_TICKS);
+            start_old;
+            run_until(4*SPF, 4_000_000);                   // old tail plays; the new head is held,
+            repeat (20000) @(posedge clk);                 // then latched as a retime arm (clock old)
+            if (count_of(2) != 0) fail("S8: new timeline played against the OLD clock");
+            // the clock arrives on the new timeline with the latched head 0.7 s late
+            stc = NEW_BASE + 33'd63000;
+            k = 0;
+            while (n_resync == 0 && k < 200000) begin @(posedge clk); k = k + 1; end
+            if (n_resync != 1) fail("S8: no resync_req for a stale latch");
+            else begin
+                apply_resync;                              // emu's aud_resync
+                c0 = ncap;
+                // fresh arrivals from the parse front, a little ahead of the clock
+                for (k = 0; k < 16; k = k + 1) add_frame(3, k, stc + 33'd900 + k * FRAME_TICKS);
+                publish;
+                run_until(c0 + SPF, 4_000_000);
+                f = first_of(3);
+                if (f < 0) fail("S8: nothing played after the re-phase");
+                else begin
+                    late = cap_stc[f] - (desc_pts[ndesc-16]);
+                    if (late < -60 || late > 60) fail("S8: audio after the re-phase is not in phase");
+                end
+                repeat (1000) @(posedge clk);
+                if (n_resync != 1) fail("S8: resync_req fired more than once");
+            end
+            if (errs == r0) $display("  [S8] stale latch: one resync_req, fresh audio in phase (%0d ticks)", late);
+        end
+
+        if (errs == 0) $display("PASS: aud_retime_tb (S1-S8)");
         else begin $display("FAIL: aud_retime_tb -- %0d error(s)", errs); $fatal(1); end
         $finish;
     end

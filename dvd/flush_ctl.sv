@@ -45,7 +45,11 @@ module flush_ctl (
     input  wire jump_ack,         // 1-cycle pulse: reader executed a VM jump
     input  wire mode_switch,      // 1-cycle pulse: live raster-regime change (interlace/film)
     input  wire aud_switch,       // 1-cycle pulse: audio track switch
-    input  wire disc_rephase,     // display re-anchored on a content PTS jump (dvd/disp_sched.sv)
+    // one-cycle: the AUDIO DECODER asks for the audio-only re-phase -- its latched
+    // re-time head is stale on the clock's own timeline (dvd_audio_decode.sv
+    // resync_req, IN-BAND TIMELINE RE-TIME step 6). Was `disc_rephase` (the
+    // display's content-jump pulse) until 2026-09-29; see the aud_resync block.
+    input  wire aud_rephase_req,
     input  wire keep_vbuf,        // level (reader): menu->menu transition keeps the VBUF
     // level (reader), valid with jump_ack: this jump CROSSES the menu/title boundary.
     // NOT the complement of keep_vbuf -- a title->title jump is neither (see soft_flush).
@@ -165,8 +169,12 @@ always @(posedge clk) begin
     // TIMELINE RE-TIME"): the audio frame whose PTS steps off the timeline is held
     // until the old audio has played out, then released on the new timeline --
     // nothing buffered is discarded. docs/nonseamless_audio.md 4a.
-    // disc_rephase and cell_seamless stay as ports (emu.sv wiring unchanged).
-    else if (aud_switch)     aud_resync_cnt <= 7'd64;
+    // The port that carried it is now aud_rephase_req: the AUDIO DECODER's own
+    // verdict that a latched re-time head is stale on the clock's timeline (step 6
+    // there) -- the one case the in-band path cannot fix without a reset, and the
+    // case the old display-time reset used to rescue (ULTIMATE_T2 boot -> menu,
+    // HW 2026-09-29). cell_seamless stays as a port and is inert.
+    else if (aud_switch || aud_rephase_req) aud_resync_cnt <= 7'd64;
     else if (aud_resync)     aud_resync_cnt <= aud_resync_cnt - 7'd1;
 end
 

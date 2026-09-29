@@ -186,7 +186,7 @@ module iso_reader_auddrain_tb;
         .clk(clk), .rst_n(rst_n),
         .start_streaming(start), .seek_ack(seek_ack), .jump_ack(jump_ack),
         .keep_vbuf(keep_vbuf_w), .jump_cross(jump_cross_w), .mode_switch(1'b0),
-        .aud_switch(1'b0), .disc_rephase(1'b0), .cell_seamless(1'b0),
+        .aud_switch(1'b0), .aud_rephase_req(1'b0), .cell_seamless(1'b0),
         .load_flush(load_flush_w), .pipe_rst_n(pipe_rst_n_w),
         .aud_flush(aud_flush_w), .aud_resync(aud_resync_w),
         .seek_flush(), .soft_flush(), .mount_flush()

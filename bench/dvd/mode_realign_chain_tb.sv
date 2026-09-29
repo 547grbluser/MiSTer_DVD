@@ -451,6 +451,7 @@ module mode_realign_chain_tb;
         .clk(clk), .rst_n(rst_n),
         .start_streaming(start), .seek_ack(seek_ack), .jump_ack(1'b0),
         .mode_switch(fc_mode_sw), .aud_switch(1'b0), .keep_vbuf(keep_vbuf),
+        .aud_rephase_req(1'b0),   // tied: an unconnected input floats Z into the aud_resync term
         // jump_ack is tied 0 in this bench, so no jump is ever acked and the crossing
         // level is never sampled -- a tie-off here is honest, not a stub.
         .jump_cross(1'b0),

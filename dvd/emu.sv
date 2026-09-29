@@ -3106,6 +3106,7 @@ wire       sw_blank;                    // hold the picture black across a mode 
 wire       realign_pend;                // an arm is open (see above)
 wire load_flush, aud_flush, aud_resync, seek_flush, mount_flush, soft_flush;
 reg  aud_disc_rephase;   // content PTS jump -> audio-only re-phase (driven below, beside the anchor CDC)
+wire aud_resync_req;     // dvd_audio_decode: its latched re-time head is stale -> audio-only re-phase
 wire pipe_rst_n, aud_rst_n;
 mode_realign mode_realign_i (
     .clk             (clk_sys),
@@ -3169,7 +3170,7 @@ flush_ctl flush_ctl_i (
     .keep_vbuf       (keep_vbuf),
     .jump_cross      (jump_cross),        // menu<->title crossing: gates soft_flush
     .load_flush      (load_flush),
-    .disc_rephase    (aud_disc_rephase),   // content PTS jump -> audio-only re-phase (VLC's RESET_PCR analogue)
+    .aud_rephase_req (aud_resync_req),     // the audio decoder's stale-latch verdict -> audio-only re-phase (docs/nonseamless_audio.md 4a step 6)
     .cell_seamless   (cell_seamless),      // ...unless the author says this cell continues the last one
     .aud_flush       (aud_flush),
     .aud_resync      (aud_resync),
@@ -4232,6 +4233,7 @@ dvd_audio_decode #(.CLK_HZ(27000000), .AUD_HZ(48000)) dvd_audio_decode_inst (
     .dbg_fbrel_cnt      (dbg_aud_fbrel_cnt),
     .dbg_skip_cnt       (dbg_aud_skip_cnt),
     .dbg_catch_cnt      (dbg_aud_catch_cnt),
+    .resync_req         (aud_resync_req),    // stale re-time latch -> flush_ctl.aud_rephase_req
     .dbg_play_err       (dbg_aud_play_err),
     .dbg_cur_codec      (dbg_cur_codec_w),
     .dbg_mp2_avalid     (dbg_mp2_avalid_w),
@@ -4666,8 +4668,9 @@ pts_cdc #(.W(35)) pts_cdc_delta (        // each re-anchor's delta + whether it 
 // RE-TIME), at the audio frame whose PTS steps off the timeline. A reset here --
 // when the PICTURE crosses -- discarded the ring's ~1.1-1.4 s of the new content's
 // opening at every non-seamless join (docs/nonseamless_audio.md 4a). The pulse
-// and its cooldown below are left wired (flush_ctl keeps the port) and are now
-// inert; the history that follows is why a re-phase is needed at all.
+// and its cooldown below drive NOTHING now (flush_ctl's re-phase input is the
+// audio decoder's resync_req instead); the history that follows is why a
+// re-phase is needed at all.
 // The display re-anchored because a tagged picture's PTS jumped off the current
 // timeline -- a cell change, a menu hop, a PGC boundary. Re-phase the audio chain
 // so it lands on the NEW timeline instead of continuing on the old one.

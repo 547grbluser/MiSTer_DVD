@@ -126,7 +126,7 @@ wire aud_rst_n;
 flush_ctl fc (
     .clk(clk), .rst_n(rst_n),
     .start_streaming(1'b0), .seek_ack(1'b0), .jump_ack(1'b0), .mode_switch(1'b0),
-    .aud_switch(aud_switch), .disc_rephase(1'b0), .keep_vbuf(1'b0),
+    .aud_switch(aud_switch), .aud_rephase_req(1'b0), .keep_vbuf(1'b0),
     .jump_cross(1'b0), .cell_seamless(1'b0),
     .load_flush(), .aud_flush(), .aud_resync(), .seek_flush(), .mount_flush(),
     .soft_flush(), .pipe_rst_n(), .aud_rst_n(aud_rst_n)

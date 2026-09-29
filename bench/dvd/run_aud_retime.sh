@@ -2,7 +2,8 @@
 # run_aud_retime.sh — the in-band timeline re-time in dvd/dvd_audio_decode.sv
 # (docs/nonseamless_audio.md 4a), plus the regression suites it touches.
 #
-#   GREEN  bench/dvd/aud_retime_tb.sv       S1-S6 (join shapes, forward gap, control, liveness)
+#   GREEN  bench/dvd/aud_retime_tb.sv       S1-S8 (join shapes, forward gap, control, liveness,
+#                                           the T2 late head, a stale latch)
 #          bench/dvd/dvd_audio_decode_tb.sv the drain gate / catch-up / de-click contract
 #          bench/dvd/flush_ctl_tb.sv        disc_rephase no longer resets audio
 #   RED    (--red) each arm removes ONE step of the re-time and must fail exactly
@@ -58,15 +59,33 @@ PYEOF
 }
 
 echo "== GREEN =="
-green aud_retime       "PASS: aud_retime_tb"      bench/dvd/aud_retime_tb.sv
+green aud_retime       "PASS: aud_retime_tb (S1-S8)" bench/dvd/aud_retime_tb.sv
 green dvd_audio_decode "PASS: dvd_audio_decode"   bench/dvd/dvd_audio_decode_tb.sv
 d=$(mktemp -d)
 if iverilog -g2012 -o "$d/sim" dvd/flush_ctl.sv bench/dvd/flush_ctl_tb.sv && vvp "$d/sim" > "$d/log" 2>&1 \
    && grep -q "ALL TESTS PASSED" "$d/log"; then echo "  PASS flush_ctl"
 else echo "  FAIL flush_ctl"; tail -8 "$d/log" | sed 's/^/      /'; fail=1; fi
 rm -rf "$d"
+# the emu.sv seam (no bench can see a wrong wire): decoder resync_req -> flush_ctl
+if python3 tools/check_aud_rephase_wiring.py > /dev/null; then echo "  PASS check_aud_rephase_wiring"
+else python3 tools/check_aud_rephase_wiring.py | sed 's/^/      /'; fail=1; fi
 
 if [ "${1:-}" = "--red" ]; then
+    # the wiring check must name both wrong wirings
+    d=$(mktemp -d)
+    sed 's/\.aud_rephase_req (aud_resync_req)/.aud_rephase_req (aud_disc_rephase)/' dvd/emu.sv > "$d/emu.sv"
+    sed 's/else if (aud_switch || aud_rephase_req) aud_resync_cnt/else if (aud_switch) aud_resync_cnt/' dvd/flush_ctl.sv > "$d/fc.sv"
+    if cmp -s "$d/emu.sv" dvd/emu.sv || cmp -s "$d/fc.sv" dvd/flush_ctl.sv; then
+        echo "  FAIL wiring RED: a mutation did not apply (anchor moved)"; fail=1
+    else
+        python3 tools/check_aud_rephase_wiring.py "$d/emu.sv" | grep -q "DISPLAY pulse" \
+            && echo "  PASS wiring RED (display pulse wired back in is named)" \
+            || { echo "  FAIL wiring RED: the display-pulse wiring passed"; fail=1; }
+        python3 tools/check_aud_rephase_wiring.py dvd/emu.sv "$d/fc.sv" | grep -q "does not include aud_rephase_req" \
+            && echo "  PASS wiring RED (request dropped from aud_resync is named)" \
+            || { echo "  FAIL wiring RED: a dropped request passed"; fail=1; }
+    fi
+    rm -rf "$d"
     echo "== RED =="
     # 1. no detector: the new timeline plays straight on after the old tail, on the
     #    OLD clock (S2), and a forward-gap head plays early (S4)
@@ -82,6 +101,15 @@ if [ "${1:-}" = "--red" ]; then
     # 4. no overlap trim: the new clip resumes a whole overlap late
     red overlap-off "FAIL S3: new timeline resumed more than STALE late" \
         "assign head_retime_stale = head_disc|||assign head_retime_stale = 1'b0 && head_disc"
+    # 6. the ULTIMATE_T2 regression (HW 2026-09-29): without the arrivals test a head
+    #    late by >= RETIME_WIN on the clock's own timeline is held as "other
+    #    timeline" and goes out 2.5 s late through the fallback
+    red agree-off "FAIL S7: the new segment played LATE" \
+        "((head_delta < RETIME_WIN) || arr_agree)|||(head_delta < RETIME_WIN)"
+    # 7. no stale-latch request: a latched head that the clock left behind is never
+    #    dropped
+    red resync-off "FAIL S8: no resync_req for a stale latch" \
+        "resync_req  <= 1'b1;|||resync_req  <= 1'b0;"
     # 5. over-trigger: a detector that fires on ordinary forward steps must be caught
     #    by the continuous control
     red over-trigger "FAIL S5: a continuous stream triggered a re-time" \

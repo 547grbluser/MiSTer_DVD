@@ -315,6 +315,21 @@ backpressures the demux for that time, well inside the ~1 s VBUF cushion.
   by more than `STALE` and less than the window is discarded (`head_retime_stale`). The
   new timeline resumes within 50 ms. A head late by 0.5 s or more means the clock is
   still on the other timeline, so it waits.
+- **⚠ Step 4's premise was CORRECTED after HW round 1.** The premise was that a head late
+  by `RETIME_WIN` or more means the clock is on the other timeline. It is not always true
+  (ULTIMATE_T2, below). The discriminator is now the ARRIVALS. `arr_agree` is a two-sided
+  test: the demux's newest audio sits within (−3 s, +50 ms] of the clock. The −3 s side
+  covers the parse front's normal ~1.1–1.6 s lead. The old `arr_current` is one-sided and
+  would read "current" for arrivals any distance ahead of the clock.
+  - If the arrivals agree, a late head is stale on the clock's own timeline and is
+    discarded at any lateness.
+  - If they disagree, the clock is elsewhere and the head waits.
+- **Step 6, a STALE LATCH.** A head latched while the clock was elsewhere can turn out
+  `RETIME_WIN` or more late once the clock arrives, with the arrivals agreeing. Frames
+  already dispatched cannot be dropped except by a reset. So the decoder raises
+  `resync_req`. `emu.sv` routes it to `flush_ctl.aud_rephase_req` (the port was renamed
+  from `disc_rephase`), which fires `aud_resync`. That is the old display-time reset, now
+  only on the decoder's own evidence. `tools/check_aud_rephase_wiring.py` gates the seam.
 - **Liveness.** `HOLD_W` (~0.62 s) force-re-arms a hold that never sees its underrun.
   A `retime` arm that never reaches its window takes the ordinary `arm_timer` fallback
   (2.5 s).
@@ -338,8 +353,15 @@ backpressures the demux for that time, well inside the ~1 s VBUF cushion.
   | S5 continuous control | no re-time, no re-arm, no gap |
   | S6 no re-anchor | fallback plays it |
 
-  RED arms: detector off, hold off, window off, overlap trim off, and an over-triggering
-  detector. Each fails its own scenario.
+  | S7 T2 shape: clock already new, head 0.6 s late, current audio behind it | head discarded, lands 45 ms late, no fallback, no reset |
+  | S8 stale latch: latched on the old clock, 0.7 s late when the clock arrives | exactly one `resync_req`, fresh audio in phase |
+
+  S1–S7 must raise no `resync_req`. The bench models the demux arrival front (frames are
+  published only after `arr_pts` moves, as in the core) and the reset `resync_req` causes.
+  RED arms: detector off, hold off, window off, overlap trim off, an over-triggering
+  detector, agree-off (fails S7: the T2 regression), and resync-off (fails S8). Each fails
+  its own scenario. The wiring check has two RED mutations: the display pulse wired back
+  in, and the request dropped from the trigger.
 - The same runner reruns `dvd_audio_decode_tb` and `flush_ctl_tb`.
 - `run_seamless_audio.sh --red`: its RED arm now restores the display-time re-phase,
   and `flush_ctl_tb` [10b]–[10d] catch it.
@@ -357,6 +379,44 @@ backpressures the demux for that time, well inside the ~1 s VBUF cushion.
   picture crosses. HW must confirm it.
 - **Forward steps under 1 s are not re-timed.** The old display re-phase was backward-only
   too, so nothing regresses there.
+
+### HW round 1 (2026-09-29, build `DVD_nsaudio_20260929_1726`, SEED 9, 90.48/88.25 MHz)
+
+**Thayer VTS_08 (20 ms capture `.sim/nsaudio/fast_fix_1.jsonl`, `join_loss.py`):**
+
+| | before | after |
+|---|---|---|
+| audio lost per join, ±1.5 s | 0.8–2.3 s | **0.0 ms** at 9 of 10 joins, 29.7 ms at the first |
+| spurious −66.8 ms anchors | 6 | 0 |
+| `play_err` after a join | 0, or −1.3…−1.4 s | 0–3 ms |
+| ring at a join | flushed | 28–34 frames throughout |
+
+(The "AUD_RESET" rows every 21.8 s in `events.py` output are the 16-bit `aud_play`
+counter wrapping, not resets.)
+
+**⚠ REGRESSION FOUND: ULTIMATE_T2, boot → menu (control arm = `DVD_pictime`, same launch).**
+The first menu segment follows a 4.5 s still (`flags.still`). Old build: audio released at
+21.94 s against the old clock (`play_err` +4574), then the display's backward re-anchor at
+21.985 s fired `aud_resync`, and the fresh audio played **in sync from 22.15 s**. New build:
+the display re-anchored at 21.96 s. The first new-segment frame to reach the head arrived
+**0.53 s LATE against that already-new clock** (`av_drift` −530 at 22.56 s), with ~0.8 s of
+newer, current audio queued behind it. It was treated as "late by ≥ 0.5 s, so the clock must
+be on the other timeline", held, and released by the `arm_timer` fallback at 24.42 s. It then
+played **2.5 s late** until the next still. (The 50 s of silence afterwards is on both builds:
+a silent still menu.)
+
+**Root cause:** step 4's premise, "late by ≥ RETIME_WIN ⇒ the clock is on the other
+timeline", is false when the audio is simply behind on the same timeline. The old flush
+masked that case by discarding the stale head. **Fix:** use the discriminator the decoder
+already has for the mid-play catch-up, `arr_current` (the demux's newest arrival is at or
+ahead of the clock):
+- If the arrivals are current, a late head is stale on the current timeline: discard it at
+  dispatch, and if one is already latched, release it so the existing catch-up discards the
+  backlog.
+- If the arrivals are also far behind the clock, the clock is on the other timeline: hold.
+  That covers Thayer, where the arrivals are new-timeline and the clock is still old.
+
+Needs a bench scenario (S7: the clock already new, the head late > WIN, arrivals current).
 
 ## 4b. HW round (next)
 
