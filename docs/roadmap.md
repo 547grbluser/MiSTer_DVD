@@ -662,7 +662,8 @@ HW-confirmed on a real PAL DVD: correct 720×576 geometry, 50 Hz lock, A/V in sy
    boot FMV, Interlaced) to decide F4.
 3. **F2:** chroma-row reuse (display 6 → 3 words per macroblock-line on Progressive).
    ✅ Bit-exact in sim, HW-measured 2026-09-29 (`feature/chroma-row-reuse`): Progressive
-   lates 0 on ROGER (3.6), Office (1.0), Thayer VTS_09 and MiB.
+   lates 0 on ROGER (3.6), Office (1.0), Thayer VTS_09 and MiB, then on the rest of the
+   census set too (Thayer VTS_08, Angel, BBB PAL, VCD, the boot FMV, Bob and Blend).
    **F3/F4 are no longer needed for the measured discs.** Keep them for a disc that still
    lates, or for a new display-side master.
 4. **F3:** display reads on the idle `ram2` port, with an explicit write-drain handshake
