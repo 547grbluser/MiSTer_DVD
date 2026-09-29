@@ -676,9 +676,10 @@ HW-confirmed on a real PAL DVD: correct 720×576 geometry, 50 Hz lock, A/V in sy
 (Thayer VTS_08), plan and data in `docs/nonseamless_audio.md`, branch
 `feature/nonseamless-audio`.
 
-**Also open:** Thayer boot-FMV Interlaced lates (3.4/s, deterministic from boot). Not
-starvation, not the drop loop (Frame Drop Off refuted it). Needs the per-picture
-instrument (`docs/decode_pacing.md` §6c).
+~~**Also open:** Thayer boot-FMV Interlaced lates (3.4/s, deterministic from boot).~~
+✅ **Resolved (PR #140):** 0 lates from the FMV's first picture after F2, and 0 pictures
+over budget. The remaining count is `lates` ticking during the First Play still
+(`docs/decode_pacing.md` §6c, §2c).
 
 ### Film 24p Out — progressive-film cadence fix (issue fj#124)
 
