@@ -22,7 +22,7 @@ predate later confirmations; the `CLAUDE.md` index carries the reconciled status
 
 ## Hardware status (THIS fork, verified 2026-06-21)
 
-- ✅ **DECODE PACING F2: THE DISPLAY REUSES CHROMA ROWS (2026-09-29, branch
+- ✅ **DECODE PACING F2: THE DISPLAY REUSES CHROMA ROWS (2026-09-29,
   ✅ MERGED PR #139, bit-exact in sim, HW-MEASURED 2026-09-29).**
   ★ **Progressive lates now read 0 on every disc measured:** ROGER 3.58 → 0 (control arm:
   the F1 build re-run in the same session), Office 1.0 → 0, Thayer VTS_09 0.08 → 0, MiB 0.
