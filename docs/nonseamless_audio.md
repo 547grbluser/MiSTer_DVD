@@ -1,6 +1,6 @@
 # Audio gaps at non-seamless cell joins (Thayer's Quest VTS_08) — investigation
 
-**Status:** ⏳ open. Offline analysis done 2026-09-29 (§2a); event-level rig capture next. Branch
+**Status:** 🔧 fixed in sim, ⏳ HW round pending (2026-09-29). Root cause 1: `pts_assoc` second-field PTS (§2b). Root cause 3: in-band audio re-time (§4a). §4b is the next step. Branch
 `feature/nonseamless-audio` (`CORE_VERSION dev-nsaudio`, set in its first commit).
 Symptom first recorded in `docs/decode_pacing.md` §2b.
 
@@ -247,7 +247,7 @@ the clock not yet having re-anchored when that frame reaches the head of the que
    write the rationale here before touching `flush_ctl`. → §4a (proposal, not yet
    approved).
 
-## 4a. Proposed design for root cause 3 (the head-discard gap), NOT yet approved
+## 4a. Design for root cause 3 (the head-discard gap): IMPLEMENTED, sim-gated (approved by the maintainer 2026-09-29)
 
 **Why the flush cannot simply be kept, moved or narrowed.** It fires when the *display*
 crosses the join, but it resets the *ring*. The ring is a parse-front structure that by
@@ -297,6 +297,84 @@ backpressures the demux for that time, well inside the ~1 s VBUF cushion.
 - **Bench first:** a dispatcher bench with a synthetic ring carrying old-tail +
   new-head frames, a clock that re-anchors before, at, and after the head reaches the
   dispatcher, and a RED arm for each of steps 2–4.
+
+### As built (2026-09-29)
+
+- **`dvd/dvd_audio_decode.sv` "IN-BAND TIMELINE RE-TIME".** The detector compares a
+  tagged head's PTS against the last tagged frame dispatched to play (`last_pts`).
+  Backward by more than 50 ms or forward by more than 1 s trips it. It runs only with
+  `sched_en`, and `last_pts` clears on reset and whenever `sched_en` is low. The hold
+  (`disc_hold`) keeps S_IDLE from popping while `draining || play_pts_valid`. The
+  existing underrun re-arm closes the gate when the old tail runs out. The head then
+  dispatches with `cur_disc`, which sets `retime`. A `retime` arm releases only when
+  `0 <= stc - play_pts < 0.5 s`.
+- **Overlap trim (step 5, added while writing the bench).** If the old audio runs past
+  its video, the display re-anchors before the tail ends. The new head then reads
+  50–500 ms late on its own timeline. Playing it would leave the whole clip that late,
+  because the mid-play catch-up acts only past 300 ms. So a discontinuity head that is late
+  by more than `STALE` and less than the window is discarded (`head_retime_stale`). The
+  new timeline resumes within 50 ms. A head late by 0.5 s or more means the clock is
+  still on the other timeline, so it waits.
+- **Liveness.** `HOLD_W` (~0.62 s) force-re-arms a hold that never sees its underrun.
+  A `retime` arm that never reaches its window takes the ordinary `arm_timer` fallback
+  (2.5 s).
+- **`dvd/flush_ctl.sv`:** `aud_resync` fires only on `aud_switch`. `disc_rephase` and
+  `cell_seamless` stay as ports and are inert. `emu.sv`'s re-phase pulse and its 0.62 s
+  cooldown are still wired, and now drive nothing.
+- **New port `dbg_retime_cnt`:** scored by the bench, not in telemetry (word 5 is full).
+  On the rig a re-time reads as one gate closure and one underrun re-arm, with **no**
+  `aud_play` reset, and `play_err` lands at ~0.
+
+**Gates.**
+- `bench/dvd/run_aud_retime.sh --red`. `aud_retime_tb` S1–S6 score every unique LPCM
+  sample that leaves the module, and the STC when it left:
+
+  | scenario | result |
+  |---|---|
+  | S1 crossing at the old end | all kept, 112-clk gap |
+  | S2 audio ends 150 ms before the crossing | silence, then the head exactly at its PTS |
+  | S3 70 ms overlap | 5 frames trimmed, resumes 45 ms late |
+  | S4 2 s forward gap | head held to its PTS |
+  | S5 continuous control | no re-time, no re-arm, no gap |
+  | S6 no re-anchor | fallback plays it |
+
+  RED arms: detector off, hold off, window off, overlap trim off, and an over-triggering
+  detector. Each fails its own scenario.
+- The same runner reruns `dvd_audio_decode_tb` and `flush_ctl_tb`.
+- `run_seamless_audio.sh --red`: its RED arm now restores the display-time re-phase,
+  and `flush_ctl_tb` [10b]–[10d] catch it.
+- **Two old stimuli changed:** `dvd_audio_decode_tb` C6 and C9 fed a PTS *backward* from
+  the frame just played. That is a discontinuity now, which is a different claim. They
+  are made monotonic, as a real late backlog is.
+
+**Known limitations.**
+- **A display crossing more than 2.5 s after its audio ends** releases early through the
+  `arm_timer` fallback. The old flush path had the same bound.
+- **An overlap resumes up to 50 ms late** (`STALE_TICKS`), inside ordinary lip-sync
+  tolerance.
+- **The Matrix white-rabbit cells now take a hold** where the carve-out gave none. The
+  expected gap is ~0: the soundtrack is continuous there, so the old audio ends as the
+  picture crosses. HW must confirm it.
+- **Forward steps under 1 s are not re-timed.** The old display re-phase was backward-only
+  too, so nothing regresses there.
+
+## 4b. HW round (next)
+
+1. `USE_DOCKER=1 ./build_release.sh --compile`. Ask the UMD and H264 sessions for a
+   slot, and run `mister.py state` before deploying.
+2. Thayer VTS_08 with the same launch and `--telem-fast-ms 20`, both fixes in. At every
+   join expect:
+   - one anchor, with no `-66.8` spurious anchor before it;
+   - no `aud_play` reset;
+   - a gap of tens of ms, not 1.3 s;
+   - `play_err` ~0 after each join, never −1.3 s.
+3. Regression:
+   - The Matrix PGC 1 across a white-rabbit cell (listen for a click or gap);
+   - T2 / MiB looping menus and Scooby-Doo 2's whac-a-mole clips (lip-sync and
+     "good job");
+   - a play-all TV disc across an episode join.
+4. Capture-card audio (`audio_check.py`, or a plain capture) across one Thayer join,
+   to confirm by ear what the telemetry says.
 
 ## 5. Where to look
 

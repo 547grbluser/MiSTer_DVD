@@ -4661,6 +4661,13 @@ pts_cdc #(.W(35)) pts_cdc_delta (        // each re-anchor's delta + whether it 
     .dst_clk(clk_sys), .dst_rst_n(reset_n), .dst_data(av_anchor_delta_w), .dst_valid(av_anchor_delta_valid));
 
 // ---- CONTENT-DISCONTINUITY AUDIO RE-PHASE (2026-09-07) ---------------------
+// ⛔ RETIRED AS AN AUDIO RESET 2026-09-29: flush_ctl ignores disc_rephase now, and
+// the re-phase happens IN BAND in dvd/dvd_audio_decode.sv (IN-BAND TIMELINE
+// RE-TIME), at the audio frame whose PTS steps off the timeline. A reset here --
+// when the PICTURE crosses -- discarded the ring's ~1.1-1.4 s of the new content's
+// opening at every non-seamless join (docs/nonseamless_audio.md 4a). The pulse
+// and its cooldown below are left wired (flush_ctl keeps the port) and are now
+// inert; the history that follows is why a re-phase is needed at all.
 // The display re-anchored because a tagged picture's PTS jumped off the current
 // timeline -- a cell change, a menu hop, a PGC boundary. Re-phase the audio chain
 // so it lands on the NEW timeline instead of continuing on the old one.

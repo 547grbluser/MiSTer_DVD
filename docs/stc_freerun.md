@@ -934,6 +934,12 @@ sampling an already-low `sp_active`. `red-hold` is what reported it.
 
 ### 12.2 A seamless-branch junction is not a content change
 
+> **Superseded 2026-09-29** (`docs/nonseamless_audio.md` §4a). The display-time
+> `aud_resync` this section carved seamless cells out of is retired altogether. A
+> re-anchor resets no audio; the audio re-times in band at the frame whose PTS steps off
+> the timeline. The carve-out below is kept as history. `cell_seamless` is still exported
+> and wired, but `flush_ctl` no longer reads it.
+
 `disc_rephase` (§3.7) turns the display's re-anchor into `aud_resync`, which resets
 `audio_ring` **and** `dvd_audio_decode`. It was accepted on the note at `dvd/emu.sv`:
 *"titles re-anchor about once per playback (MEASURED: reanchors=1 over 80 s on

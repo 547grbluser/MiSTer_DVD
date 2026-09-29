@@ -17,8 +17,8 @@
 //     (soft_flush additionally needs jump_cross -- see [4] vs [4b] below)
 //   mode_switch (interlace/film raster)     x     x     x     -        -
 //   aud_switch (audio track)                -     -     -     -        x
-//   disc_rephase (content PTS jump)         -     -     -     -        x
-//   disc_rephase & cell_seamless            -     -     -     -        -
+//   disc_rephase (content PTS jump)         -     -     -     -        -   (re-phase is in-band
+//   disc_rephase & cell_seamless            -     -     -     -        -    since 2026-09-29)
 //
 // mount_flush = MOUNT ONLY (pal_detect's immediate PAL re-arm: a mount is the one event
 // that may change the standard). soft_flush = the decoder soft-reset request
@@ -236,7 +236,11 @@ module flush_ctl_tb;
     expect_idle("[10b] not idle before disc_rephase");
     disc_rephase = 1;
     fork pulse_and_measure; begin @(posedge clk); disc_rephase <= 0; end join
-    check_row(0, 0, 0, 1, 0, 0, "[10b] disc_rephase must fire aud_resync only");
+    // ⛔ CHANGED 2026-09-29: it fires NOTHING now. The re-phase moved in band
+    // (dvd_audio_decode's IN-BAND TIMELINE RE-TIME, gated by run_aud_retime.sh),
+    // because a reset here -- at the picture's crossing -- discarded the new
+    // content's buffered opening (docs/nonseamless_audio.md 4a).
+    check_row(0, 0, 0, 0, 0, 0, "[10b] disc_rephase must fire NOTHING (audio re-times in band)");
 
     // [10c] ...but NOT on a cell the author marked seamless_play. A seamless-branch
     // junction restarts the timestamps while the soundtrack plays straight through
@@ -257,7 +261,7 @@ module flush_ctl_tb;
     expect_idle("[10d] not idle before the control disc_rephase");
     disc_rephase = 1;
     fork pulse_and_measure; begin @(posedge clk); disc_rephase <= 0; end join
-    check_row(0, 0, 0, 1, 0, 0, "[10d] disc_rephase off a seamless cell still fires aud_resync");
+    check_row(0, 0, 0, 0, 0, 0, "[10d] disc_rephase off a seamless cell fires NOTHING either");
 
     // [10e] CONTROL: cell_seamless must gate ONLY the discontinuity re-phase. An
     // audio TRACK SWITCH on the same cell is a real content change and must still

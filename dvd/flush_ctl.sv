@@ -151,7 +151,22 @@ always @(posedge clk) begin
     // cell re-anchors with genuinely restarting audio and pulses no seek_ack, so a
     // navigation-event gate would silently drop the menu case #63 was built for.
     // cell_seamless is 0 in every menu, so menus keep their re-phase untouched.
-    else if (aud_switch || (disc_rephase && !cell_seamless)) aud_resync_cnt <= 7'd64;
+    // ⛔⛔ RETIRED 2026-09-29: disc_rephase NO LONGER RESETS AUDIO (and so the
+    // cell_seamless carve-out above has nothing left to gate). Everything above
+    // explains why a discontinuity must re-phase audio; what it could not fix is
+    // WHERE this did it. The pulse comes when the PICTURE crosses the join, but it
+    // resets the RING -- a parse-front buffer that by then already holds the new
+    // content's first ~1.1-1.4 s. Every such reset threw that opening away:
+    // ~1.3 s of silence at every non-seamless cell join (Thayer's Quest: every
+    // clip; 1,036 of 1,525 library discs have such joins in a title), and the
+    // same loss behind Scooby-Doo 2's "good job" -> "job" and the Matrix
+    // white-rabbit dropouts, each once fixed by suppressing one trigger.
+    // The re-phase now happens IN BAND, in dvd/dvd_audio_decode.sv ("IN-BAND
+    // TIMELINE RE-TIME"): the audio frame whose PTS steps off the timeline is held
+    // until the old audio has played out, then released on the new timeline --
+    // nothing buffered is discarded. docs/nonseamless_audio.md 4a.
+    // disc_rephase and cell_seamless stay as ports (emu.sv wiring unchanged).
+    else if (aud_switch)     aud_resync_cnt <= 7'd64;
     else if (aud_resync)     aud_resync_cnt <= aud_resync_cnt - 7'd1;
 end
 

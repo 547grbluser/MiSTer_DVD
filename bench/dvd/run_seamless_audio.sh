@@ -60,8 +60,10 @@ if [ "${1:-}" = "--red" ]; then
     red reader-wrong-bit dvd/dvd_iso_reader.sv \
         's|wire       cc_seamless_play = cc_rd\[3\];|wire       cc_seamless_play = cc_rd[2];|' \
         dvd/bcd_time_add.sv bench/dvd/iso_reader_ilvu_tb.sv
-    red flush-no-gate dvd/flush_ctl.sv \
-        's|(disc_rephase \&\& !cell_seamless)|(disc_rephase)|' \
+    # the display-time audio re-phase is retired (in-band since 2026-09-29,
+    # docs/nonseamless_audio.md 4a): restoring it must fail flush_ctl_tb [10b]
+    red display-rephase-restored dvd/flush_ctl.sv \
+        's|else if (aud_switch)     aud_resync_cnt|else if (aud_switch \|\| disc_rephase) aud_resync_cnt|' \
         bench/dvd/flush_ctl_tb.sv
 fi
 

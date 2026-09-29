@@ -1,0 +1,92 @@
+#!/usr/bin/env bash
+# run_aud_retime.sh — the in-band timeline re-time in dvd/dvd_audio_decode.sv
+# (docs/nonseamless_audio.md 4a), plus the regression suites it touches.
+#
+#   GREEN  bench/dvd/aud_retime_tb.sv       S1-S6 (join shapes, forward gap, control, liveness)
+#          bench/dvd/dvd_audio_decode_tb.sv the drain gate / catch-up / de-click contract
+#          bench/dvd/flush_ctl_tb.sv        disc_rephase no longer resets audio
+#   RED    (--red) each arm removes ONE step of the re-time and must fail exactly
+#          the scenario that step exists for.
+set -u
+cd "$(dirname "$0")/../.."
+fail=0
+SRC="dvd/ac3/*.sv dvd/lpcm_unpack.sv dvd/mp2/mp2_decode.sv"
+iv() { iverilog -g2012 -D__IVERILOG__ -I rtl/mpeg2 -I dvd/ac3 -o "$@" 2>&1 | grep -v "sorry:" ; }
+
+green() {  # name pass-regex tb [dut-override]
+    local name=$1 pat=$2 tb=$3 dut=${4:-dvd/dvd_audio_decode.sv}
+    local d; d=$(mktemp -d)
+    iv "$d/sim" $SRC "$dut" "$tb" > "$d/build"
+    if [ -f "$d/sim" ] && vvp "$d/sim" > "$d/log" 2>&1 && grep -q "$pat" "$d/log"; then
+        echo "  PASS $name"; grep -E '^\s+\[' "$d/log" | sed 's/^/      /'
+    else
+        echo "  FAIL $name"; tail -15 "$d/build" "$d/log" 2>/dev/null | sed 's/^/      /'; fail=1
+    fi
+    rm -rf "$d"
+}
+
+red() {    # name  expected-FAIL-regex  python-replacements (old|||new per line)
+    local name=$1 pat=$2 subs=$3
+    local d; d=$(mktemp -d)
+    if ! python3 - "$d/dvd_audio_decode.sv" "$subs" <<'PYEOF'
+import sys
+s = open('dvd/dvd_audio_decode.sv').read()
+for line in sys.argv[2].strip().split('\n'):
+    old, new = line.split('|||')
+    if old not in s:
+        sys.exit("RED anchor moved: " + old)
+    s = s.replace(old, new)
+open(sys.argv[1], 'w').write(s)
+PYEOF
+    then echo "  FAIL $name: mutation did not apply"; fail=1; rm -rf "$d"; return; fi
+    iv "$d/sim" $SRC "$d/dvd_audio_decode.sv" bench/dvd/aud_retime_tb.sv > "$d/build"
+    if [ ! -f "$d/sim" ]; then
+        echo "  FAIL $name: mutated module did not build -- the arm proves nothing"; fail=1
+    else
+        vvp "$d/sim" > "$d/log" 2>&1 || true
+        if [ ! -s "$d/log" ]; then
+            echo "  FAIL $name: no output -- not a verdict"; fail=1
+        elif grep -q "PASS: aud_retime_tb" "$d/log"; then
+            echo "  FAIL $name: the bench PASSED without this step"; fail=1
+        elif grep -qE "$pat" "$d/log"; then
+            echo "  PASS $name"; grep -E "^FAIL S" "$d/log" | head -3 | sed 's/^/      /'
+        else
+            echo "  FAIL $name: failed, but not on its own scenario"; grep "^FAIL" "$d/log" | head -3 | sed 's/^/      /'; fail=1
+        fi
+    fi
+    rm -rf "$d"
+}
+
+echo "== GREEN =="
+green aud_retime       "PASS: aud_retime_tb"      bench/dvd/aud_retime_tb.sv
+green dvd_audio_decode "PASS: dvd_audio_decode"   bench/dvd/dvd_audio_decode_tb.sv
+d=$(mktemp -d)
+if iverilog -g2012 -o "$d/sim" dvd/flush_ctl.sv bench/dvd/flush_ctl_tb.sv && vvp "$d/sim" > "$d/log" 2>&1 \
+   && grep -q "ALL TESTS PASSED" "$d/log"; then echo "  PASS flush_ctl"
+else echo "  FAIL flush_ctl"; tail -8 "$d/log" | sed 's/^/      /'; fail=1; fi
+rm -rf "$d"
+
+if [ "${1:-}" = "--red" ]; then
+    echo "== RED =="
+    # 1. no detector: the new timeline plays straight on after the old tail, on the
+    #    OLD clock (S2), and a forward-gap head plays early (S4)
+    red detect-off "FAIL S2: new-timeline audio played while the clock was on the OLD" \
+        "wire  head_disc = sched_en && last_pts_v|||wire  head_disc = 1'b0 && sched_en && last_pts_v"
+    # 2. no hold: the head dispatches into the still-draining gate, sample-continuous
+    red hold-off "FAIL S2: new-timeline audio played while the clock was on the OLD" \
+        "wire  disc_hold = head_disc && (draining || play_pts_valid) && !(&hold_tmr);|||wire  disc_hold = 1'b0;"
+    # 3. no timeline window: the re-armed head reads 'late' against the old clock and
+    #    releases at once -- the Thayer E-state release (2b step 3)
+    red window-off "FAIL S2: new-timeline audio played while the clock was on the OLD" \
+        "(!retime || (start_delta < RETIME_WIN))|||1'b1"
+    # 4. no overlap trim: the new clip resumes a whole overlap late
+    red overlap-off "FAIL S3: new timeline resumed more than STALE late" \
+        "assign head_retime_stale = head_disc|||assign head_retime_stale = 1'b0 && head_disc"
+    # 5. over-trigger: a detector that fires on ordinary forward steps must be caught
+    #    by the continuous control
+    red over-trigger "FAIL S5: a continuous stream triggered a re-time" \
+        "(pts_step < -DISC_BACK_TICKS)|||(pts_step < DISC_BACK_TICKS)"
+fi
+
+[ $fail -eq 0 ] && echo "ALL GREEN" || echo "FAILURES"
+exit $fail

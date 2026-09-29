@@ -46,9 +46,9 @@ module dvd_audio_decode #(
     input  logic        enable,          // O5 "Audio" toggle (default On)
     input  logic        pause,           // gamepad transport: freeze audio (hold, silence)
     // dvd/flush_ctl.sv's aud_resync mirrored (aud_resync_o): rst_n (=aud_rst_n) is
-    // asserted for this GENTLE cause (an audio-track switch, or a display re-anchor
-    // that is not on a seamless cell -- content keeps playing, only the audio phase
-    // resets) as opposed to a HARD cause (aud_flush: seek/mount/jump, a real
+    // asserted for this GENTLE cause (an audio-track switch -- content keeps playing,
+    // only the audio phase resets; a display re-anchor no longer resets audio since
+    // 2026-09-29, see IN-BAND TIMELINE RE-TIME) as opposed to a HARD cause (aud_flush: seek/mount/jump, a real
     // discontinuity). Selects instant-cut vs. de-click ramp in the output mux below.
     input  logic        aud_soft_switch,
 
@@ -175,6 +175,9 @@ module dvd_audio_decode #(
     // window stale-skip). Split out 2026-09-18 so telemetry can tell the two
     // apart: they discard for opposite reasons (docs/dvd_nav.md).
     output logic [3:0]  dbg_catch_cnt,
+    // In-band timeline re-times (a discontinuity head dispatched into a re-armed
+    // gate; docs/nonseamless_audio.md 4a). Saturating.
+    output logic [3:0]  dbg_retime_cnt,
     // Playback-position error vs STC: (stc - play_anchor) - samples*1.875,
     // in 90 kHz ticks >> 4 (same 178 us/unit scale as the drift row). Positive
     // = playback LATE. Starts ~av_ofs at each release; the SLOPE is the read
@@ -310,6 +313,7 @@ module dvd_audio_decode #(
     logic        seen_valid;
     logic        ce_play_d;
     logic        armed_data;                    // a frame dispatched since (re-)arm
+    logic        retime;                        // this arm was taken at a timeline discontinuity
     logic [ARM_TIMEOUT_W-1:0] arm_timer;        // fallback-release timer
 
     // ---- STALE-SKIP (v4, armed only): discard audio whose PTS is already past
@@ -379,7 +383,8 @@ module dvd_audio_decode #(
                         ( frame_pts_valid
                             ? (head_delta > (skip_run ? STALE_TICKS : CATCHUP_TICKS))
                             : skip_run );
-    wire head_discard = head_stale || head_catchup;
+    wire head_retime_stale;           // IN-BAND RE-TIME (below): late head on the new timeline
+    wire head_discard = head_stale || head_catchup || head_retime_stale;
 
     // ---- PRE-ANCHOR DISPATCH HOLD (v5.1): audio packs reach the demux BEFORE
     // the first video PTS, so for a brief window stc_anchored=0 and the
@@ -394,6 +399,62 @@ module dvd_audio_decode #(
     // ~half-ARM_TIMEOUT fallback opens it for video-PTS-less streams (raw ES).
     logic [ARM_TIMEOUT_W-2:0] anchor_tmr;
     wire pre_anchor_hold = sched_en && !stc_anchored && !(&anchor_tmr);
+
+    // ---- IN-BAND TIMELINE RE-TIME (2026-09-29, docs/nonseamless_audio.md 4a) ----
+    // A content discontinuity (a non-seamless cell join, a menu loop, a PGC
+    // boundary) restarts the audio PTS in the stream itself: the frame that
+    // carries it is the exact point where the old timeline's audio ends and the
+    // new one's begins. Re-time HERE, at that frame, instead of flushing:
+    //   1. DETECT: a PTS-tagged head whose PTS steps off the dispatched timeline
+    //      (backward > DISC_BACK, or forward > DISC_FWD -- above the spec's
+    //      0.7 s maximum PTS spacing, so ordinary sparse tags never trip it).
+    //   2. HOLD: while the old timeline still has audio downstream (draining, or
+    //      armed with a latched play_pts) the frame is NOT popped. The decode
+    //      and PCM FIFOs play the old tail out at the normal rate -- nothing
+    //      is discarded -- until the underrun re-arm below closes the gate.
+    //   3. RE-ARM WITH EMPTY FIFOs: then the frame dispatches into the armed
+    //      gate and latches play_pts. This is the one re-arm that cannot hit the
+    //      v5.3 deadlock (a re-arm with FULL FIFOs): here they are empty.
+    //   4. RELEASE ON THE RIGHT TIMELINE: that arm is a `retime` arm, whose
+    //      release also needs stc - play_pts < RETIME_WIN. While the display
+    //      has not yet crossed, the clock is still on the OLD timeline and a
+    //      backward-stepped frame reads grossly LATE; releasing it there is how
+    //      Thayer's audio ended up 1.4 s early for whole clips (2b step 3).
+    //      The display's own re-anchor brings the clock within the window.
+    // ★ WHY NOT THE DISPLAY-TIME FLUSH IT REPLACES (flush_ctl aud_resync on
+    // disc_rephase): that fired when the PICTURE crossed the join, but it reset
+    // the RING -- a parse-front buffer that by then already held the new cell's
+    // first ~1.1-1.4 s. Every such flush threw that opening away (Thayer: ~1.3 s
+    // of silence at every clip; Scooby-Doo 2's "good job" -> "job" was the same
+    // loss behind a different trigger).
+    // Liveness: a hold that never sees its underrun (HOLD_W, ~0.6 s) forces the
+    // re-arm; a retime arm that never reaches its window takes the ordinary
+    // arm_timer fallback. Only with scheduling on (sched_en): the A/V Sync Off
+    // diagnostic free-runs exactly as before.
+    localparam logic signed [34:0] DISC_BACK_TICKS = 35'sd4500;     // 50 ms
+    localparam logic signed [34:0] DISC_FWD_TICKS  = 35'sd90000;    // 1 s
+    localparam logic signed [34:0] RETIME_WIN      = 35'sd45000;    // 0.5 s
+    localparam int HOLD_W = 24;                                     // 2^24/27 MHz ~ 0.62 s
+    logic [32:0] last_pts;          // PTS of the last tagged frame dispatched to play
+    logic        last_pts_v;
+    logic        cur_disc;          // the frame being dispatched is a discontinuity head
+    logic [HOLD_W-1:0] hold_tmr;
+    wire  signed [34:0] pts_step = $signed({2'b0, frame_pts}) - $signed({2'b0, last_pts});
+    wire  head_disc = sched_en && last_pts_v && frame_pts_valid &&
+                      ((pts_step < -DISC_BACK_TICKS) || (pts_step > DISC_FWD_TICKS));
+    wire  disc_hold = head_disc && (draining || play_pts_valid) && !(&hold_tmr);
+    wire  hold_expired = head_disc && (draining || play_pts_valid) && (&hold_tmr);
+    // 5. OVERLAP: the old cell's audio may run a little past its video, so the
+    //    display can re-anchor while the old tail is still playing. The new
+    //    head then reads slightly LATE on its own timeline. Playing it anyway
+    //    would leave the whole new clip that late (the mid-play catch-up only
+    //    acts past 300 ms), so a discontinuity head that is late by more than
+    //    STALE but less than RETIME_WIN is discarded at the re-armed gate,
+    //    exactly like the load-window stale-skip -- bounded by the overlap.
+    //    Late by RETIME_WIN or more means the clock is still on the OTHER
+    //    timeline: that head is kept and waits (step 4), never discarded.
+    assign head_retime_stale = head_disc && !draining && !play_pts_valid &&
+                               (head_delta > STALE_TICKS) && (head_delta < RETIME_WIN);
 
     // codec sink readiness for the byte currently offered
     logic        ac3_full;
@@ -410,6 +471,8 @@ module dvd_audio_decode #(
     assign ring_ready = consume;                          // pop on consume only
 
     assign frame_pop = (state == S_POP);                  // 1-cycle descriptor pop
+    // a discontinuity head entering the (re-armed) decoder: its arm is a retime arm
+    wire disc_dispatch = (state == S_POP) && cur_disc && cur_pts_valid && !discard_cur;
 
     always_ff @(posedge clk) begin
         if (rst) begin
@@ -425,8 +488,17 @@ module dvd_audio_decode #(
             anchor_tmr         <= '0;
             dbg_skip_cnt       <= '0;
             dbg_catch_cnt      <= '0;
+            last_pts           <= '0;
+            last_pts_v         <= 1'b0;
+            cur_disc           <= 1'b0;
+            hold_tmr           <= '0;
+            dbg_retime_cnt     <= '0;
         end else begin
             dispatch_pts_valid <= 1'b0;       // 1-cycle pulse
+            // in-band re-time: the hold timer runs only while a discontinuity head waits
+            if (disc_hold && frame_valid && (state == S_IDLE)) hold_tmr <= hold_tmr + 1'b1;
+            else if (!head_disc)                               hold_tmr <= '0;
+            if (!sched_en) last_pts_v <= 1'b0;
             // pre-anchor fallback timer: counts while a frame waits un-anchored
             if (!sched_en)                                        anchor_tmr <= '0;
             else if (!stc_anchored && frame_valid && ~&anchor_tmr) anchor_tmr <= anchor_tmr + 1'b1;
@@ -438,8 +510,9 @@ module dvd_audio_decode #(
                 state <= S_IDLE;              // parked; audio_ring drops frames
             end else begin
                 case (state)
-                    S_IDLE: if (frame_valid && !pre_anchor_hold) begin
+                    S_IDLE: if (frame_valid && !pre_anchor_hold && !disc_hold) begin
                         bytes_left    <= frame_len;
+                        cur_disc      <= head_disc;         // dispatched as a re-time head
                         cur_type      <= frame_type;
                         cur_pts       <= frame_pts;        // latch with the descriptor
                         cur_pts_valid <= frame_pts_valid;
@@ -457,6 +530,11 @@ module dvd_audio_decode #(
                         // av_sync's telemetry)
                         dispatch_pts       <= cur_pts;
                         dispatch_pts_valid <= cur_pts_valid && !discard_cur;
+                        if (cur_pts_valid && !discard_cur && sched_en) begin
+                            last_pts   <= cur_pts;      // the timeline now playing
+                            last_pts_v <= 1'b1;
+                            if (cur_disc && !(&dbg_retime_cnt)) dbg_retime_cnt <= dbg_retime_cnt + 1'b1;
+                        end
                         if (discard_cur && !(&dbg_skip_cnt)) dbg_skip_cnt <= dbg_skip_cnt + 1'b1;
                         if (bytes_left == 16'd0) state <= S_IDLE;
                         else                     state <= S_ROUTE;
@@ -965,6 +1043,7 @@ module dvd_audio_decode #(
             pos_frac       <= '0;
             nco_fs         <= 2'd1;    // 48 kHz until an MP2 header says otherwise
             dbg_play_err   <= '0;
+            retime         <= 1'b0;
         end else begin
             ce_play_d <= aud_ce_play;
 
@@ -984,6 +1063,11 @@ module dvd_audio_decode #(
                 play_pts_valid <= 1'b1;
             end
 
+            // an in-band re-time head just entered the re-armed gate (see IN-BAND
+            // TIMELINE RE-TIME at the dispatcher): its release must land on its own
+            // timeline
+            if (disc_dispatch) retime <= 1'b1;
+
             if (!sched_en) begin
                 // O[13] free-run diagnostic: keep the state clear for a clean re-arm
                 draining       <= 1'b0;
@@ -991,6 +1075,14 @@ module dvd_audio_decode #(
                 seen_valid     <= 1'b0;
                 armed_data     <= 1'b0;
                 arm_timer      <= '0;
+                retime         <= 1'b0;
+            end else if (hold_expired) begin
+                // a discontinuity head waited HOLD_W without the old tail's
+                // underrun closing the gate: re-arm anyway (liveness), so it can
+                // dispatch and schedule; arm_timer remains the outer bound
+                draining       <= 1'b0;
+                play_pts_valid <= 1'b0;
+                seen_valid     <= 1'b0;
             end else if (!draining) begin
                 if (frame_pop)               armed_data <= 1'b1;
                 // Liveness hardening (v5.3): the fallback timer runs whenever ARMED
@@ -1001,14 +1093,17 @@ module dvd_audio_decode #(
                 if ((armed_data || frame_valid || (state != S_IDLE)) && ~&arm_timer)
                     arm_timer <= arm_timer + 1'b1;
 
-                if (play_pts_valid && disp_anchored && video_live && (start_delta >= 0)) begin
+                if (play_pts_valid && disp_anchored && video_live && (start_delta >= 0) &&
+                    (!retime || (start_delta < RETIME_WIN))) begin
                     draining    <= 1'b1;       // scheduled release (the normal path)
+                    retime      <= 1'b0;
                     seen_valid  <= 1'b0;
                     play_anchor <= play_pts;
                     pos_ticks   <= '0;
                     pos_frac    <= '0;
                 end else if (armed_data && (&arm_timer)) begin
                     draining    <= 1'b1;       // fallback: free-run rather than wedge
+                    retime      <= 1'b0;
                     seen_valid  <= 1'b0;
                     play_anchor <= play_pts_valid ? play_pts : stc;
                     pos_ticks   <= '0;

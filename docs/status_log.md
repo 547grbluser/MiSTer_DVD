@@ -22,6 +22,37 @@ predate later confirmations; the `CLAUDE.md` index carries the reconciled status
 
 ## Hardware status (THIS fork, verified 2026-06-21)
 
+- 🔧 **NON-SEAMLESS CELL-JOIN AUDIO (2026-09-29, branch `feature/nonseamless-audio`;
+  sim-gated, ⏳ HW round pending).** Full record: `docs/nonseamless_audio.md`.
+  - **Report.** Thayer's Quest VTS_08 lost ~1.3 s of audio at every clip start. After about
+    half the joins it also played audio **1.4 s early** for the whole next clip. The
+    behaviour is identical on every build since v0.7.0.
+  - **Settled by a 20 ms telemetry capture.** That needed a new HIL knob:
+    `/tmp/dvd_telem_fast` in the custom Main, and `mister.py launch --telem-fast-ms`.
+  - **Three root causes:**
+    1. `pts_assoc` gave a PTS to a B picture's **second field**. The mark carried the
+       next I's display time. The next correct tag then read 2 frames backward, which
+       caused a spurious content discontinuity and an audio flush.
+    2. Emu's **0.62 s re-phase cooldown** swallowed the real join after a spurious
+       anchor. Audio released against the old clock stayed 1.4 s early.
+    3. The display-time **`aud_resync` reset a ring already holding the new cell's first
+       ~1.3 s**. The Scooby-Doo 2 "good job" and Matrix white-rabbit dropouts were the
+       same mechanism, each fixed earlier by removing one trigger.
+  - **Fixes:**
+    - A second field never takes a tag. `tools/pts_map.py`'s golden follows the same
+      rule.
+    - Audio **re-times in band** at the frame whose PTS steps off the timeline: hold it,
+      play the old tail out, re-arm with empty FIFOs, and release only within 0.5 s of its
+      own timeline. Heads that the overlap made slightly late are trimmed.
+    - `flush_ctl` no longer resets audio on `disc_rephase`.
+  - **Measured census:** 1,036 of 1,525 discs have backward PTS joins inside a title. They
+    are worst in FMV games (Last Bounty Hunter 96, Space Pirates 85, Mad Dog 67).
+  - **Gates:** `run_pts_assoc.sh` (new `pts_thayer` fixture plus RED),
+    `run_aud_retime.sh --red` (S1–S6 plus 5 RED arms), and `run_seamless_audio.sh
+    --red`.
+  - **Next:** build, flash, and repeat the Thayer capture, then the regression set in
+    `docs/nonseamless_audio.md` §4b.
+
 - ✅ **PER-PICTURE DECODE-TIME INSTRUMENT (2026-09-29,
   ✅ MERGED PR #140; sim-gated, HW DATA TAKEN 2026-09-29).**
   ★ **§6c answered:** Thayer's boot FMV on Interlaced reads 0 lates from its first

@@ -673,8 +673,11 @@ HW-confirmed on a real PAL DVD: correct 720×576 geometry, 50 Hz lock, A/V in sy
    content. Revisit only if a disc shows `pic_over > 0` beside real lates.
 
 **Next (separate from pacing):** audio gaps of ~1.5–2 s at non-seamless cell joins
-(Thayer VTS_08), plan and data in `docs/nonseamless_audio.md`, branch
-`feature/nonseamless-audio`.
+(Thayer VTS_08). 🔧 **Fixed in sim (2026-09-29), HW round pending** on branch
+`feature/nonseamless-audio`, in two parts: the `pts_assoc` second-field PTS fix, and the
+in-band audio re-time that replaces the display-time `aud_resync`. Next step: build,
+flash, and repeat the 20 ms Thayer capture (`docs/nonseamless_audio.md` §4b). Regression
+set: The Matrix seamless branches, T2/MiB/Scooby menus, a play-all TV disc.
 
 ~~**Also open:** Thayer boot-FMV Interlaced lates (3.4/s, deterministic from boot).~~
 ✅ **Resolved (PR #140):** 0 lates from the FMV's first picture after F2, and 0 pictures
