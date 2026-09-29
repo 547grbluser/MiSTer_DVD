@@ -70,7 +70,11 @@ module motcomp_picbuf(
    * STATE_UPDATE is ordered by construction -- the same argument as flags_commit.
    * A tag that lands on the SECOND field of a pair arrives after the rotation;
    * pts_commit with vld_pic_pts_2nd re-latches it into the slot that is still
-   * current. It rides current -> prev_i_p -> output exactly as the flags do,
+   * current. DVD-FORK FIX (2026-09-29): that path is now UNREACHABLE --
+   * pts_assoc never tags a second field (a field pair is one access unit; the
+   * old rule mis-tagged Thayer's B pictures with the next I's PTS,
+   * docs/nonseamless_audio.md 2b). Kept, not deleted, so the port contract is
+   * unchanged. It rides current -> prev_i_p -> output exactly as the flags do,
    * including the STATE_LAST_FRAME path (a menu still is SEQ GOP PIC:I SEQ_END). */
   input        [32:0]vld_pic_pts;
   input              vld_pic_pts_valid;

@@ -110,7 +110,7 @@ f2wide prog_1   EEEEEEEEEEEEEEEEEEEEEEEEEEELLL1sspppppppppppppppp
   The same launch reproduces the same joins at the same moments, which makes a rig
   capture cheap to repeat.
 
-**How the `E` state arises is NOT settled.** A scheduled release needs `stc >= play_pts`,
+**How the `E` state arises: SUPERSEDED by §2b** (a PTS mis-tag plus the re-phase cooldown; the `cell_seamless` hypothesis below was not the cause). The text as first written: A scheduled release needs `stc >= play_pts`,
 so `play_err` starts at ≥ 0. To reach −1.4 s, either the clock stepped back ~1.4 s after
 the release with no audio reset, or `play_pts` latched a frame from a different timeline
 than the clock. One candidate to test: **`cell_seamless` is a parse-front level, and it is
@@ -142,10 +142,11 @@ B picture. The positional rule (`pts_assoc.sv`, and `tools/pts_map.py`'s golden)
 mark to the first *picture start code* at or after the payload. That is the B's **second
 field**, and `disp_sched` then subtracts one field. The value proves the tag wrong. c2's mark
 is 16.377 s, **exactly the next I's display time**, while the B it lands on displays at
-16.310. So that frame is stamped ~50 ms early, the timeline extrapolates from it, and the next
-correct tag falls more than a frame behind. `disc_jump_w` fires. Under ISO 13818-1 a field
-pair is ONE access unit, so a second field's start code never begins one, and the PTS
-belongs to the next frame.
+16.310. So that frame is stamped ~50 ms LATE (16.377 − 1 field = 16.360 against 16.310), the
+timeline extrapolates from it, and the next correct tag falls more than a frame behind. `disc_jump_w` fires. The measured value is the
+argument: the author's PTS is the I's. (A second field does not begin a new frame, so a
+reference decoder does not give it a frame's timestamp either. Verify the exact clause or
+decoder behaviour before citing it.)
 `.sim/nsaudio/second_tags.py` lists every tag that lands on a second field in PGC 1. All 20
 are on B pictures, and the capture matches their predicted positions:
 
@@ -184,11 +185,25 @@ gap at every non-seamless join (§4 requirement).
 
 **Library census (flag only, `census.py`, 1,527 ISOs parsed):** 1,064 discs have at least
 one in-title join flagged `stc_discontinuity && !seamless_play` (angle-block interiors
-skipped), and 299 have `seamless_play && stc_discontinuity` (the Matrix class). Many of these
-are play-all extras and episode joins, not the main feature. A flag is a claim, so
-`census2.py` MEASURES every join from the NAV packs (`vobu_s_ptm` of the new cell minus
-`vobu_e_ptm` of the previous one; backward = what trips `disc_jump_w`) and records each
-PGC's length. That is what separates main features from extras. ⏳ Running.
+skipped), and 299 have `seamless_play && stc_discontinuity` (the Matrix class).
+
+**Measured census (`census2.py`, 1,525 discs with title PGCs, 2026-09-29).** Every
+in-title join was measured from the NAV packs as `vobu_s_ptm` of the new cell minus
+`vobu_e_ptm` of the previous one. A backward step is what trips `disc_jump_w`.
+- **1,036 discs** have at least one measured backward join inside a title PGC. Of
+  80,793 backward joins, 74,853 are flagged `D` only (non-seamless), 5,930 `SD`
+  (seamless, already carved out), and 10 `S` only.
+- **Main feature** (proxy: each disc's longest PGC): 895 discs have at least one
+  non-seamless backward join, 2,336 joins in all. **606 of them have exactly one, and 399
+  of those are at the LAST cell**, a short end card after the credits, where losing
+  ~1.3 s is barely audible. 180 are mid-PGC: episode boundaries in play-all PGCs (for
+  example 7th Heaven) and Disney "fast play" chains (WALL-E 64, Finding Nemo 50).
+- **The heaviest users are FMV games:** Last Bounty Hunter 96, Space Pirates 85, Drug
+  Wars 76, Mad Dog 67 / Mad Dog 2 64, Crime Patrol 40, Who Shot Johnny Rock 27, all in
+  PGCs of 3–7 minutes. That is one join every few seconds, and each one costs ~1.3 s of
+  audio today.
+- Field-coded video (root cause 1) is rare in a 230-disc sample: Thayer's Quest and the
+  Mad Dog discs so far (`field_scan.py`).
 
 **Design requirement (recorded before choosing a mechanism).** Withholding the flush alone
 is not a fix. §12.2's seamless carve-out works because a seamless cell's audio really does
@@ -229,7 +244,59 @@ the clock not yet having re-anchored when that frame reaches the head of the que
    or a plain capture) to confirm the silence is audible and matches the telemetry, and
    try one other disc from the census with in-title non-seamless joins.
 4. **Design:** decide from 2–3 what the right behaviour at a non-seamless join is, and
-   write the rationale here before touching `flush_ctl`.
+   write the rationale here before touching `flush_ctl`. → §4a (proposal, not yet
+   approved).
+
+## 4a. Proposed design for root cause 3 (the head-discard gap), NOT yet approved
+
+**Why the flush cannot simply be kept, moved or narrowed.** It fires when the *display*
+crosses the join, but it resets the *ring*. The ring is a parse-front structure that by
+then holds the new cell's first ~1.1–1.4 s. Any display-time reset of it throws that
+opening away, whatever qualifier gates it. VLC's `ES_OUT_RESET_PCR` flush is harmless
+only because VLC flushes at the demux, before any new-cell data enters its buffers.
+Withholding the flush (the §12.2 seamless carve-out, generalised) keeps the audio but
+loses the re-time. That is exactly how the `E` state kept audio 1.4 s early.
+
+**Proposal: re-time in band, at the audio frame that carries the discontinuity.**
+In `dvd_audio_decode`'s dispatcher:
+1. **Detect.** A PTS-tagged frame at the ring head whose PTS steps off the dispatched
+   timeline (backward by more than ~1 frame, or forward by more than an authored-gap
+   bound) is an audio discontinuity. It is carried by the frame itself, so nothing
+   depends on which cell the reader is in (the `cell_seamless` parse-front vs display
+   hazard in §2a) or on the display's anchor timing.
+2. **Let the old timeline finish.** Stop dispatching at that frame (do not pop it). The
+   decode/PCM FIFOs drain at the normal rate: the old cell's tail plays out, nothing is
+   discarded.
+3. **Re-arm with empty FIFOs.** When they are empty, clear `draining` / `play_pts_valid`
+   and dispatch the held frame, so it latches `play_pts`. This is the re-arm the v5.3
+   comment warns about, but taken with the FIFOs EMPTY, which is the one condition
+   under which it cannot deadlock.
+4. **Release only on the right timeline.** Release when `0 <= stc - play_pts < WIN`
+   (WIN ≈ 0.5 s), not merely `>= 0`. While the clock is still on the old timeline a
+   backward-stepped frame reads grossly "late", which is precisely the case that
+   released new-cell audio against the old clock in the `E` sequence (§2b step 3).
+   Holding it until the display's own re-anchor brings the clock within WIN of it makes
+   the ordering irrelevant. `arm_timer`'s ~2.5 s fallback remains the liveness bound.
+5. **Retire the display-time `aud_resync` on `disc_rephase`** (keep it for `aud_switch`),
+   and with it the `rephase_cool` cooldown's audio role. The menu problem it was added
+   for (#63: old-timeline audio carried across a discontinuity) is handled by 1–4 at
+   the frame where it actually happens.
+
+**Expected cost at a join:** the hold lasts from the old audio's end to the display's
+re-anchor. That is about the dispatch lead, ~0.2 s at most, instead of ~1.3 s. The ring
+backpressures the demux for that time, well inside the ~1 s VBUF cushion.
+
+**Risks to measure before shipping:**
+- **Matrix seamless branches** (audio continuous across a PTS restart) would take a short
+  hold where today they take none. Measure it on the rig. If it is audible, a seamless
+  frame would need a flag carried through the ring rather than a cell-level level.
+- **Forward audio gaps** that are authored (audio pauses while video runs) would now be
+  PTS-scheduled instead of played early. That is more correct, but new.
+- **Menus:** every keep_vbuf hop and looping cell goes through the new path instead of
+  the reset. Menu sets (T2, Scooby-Doo 2, Harry Potter) are the regression gate.
+- **Bench first:** a dispatcher bench with a synthetic ring carrying old-tail +
+  new-head frames, a clock that re-anchors before, at, and after the head reaches the
+  dispatcher, and a RED arm for each of steps 2–4.
 
 ## 5. Where to look
 

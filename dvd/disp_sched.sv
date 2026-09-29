@@ -246,6 +246,10 @@ module disp_sched #(
     wire [17:0] skip_dur_q3 = skip_field ? {4'd0, field_q3[14:1]} :   // one field
                               skip_ps    ? (skip_rff ? (skip_tff ? dur6 : dur4) : dur2)
                                          : ((skip_pf && skip_rff) ? dur3 : dur2);
+    // pic_pts_2nd is always 0 since 2026-09-29: pts_assoc no longer tags a second
+    // field (a mark between the fields of a pair belongs to the NEXT frame -- the
+    // subtraction below made Thayer's B pictures read 2 frames off the timeline,
+    // docs/nonseamless_audio.md 2b). Left in place; it now subtracts nothing.
     wire [32:0] pic_pts_eff = pic_pts - (pic_pts_2nd ? field_ticks : 33'd0);
 
     // ---- the timeline -----------------------------------------------------
