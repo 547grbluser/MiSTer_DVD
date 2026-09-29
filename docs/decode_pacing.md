@@ -1,7 +1,8 @@
 # Decode pacing: content coding × output mode
 
-**Status:** investigation done 2026-09-28 on branch `feature/decode-pacing`. Nothing here
-changes playback. The fix is proposed (§7), not built. Measured on the rig with v0.8.0
+**Status:** investigation ✅ MERGED (PR #137, 2026-09-28). The fix is being built one stage
+per branch (§7). **F1** (no OSD display reads) is on `feature/osd-read-drop`: sim-proven
+bit-exact, ⏳ HW pending. Measured on the rig with v0.8.0
 (`DVD_20260928.rbf`), the v0.7.0 control (`DVD_20260924.rbf`) and an instrument build
 (`dev-pacing`, which adds `dvd/dec_duty.sv`).
 
@@ -299,7 +300,14 @@ Ranked by cost against payoff. Each stage is measured on the rig with
 `tools/pacing_matrix.py`, on ROGER, Office and Thayer VTS_08, Progressive against
 Interlaced, before the next stage starts.
 
-**F1. Stop the dead OSD reads.**
+**F1. Stop the dead OSD reads.** 🔧 **Built** (`feature/osd-read-drop`). `OSD_READS = 0`
+in `resample.v`, one parameter for both `resample_addrgen` and `resample_dta`.
+`bench/dvd/run_osd_read.sh` proves the pixels bit-identical against `OSD_READS = 1`
+in four geometries (progressive, interlaced, 720-wide, bursty stall), and 8 → 6 read
+words per macroblock-line. Three mutations are each caught.
+`tools/check_osd_read_wiring.py` pins the seams and the premise
+(`dot_osd_enable = 1'b0`). ⏳ HW: re-run the §5 Progressive cells with
+`tools/pacing_matrix.py` and compare `dec_duty` ref-wait per picture against §6b.
 - **What:** `resample_addrgen` issues 8 words per macroblock per line: OSD × 2, Y × 2,
   and U, V × 2 rows each. The upstream OSD layer is tied off in this fork
   (`dot_osd_enable = 1'b0`, `mpeg2video.v`), so the OSD words fetch data nothing uses:

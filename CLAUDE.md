@@ -418,7 +418,8 @@ otherwise; `--red` runs its mutation arms).
 | mem_shim tag/LRU store in M10K | ✅ | `history.md` §11 | `run_mem_shim.sh` |
 | Logic reclaim (AC-3, nav/VM, reader ×2; debug overlay retired) | ✅ (D HW-confirmed 2026-09-26) | `logic_reclaim.md` §8 | `bench/ac3` suites, `run_reader_regress.sh` |
 | Logic reclaim E: VM GPRMs in an M10K (−1,129 ALUTs) | ✅ | `logic_reclaim.md` §9 | `run_gprm_ram.sh`, `check_gprm_ram.py` |
-| Decode pacing × output mode: Progressive lates = display re-read contention; `dec_duty` telemetry | 🔧 ⏳ fix F1–F4 | `decode_pacing.md` | `run_telem.sh`, `check_decode_duty_wiring.py` |
+| Decode pacing × output mode: Progressive lates = display re-read contention; `dec_duty` telemetry (PR #137) | 🔧 ⏳ fix F1–F4 | `decode_pacing.md` | `run_telem.sh`, `check_decode_duty_wiring.py` |
+| F1: no OSD display reads (8 → 6 words per MB-line, bit-exact) | 🔧 ⏳ HW | `decode_pacing.md` §7 | `run_osd_read.sh`, `check_osd_read_wiring.py` |
 
 ### Audio and A/V sync
 

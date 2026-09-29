@@ -24,7 +24,7 @@ predate later confirmations; the `CLAUDE.md` index carries the reconciled status
 
 - 🔧 **DECODE PACING × OUTPUT MODE: THE PROGRESSIVE-ONLY LATES ARE DDR3 CONTENTION FROM
   THE DISPLAY'S FRAME RE-READS, NOT A COMPUTE CEILING (2026-09-28, branch
-  `feature/decode-pacing`, investigation + instrument; fix proposed, not built).**
+  ✅ MERGED PR #137, investigation + instrument; fix F1 on `feature/osd-read-drop`).**
   Full record: `docs/decode_pacing.md`.
 
   **Field report (v0.8.0 smoke test):**

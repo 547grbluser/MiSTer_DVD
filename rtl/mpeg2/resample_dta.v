@@ -85,10 +85,17 @@ module resample_dta (
   reg          [3:0]state;
   reg          [3:0]next;
 
+  /* DVD-FORK FIX (F1, docs/decode_pacing.md §7): with OSD_READS = 0 resample_addrgen no
+   * longer requests the OSD words (the OSD layer is tied off in this fork), so the OSD
+   * read is skipped here in step and fifo_osd stays 0 -- which osd.v ignores while
+   * osd_enable is 0. resample.v passes one parameter to both modules. */
+  parameter OSD_READS = 0;
+  localparam [3:0] FIRST_RD = OSD_READS ? STATE_RD_OSD : STATE_RD_Y;
+
   /* next state logic */
   always @*
     case (state)
-      STATE_INIT:         next = STATE_RD_OSD;
+      STATE_INIT:         next = FIRST_RD;   // DVD-FORK FIX (F1)
 
       STATE_RD_OSD:       if (disp_fwft_valid) next = STATE_RD_Y;
                           else next = STATE_RD_OSD;
@@ -110,7 +117,7 @@ module resample_dta (
                           else next = STATE_READY;
 
                           /* wait for fifo_read to drop, then lower fifo_valid */
-      STATE_WAIT:         if (~fifo_read) next = STATE_RD_OSD;
+      STATE_WAIT:         if (~fifo_read) next = FIRST_RD;   // DVD-FORK FIX (F1)
                           else next = STATE_WAIT;
 
       default             next = STATE_INIT;
