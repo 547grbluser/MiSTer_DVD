@@ -423,7 +423,20 @@ The other discs' "before" is F1's own table.
   `mv ±2` (progressive upsampling) lands on rows **+0 / −1**: odd lines get no vertical
   chroma interpolation at all. `mv ±4` (interlaced upsampling) lands on **±1**, the
   *opposite field's* chroma row, where 4:2:0 interlaced needs ±2. F2 keeps it bit for
-  bit, so F2 can be proven by identity. Fixing it would be a separate, visible change,
+  bit, so F2 can be proven by identity.
+  - **Pre-existing:** `mem_addr.v` and the upstream `rtl/mpeg2/resample_addrgen.v` are
+    unchanged since the upstream import (`30c8a75`). Upstream's own clamps (`plus_2` on the
+    last chroma row, `plus_4` on the last two) show that ±1 / ±2 rows was the intent.
+  - **Size, measured 2026-09-29.** Six decoded frames each, through a model of
+    `resample_bilinear`'s arithmetic, upstream rows against the intended rows. ROGER
+    (interlaced path): mean |Δchroma| 0.49, 99th percentile 3, max 20 of 255, 0.7 % of
+    pixels off by ≥ 4. MiB (progressive path): 0.14 / 1 / 10, 0.2 %. The worst 64×64
+    blocks look the same side by side, enlarged 4×. The difference is faint horizontal
+    streaks at colour edges; on interlaced content it grows with motion (25 % of the
+    chroma is from the other field).
+  - **Fix, if ever:** double the two offsets (`±2 → ±4`, `±4 → ±8`). It changes pixels, so
+    it needs a reference-filter bench, not an identity gate. The reuse cache absorbs it,
+    and field scans get cheaper (same-field rows repeat). Fixing it would be a separate, visible change,
   and the reuse cache would absorb it (the key follows whatever row is fetched).
 - **Gates:** `bench/dvd/run_chroma_reuse.sh`:
   - [1] Bit-exact across 14 arms, CHROMA_REUSE 0 vs 1, with memory words that hash
