@@ -1,8 +1,8 @@
 # Decode pacing: content coding × output mode
 
 **Status:** investigation ✅ MERGED (PR #137, 2026-09-28). The fix is being built one stage
-per branch (§7). **F1** (no OSD display reads) is on `feature/osd-read-drop`: sim-proven
-bit-exact, ⏳ HW pending. Measured on the rig with v0.8.0
+per branch (§7). **F1** (no OSD display reads) ✅ MERGED (PR #138), bit-exact in sim and
+HW-measured: Progressive lates ROGER 9.2→3.8/s, Office 8.2→1.0, Thayer 7.3→0.1. Next: F2. Measured on the rig with v0.8.0
 (`DVD_20260928.rbf`), the v0.7.0 control (`DVD_20260924.rbf`) and an instrument build
 (`dev-pacing`, which adds `dvd/dec_duty.sv`).
 
@@ -301,7 +301,7 @@ Ranked by cost against payoff. Each stage is measured on the rig with
 Interlaced, before the next stage starts.
 
 **F1. Stop the dead OSD reads.** ✅ **Built and HW-measured 2026-09-29**
-(`feature/osd-read-drop`, `releases/DVD_osdread_20260929_0343.rbf`, clk_dec 86.0 MHz at
+(PR #138, `releases/DVD_osdread_20260929_0343.rbf`, clk_dec 86.0 MHz at
 both slow corners). `OSD_READS = 0`
 in `resample.v`, one parameter for both `resample_addrgen` and `resample_dta`.
 `bench/dvd/run_osd_read.sh` proves the pixels bit-identical against `OSD_READS = 1`

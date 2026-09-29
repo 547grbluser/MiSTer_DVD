@@ -24,7 +24,7 @@ predate later confirmations; the `CLAUDE.md` index carries the reconciled status
 
 - 🔧 **DECODE PACING × OUTPUT MODE: THE PROGRESSIVE-ONLY LATES ARE DDR3 CONTENTION FROM
   THE DISPLAY'S FRAME RE-READS, NOT A COMPUTE CEILING (2026-09-28, branch
-  ✅ MERGED PR #137, investigation + instrument; fix F1 on `feature/osd-read-drop`).**
+  ✅ MERGED PR #137, investigation + instrument; fix F1 ✅ MERGED PR #138).**
   ★ **F1 HW-MEASURED 2026-09-29 (no OSD display reads, 8 → 6 words per macroblock-line,
   bit-exact in sim).** Progressive lates:
   - ROGER 9.2 → 3.8/s
