@@ -634,9 +634,37 @@ HW-confirmed on a real PAL DVD: correct 720×576 geometry, 50 Hz lock, A/V in sy
 > is broadly the same class as the NTSC high-motion load,
 > just exposed harder by the bigger frame; it is **not** a PAL-timing/pacing bug (geometry
 > and 50 Hz lock are correct). No new cheap lever is expected — it rides on the deferred
-> decoder motion-comp/IDCT datapath rewrite. **TODO:** confirm with the cache-miss/stage
+> decoder motion-comp/IDCT datapath rewrite. ~~**TODO:** confirm with the cache-miss/stage
 > profiler overlays whether PAL BBB is purely compute-bound (expected) or whether the larger
-> reference reads also re-stress the f2sdram bridge.
+> reference reads also re-stress the f2sdram bridge.~~ **ANSWERED 2026-09-28
+> (`docs/decode_pacing.md`): not compute-bound.** BBB PAL lates 5/s on Progressive, 0 on
+> Interlaced, and 0 with Film 24p On (a 25 Hz raster) on the same pictures. The decoder's
+> VLD is parked ~50 % on every raster, and per-picture reference-fetch wait follows the
+> display's frame re-read rate. See the next section.
+
+### Decode pacing on the Progressive raster (2026-09-28, `docs/decode_pacing.md`)
+
+**Measured:**
+- Every busy interlaced or 25p source lates **4–10/s on Progressive**, ~0 on Interlaced.
+  That covers frame-coded and field-coded, NTSC and PAL, title and menu domain, and any
+  Deinterlace setting. v0.7.0 = v0.8.0.
+- The same pictures cost **+30–50 % decode time** on Progressive, almost all of it
+  reference-fetch wait (`dec_duty`, telemetry words 16–20).
+- Cause: the display's top-priority frame re-reads on the decoder's port. It is the Film
+  24p finding below, generalized to all content.
+
+**Next, one behavioural change per build:**
+1. **F1:** drop the dead OSD display reads (25 % of display requests; the OSD is tied
+   off).
+2. **Per-picture maximum decode-time instrument.** It can ride F1's build.
+3. **F2:** chroma-row reuse line buffer (display 8 → 3 words per macroblock-line).
+4. **F3:** display reads on the idle `ram2` port, with an explicit write-drain handshake
+   at pickup.
+5. **F4:** a deeper output queue (the VLD is parked ~50 %).
+
+**Also open:** Thayer boot-FMV Interlaced lates (3.4/s, deterministic from boot). Not
+starvation, not the drop loop (Frame Drop Off refuted it). Needs the per-picture
+instrument (`docs/decode_pacing.md` §6c).
 
 ### Film 24p Out — progressive-film cadence fix (issue fj#124)
 

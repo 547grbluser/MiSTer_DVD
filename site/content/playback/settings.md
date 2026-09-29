@@ -69,10 +69,11 @@ problems.
 
 Default **On**, and it should stay on.
 
-The inherited MPEG-2 decoder has a motion-compensation and IDCT throughput ceiling, and on
-the heaviest content it can fall behind the display cadence. The frame-rate governor
+On busy content the decoder can fall behind the display cadence, mostly with **Video
+Output = Progressive**, where the display's own memory reads compete with the decoder (see
+[Compatibility](../reference/compatibility.md#known-limitations)). The frame-rate governor
 absorbs this by dropping a B-frame to stay in step. B-frames are never used as references,
-so the picture cannot be corrupted by this, and in practice it is not something you notice.
+so the picture cannot be corrupted by this.
 
 It is also how the player catches up when it has fallen behind the disc's own timeline:
 advancing past a frame is the only way to recover time that has already been lost. With
