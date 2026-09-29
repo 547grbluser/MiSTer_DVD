@@ -25,6 +25,16 @@ predate later confirmations; the `CLAUDE.md` index carries the reconciled status
 - 🔧 **DECODE PACING × OUTPUT MODE: THE PROGRESSIVE-ONLY LATES ARE DDR3 CONTENTION FROM
   THE DISPLAY'S FRAME RE-READS, NOT A COMPUTE CEILING (2026-09-28, branch
   ✅ MERGED PR #137, investigation + instrument; fix F1 on `feature/osd-read-drop`).**
+  ★ **F1 HW-MEASURED 2026-09-29 (no OSD display reads, 8 → 6 words per macroblock-line,
+  bit-exact in sim).** Progressive lates:
+  - ROGER 9.2 → 3.8/s
+  - Office PAL 8.2 → 1.0/s
+  - Thayer VTS_09 7.3 → 0.08/s
+  - MiB 1.4 → 0/s
+
+  Ref-wait per picture fell 2.2–3.9 ms everywhere. A control re-run of the pre-F1 build
+  in the same session reproduced its numbers (9.22 / 7.30). Table:
+  `docs/decode_pacing.md` §7 F1. Next: F2 for ROGER's residue.
   Full record: `docs/decode_pacing.md`.
 
   **Field report (v0.8.0 smoke test):**
