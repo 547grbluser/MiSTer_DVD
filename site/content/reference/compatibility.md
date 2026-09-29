@@ -45,6 +45,13 @@ the usual console-style 240p, and over HDMI the framework scaler receives the or
 frame rather than a doubled one.
 See [Analog and CRT output](../video/analog-crt.md#native-240p-for-vcds-and-mpeg-1).
 
+**Busy video keeps up on both Video Output settings.** Earlier builds dropped a frame or
+two a second in the busiest concert and TV discs on **Progressive** output, because the
+display's memory reads competed with the decoder. The display now reads about a third as
+much per line, and every disc measured plays without skipping on Progressive and on
+Interlaced. The one exception is by design: **Film 24p Out = On** with 29.97 fps video
+(see [Troubleshooting](troubleshooting.md#video-skips-frames-in-busy-scenes)).
+
 ## Audio
 
 Covered in full on [Audio formats](../audio/formats.md). In short: AC-3 (all channel modes)
@@ -107,19 +114,6 @@ earlier than the bar showed if the target falls in a gap between two parts.
     **Menu** to skip the intro jumps past it — so the game repeats one question. That is
     how the disc is authored; a real player and libdvdnav do the same thing. Let the intro
     play.
-
-**The busiest interlaced video can skip frames on Progressive output.** The most
-demanding concert and TV discs can lose a frame or two a second in busy scenes when
-**Video Output** is **Progressive**. That includes **Auto**, unless
-`MiSTer.ini` sets up an analog TV (Auto lands on Progressive otherwise). On a progressive raster the player
-re-reads the whole picture from memory at every refresh, and those reads compete with the
-decoder for memory, so the heaviest pictures miss their slot. The frame-rate governor then
-drops a B-frame to stay in step. B-frames are never used as references, so the picture
-cannot be corrupted, but the motion is visibly less smooth. **Video Output = Interlaced**
-removes nearly all of it (a game disc's full-motion intro can still skip a frame or two a
-second), and on PAL discs **Film 24p Out = On** does too. See
-[Troubleshooting](troubleshooting.md#busy-video-skips-frames-on-progressive-output). Film
-discs are much less affected, because they carry fewer pictures per second.
 
 **Closed captions are analog-only** and need a television that decodes them — see
 [Closed captions](../video/closed-captions.md). Roughly 1 disc in 6 carries them.
