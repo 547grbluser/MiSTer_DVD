@@ -73,6 +73,11 @@ domain) shows 0–1 resets per window and 48 kHz. Also observed and not investig
 
 ### 2c. Other fields that lie if read naively
 
+- **`lates` during a still** (found 2026-09-29): while the VM holds a PGC still
+  (`flags.still = 1`), `lates` rises by one per refresh, although the picture on screen
+  is exactly the one intended. A boot capture of Thayer's First Play counts ~300 "lates"
+  in 5 s this way. Exclude still rows before reading lates as decode lateness.
+
 - **`vid_err`** (the JSON key) is word 5, `{skip[7:0], catch[3:0], rearm[3:0]}`: audio
   discard counters, not a video error. `mister.py` decodes it as `aud_disc`, and only on
   a window without audio resets, since it shares `aud_play`'s reset domain.
@@ -271,7 +276,15 @@ the scarce resource is arbitration occupancy, not bandwidth.
   push many more of them over it.
 - A per-picture maximum is not yet measured (§7, instrument).
 
-### 6c. Open: Interlaced lates in Thayer's boot FMV (labelled hypothesis, not a root cause)
+### 6c. Interlaced lates in Thayer's boot FMV — ✅ resolved 2026-09-29, see the end of this section
+
+**Answer (per-picture instrument, §7):** after F2 the FMV reads **0 lates on Interlaced**
+for two minutes from boot, in two clean launches; **no picture** took longer than one
+frame period (0 of ~3,300; the longest 21.1 ms of a 33.4 ms budget). The only lates left
+are **counted during the disc's First Play still** (`flags.still = 1`, pickups flat, one
+per refresh for ~5 s), which is bookkeeping, not a visible miss. The slow-picture
+hypothesis below is refuted for the post-F2 build. The pre-F2 bursts were the same
+display-read contention as §6b. The original analysis follows, unchanged.
 
 On a clean launch straight into Interlaced (Disc Menus = On), the boot FMV reads
 **3.4 lates/s, then 0.9 lates/s** in the next minute. v0.8.0 is identical (3.39 / 0.89):
@@ -552,10 +565,28 @@ structural fix, not a fallback.
 - **Trap hit on the way:** the threshold was first written as an `always @*` case. The
   bench holds `frame_rate_code` constant from time zero, iverilog never evaluated the
   block, and `thr` stayed X, so `pic_over` never counted. It is a continuous assign now.
-- **Next:** measure on the rig. §6c's Thayer boot FMV on Interlaced is the question:
-  do its lates line up with pictures over one frame period? If a single slow picture,
-  with the VLD otherwise parked, explains each late pair, F4 (a deeper output queue) is
-  justified. If they don't line up, it isn't.
+- **HW result (2026-09-29, `releases/DVD_pictime_20260929_1432.rbf` = F2 + the
+  instrument; `clk_dec` 89.3 / 87.2 MHz; `dec_duty` 290 ALUT / 243 regs).** Two clean
+  launches of Thayer's boot FMV straight into Interlaced with Disc Menus = On, telemetry
+  logged from before the core loads (`mister.py launch --telem-log`, 130 s):
+
+  | Launch | 0–60 s lates/s | 60–120 s | pic_max | Pictures over one frame period |
+  |---|---|---|---|---|
+  | 1 | 4.99 | **0.00** | 21.1 / 20.6 ms | **0 / 1649**, 0 / 1786 |
+  | 2 | 5.36 | **0.00** | 21.1 / 20.7 ms | **0 / 1501**, 0 / 1794 |
+
+  - **All** of the first minute's lates fall in the 5 s before the FMV starts, while the
+    VM holds the First Play still: `flags.menu = 1, still = 1`, pickups flat at 1, VBUF
+    empty, decoder starved, and `lates` +1 per refresh. From the FMV's first picture to
+    the end of the capture: **0**.
+  - The earlier captures (§6c) started after launch and never saw the still. The
+    sustained FMV lates they did see (up to 58 per 5 s at 40–45 s) are gone.
+  - **Decision: F4 is not justified.** Its premise is single heavy pictures that the
+    one-deep handoff cannot absorb. No picture on this content exceeds 64 % of its budget,
+    and the VLD is parked 54–62 % of the time.
+- **Caveat for every reader of `lates`:** the governor counts a late on every refresh
+  while a PGC **still** holds the picture. Filter `flags.still` before reading a
+  startup or menu window as decode lateness (added to §2c).
 
 **Workarounds available today (manual):**
 - Video Output = **Interlaced** removes these lates on every disc measured.

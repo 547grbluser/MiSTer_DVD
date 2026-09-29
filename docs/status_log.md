@@ -22,8 +22,12 @@ predate later confirmations; the `CLAUDE.md` index carries the reconciled status
 
 ## Hardware status (THIS fork, verified 2026-06-21)
 
-- 🔧 **PER-PICTURE DECODE-TIME INSTRUMENT (2026-09-29, branch
-  `feature/pic-time-instrument`, on F2; sim-gated, ⏳ HW data pending).**
+- ✅ **PER-PICTURE DECODE-TIME INSTRUMENT (2026-09-29, branch
+  `feature/pic-time-instrument`, on F2; sim-gated, HW DATA TAKEN 2026-09-29).**
+  ★ **§6c answered:** Thayer's boot FMV on Interlaced reads 0 lates from its first
+  picture for two minutes, in two clean launches. 0 of ~3,300 pictures exceeded one frame
+  period (longest 21.1 ms / 33.4). The first minute's "lates" are all counted during the
+  First Play still (`flags.still`), one per refresh. **F4 is not justified.**
   - **Why:** the duty words are averages, and §6c's lates come from individual slow
     pictures that a 0.5 s row cannot resolve. It decides whether F4 is worth building.
   - **What:** telemetry words 21–24, behind a second marker (`0xDD02`): the longest

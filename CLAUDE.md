@@ -418,9 +418,9 @@ otherwise; `--red` runs its mutation arms).
 | mem_shim tag/LRU store in M10K | ✅ | `history.md` §11 | `run_mem_shim.sh` |
 | Logic reclaim (AC-3, nav/VM, reader ×2; debug overlay retired) | ✅ (D HW-confirmed 2026-09-26) | `logic_reclaim.md` §8 | `bench/ac3` suites, `run_reader_regress.sh` |
 | Logic reclaim E: VM GPRMs in an M10K (−1,129 ALUTs) | ✅ | `logic_reclaim.md` §9 | `run_gprm_ram.sh`, `check_gprm_ram.py` |
-| Decode pacing × output mode: Progressive lates = display re-read contention; `dec_duty` telemetry (PR #137) | ✅ fixed by F1 + F2 ⏳ §6c | `decode_pacing.md` | `run_telem.sh`, `check_decode_duty_wiring.py` |
+| Decode pacing × output mode: Progressive lates = display re-read contention; `dec_duty` telemetry (PR #137) | ✅ fixed by F1 + F2 (whole census 0; §6c resolved) | `decode_pacing.md` | `run_telem.sh`, `check_decode_duty_wiring.py` |
 | F1: no OSD display reads (8 → 6 words per MB-line, bit-exact; Prog lates ROGER 9.2→3.8, Office 8.2→1.0, Thayer 7.3→0.1; PR #138) | ✅ HW-measured | `decode_pacing.md` §7 | `run_osd_read.sh`, `check_osd_read_wiring.py` |
-| Per-picture decode-time instrument: telemetry words 21–24 (`pic_max`, `pic_n`, `pic_over`), `feature/pic-time-instrument` | 🔧 ⏳ HW data | `decode_pacing.md` §7 "Instrument" | `run_telem.sh` (M5–M8), `check_decode_duty_wiring.py` |
+| Per-picture decode-time instrument: telemetry words 21–24 (`pic_max`, `pic_n`, `pic_over`); settled §6c, F4 not justified; `feature/pic-time-instrument` | ✅ HW data | `decode_pacing.md` §7 "Instrument" | `run_telem.sh` (M5–M8), `check_decode_duty_wiring.py` |
 | F2: chroma row reuse (6 → 3 words per MB-line on Progressive, bit-exact; Prog lates ROGER 3.6→0, Office 1.0→0; `feature/chroma-row-reuse`) | ✅ HW-measured | `decode_pacing.md` §7 F2 | `run_chroma_reuse.sh`, `check_chroma_reuse_wiring.py` |
 
 ### Audio and A/V sync
@@ -459,9 +459,10 @@ otherwise; `--red` runs its mutation arms).
 - ❌ Chapters/PTT exactness (Phase 6, `VTS_PTT_SRPT`), UDF-only images, parental control,
   GPRM counter mode, dual-mono AC-3 (acmod 0, rejected deliberately).
 - ❌ Trick play (continuous 2×/4×): needs a flush-free I-frame splice (`docs/dvd_nav.md` §2d).
-- ⚠ A heavy-picture tail remains on Interlaced (Thayer boot FMV 3.4/s, open,
-  `docs/decode_pacing.md` §6c). The Progressive-only lates (4–10/s on busy interlaced/25p
-  video) are fixed by F1 + F2: 0 on every disc measured. F3/F4 stay recorded there.
+- ⚠ `lates` counts one per refresh while a PGC still is held (`flags.still`), so boot and
+  menu windows over-report (`docs/decode_pacing.md` §2c). The Progressive lates and the
+  Thayer boot-FMV Interlaced lates are fixed by F1 + F2: 0 on the whole census set, and no
+  picture over its frame budget. F3/F4 stay recorded, not needed.
 
 `docs/roadmap.md` is the canonical "what's next".
 
