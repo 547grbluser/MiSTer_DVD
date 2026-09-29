@@ -27,6 +27,10 @@ predate later confirmations; the `CLAUDE.md` index carries the reconciled status
   ★ **Progressive lates now read 0 on every disc measured:** ROGER 3.58 → 0 (control arm:
   the F1 build re-run in the same session), Office 1.0 → 0, Thayer VTS_09 0.08 → 0, MiB 0.
   ROGER Progressive decode fell 17.0 → 14.7 ms per picture, and ref-wait 14.5 → 12.3 ms.
+  ★ **The whole §3 census set, measured next on the same build:** Thayer VTS_08
+  (field-coded) 6.77 → 0, Angel → 0, BBB PAL → 0, VCD 0, the Thayer boot FMV 6.70 → 0.05,
+  ROGER Bob / Blend / Film Off → 0. The only non-zero cell is Film 24p On over 29.97
+  content (structural).
   - **What:** after F1 the display still read 6 words per macroblock-line: 2 luma, plus an
     upper and a lower chroma row for each of U and V, on every line. `resample_dta` now
     keeps two rows per plane (a 256 × 64 RAM). `resample_addrgen` requests only the rows

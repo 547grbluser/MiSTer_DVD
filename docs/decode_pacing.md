@@ -376,8 +376,24 @@ The other discs' "before" is F1's own table.
 - Across F1 + F2, ROGER Progressive went 9.2 → 0 lates/s and 20.9 → 14.7 ms per picture.
 - The board shows a correct picture (ROGER, Progressive, screenshot checked). The sim
   proves bit-identity; the shot only rules out a gross wiring fault the bench cannot see.
-- **Not re-measured:** Thayer VTS_08 (field-coded) and §6c's boot-FMV Interlaced tail. F2
-  touches display reads only, and that tail was measured with the VLD parked 62–68 %.
+- **The rest of the §3 census set, measured afterwards on the same F2 build** (same
+  script, 2 interleaved rounds; "before" is the pre-F1 `dev-pacing` run where it exists,
+  else v0.8.0 from §5):
+
+  | Disc | Prog lates/s (before → F2) | Ilace | F2 decode / ref-wait ms per picture (Prog) |
+  |---|---|---|---|
+  | Thayer VTS_08 (field-coded) | 6.77 → **0.00** | 0.15 → 0.00 | 18.8 / 15.5 → 13.8 / 10.2 |
+  | Angel (field-coded film) | 6.6 / 8.8 (v0.8.0) → **0.00** | 0 → 0 | 11.8 / 9.5 |
+  | BBB PAL (25p) | 5.1 / 0.8 (v0.8.0) → **0.00** | 0 → 0 | 13.7 / 9.7 |
+  | VCD (MPEG-1 SIF) | 0 → **0.00** | 0 → 0 | 3.7 / 2.8 |
+  | Thayer boot FMV (menu domain) | 6.70 → **0.05** (one 0.10 window) | 0.27 → 0.00 | 13.9 / 10.5 |
+  | ROGER, Film Off / Bob / Blend | 8.8 / 9.7 / 9.8 (v0.8.0) → **0.00 / 0.00 / 0.00** | — | — |
+  | ROGER, Film 24p **On** | 6.0 → 5.99 | — | structural (†): a 23.976 Hz raster cannot show 29.97 fps |
+
+  **Every Progressive cell of the census reads 0**, frame- and field-coded, NTSC and PAL,
+  title and menu domain, Weave, Bob and Blend. Thayer VTS_08's low audio rate (40–46 kHz
+  with 2–5 counter resets per window) is §2b's pre-existing cell re-anchor behaviour,
+  identical before F1.
 - **What was wrong:** bilinear chroma upsampling (`resample_addrgen.v`, "see
   bilinear.txt") fetched two chroma rows for each of U and V on **every** macroblock-line
   (4 of the 6 words left after F1), although each chroma row serves several lines.
