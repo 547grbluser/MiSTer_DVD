@@ -58,6 +58,12 @@ CORE_DIR = os.environ.get('MISTER_CORE_DIR', '/media/fat/_Other')
 CFG_DIR = os.environ.get('MISTER_CFG_DIR', '/media/fat/config')
 SHOT_DIR = '/media/fat/screenshots'
 REMOTE_TELEM_LOG = '/tmp/dvd_telemlog.jsonl'
+# Event capture (docs/nonseamless_audio.md): the custom Main's dvd_ctl samples at
+# the period written to TELEM_FAST and appends every sample to TELEM_FAST_LOG
+# itself -- a shell poller cannot keep up at 50 Hz. A Main without the knob
+# ignores the file, and the collector then finds no log and says so.
+TELEM_FAST = '/tmp/dvd_telem_fast'
+TELEM_FAST_LOG = '/tmp/dvd_telem_fast.jsonl'
 # A FIXED name, deliberately. MGL <rbf> resolution takes the lexicographically
 # GREATEST match (mra_loader.cpp:1288), not the newest file -- with ~75 DVD_*
 # builds in _Other/ a bare "DVD" selects whichever sorts last, which on this rig
@@ -157,7 +163,7 @@ def kill_exact(cmdline):
 
 RESTORE_SCRIPT = _INI_REWRITE.replace('@TARGET@', 'MiSTer_DVDcss') + """
 @KILL_AGENT@
-rm -f /media/fat/dvd_hil
+rm -f /media/fat/dvd_hil /tmp/dvd_telem_fast /tmp/dvd_telem_fast.jsonl
 rm -f @FIFO@ @AGENT@ @COREDIR@/@RBF@ @COREDIR@/@MGL@
 for f in /media/fat/MiSTer_DVDcss_hil_*; do
   [ -e "$f" ] || continue
@@ -649,16 +655,32 @@ python3 -c "import sys;open('{CFG_DIR}/{CFG_NAME}','wb').write(bytes.fromhex('{b
 cat > {CORE_DIR}/{HIL_MGL} <<'MGLEOF'
 {mgl}MGLEOF
 ''')
+    fast = getattr(args, 'telem_fast_ms', None)
     if getattr(args, 'telem_log', None):
-        telem_poll_start(REMOTE_TELEM_LOG, args.telem_seconds, args.telem_hz)
-        print(f'  telemetry poller: {args.telem_seconds}s @ {args.telem_hz} Hz')
+        if fast:
+            # dvd_ctl re-reads the knob every 2 s, so write it before the load
+            ssh(f'rm -f {TELEM_FAST_LOG}; echo {int(fast)} > {TELEM_FAST}\n')
+            print(f'  event capture: every {int(fast)} ms for {args.telem_seconds}s '
+                  f'(Main-side log {TELEM_FAST_LOG})')
+        else:
+            telem_poll_start(REMOTE_TELEM_LOG, args.telem_seconds, args.telem_hz)
+            print(f'  telemetry poller: {args.telem_seconds}s @ {args.telem_hz} Hz')
     fifo(f'load_core {CORE_DIR}/{HIL_MGL}')
     if not args.no_wait:
         cmd_wait(args)
     if getattr(args, 'telem_log', None):
         # let the poller run out its window before collecting
         time.sleep(max(0, args.telem_seconds - (time.time() - t_launch)) + 1)
-        rows = telem_poll_collect(REMOTE_TELEM_LOG)
+        if fast:
+            # disarm first, so the log stops growing while it is copied back
+            ssh(f'rm -f {TELEM_FAST}\n')
+            time.sleep(2.5)
+            rows = telem_poll_collect(TELEM_FAST_LOG)
+            if not rows:
+                print('  ⚠ event capture produced NO rows: is the deployed Main one '
+                      'with the dvd_telem_fast knob?')
+        else:
+            rows = telem_poll_collect(REMOTE_TELEM_LOG)
         with open(args.telem_log, 'w') as f:
             for r in rows:
                 f.write(json.dumps(r) + '\n')
@@ -1130,6 +1152,9 @@ def main():
                         'transient is invisible to a telem --watch started after)')
     p.add_argument('--telem-seconds', type=int, default=120)
     p.add_argument('--telem-hz', type=float, default=10.0)
+    p.add_argument('--telem-fast-ms', type=int, metavar='MS',
+                   help='with --telem-log: event capture -- the custom Main samples '
+                        'every MS ms (10..1000) and logs every sample itself')
     p.set_defaults(fn=cmd_launch)
 
     p = sub.add_parser('wait')
