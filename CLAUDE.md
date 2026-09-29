@@ -459,11 +459,13 @@ otherwise; `--red` runs its mutation arms).
 - ❌ Chapters/PTT exactness (Phase 6, `VTS_PTT_SRPT`), UDF-only images, parental control,
   GPRM counter mode, dual-mono AC-3 (acmod 0, rejected deliberately).
 - ❌ Trick play (continuous 2×/4×): needs a flush-free I-frame splice (`docs/dvd_nav.md` §2d).
-- 🔧 ⏳ HW: ~1.3 s audio lost at every non-seamless cell join inside a title (Thayer VTS_08,
-  FMV games, play-all extras; 1,036 of 1,525 discs have such joins). Fixed in sim on branch
-  `feature/nonseamless-audio`: `pts_assoc` never tags a second field, and audio re-times
-  IN BAND at the discontinuity frame instead of a display-time ring reset.
-  `docs/nonseamless_audio.md`; gates `run_pts_assoc.sh`, `run_aud_retime.sh --red`.
+- 🔧 ⏳ HW round 3: ~1.3 s audio lost at every non-seamless cell join inside a title (Thayer
+  VTS_08, FMV games, play-all extras; 1,036 of 1,525 discs). Branch `feature/nonseamless-audio`:
+  `pts_assoc` never tags a second field (✅ HW); audio re-times IN BAND at the discontinuity
+  frame (✅ Thayer 0 ms/join on 2 rigs), waiting for the clock (`arr_agree`), and never at a
+  seamless-stamped frame (`audio_ring` carries `cell_seamless`). Rounds 1–2 found and fixed
+  a T2 menu and a Matrix white-rabbit regression. `docs/nonseamless_audio.md` §4a; gates
+  `run_pts_assoc.sh`, `run_aud_retime.sh --red`, `check_aud_rephase_wiring.py`.
 - ⚠ `lates` counts one per refresh while a PGC still is held (`flags.still`), so boot and
   menu windows over-report (`docs/decode_pacing.md` §2c). The Progressive lates and the
   Thayer boot-FMV Interlaced lates are fixed by F1 + F2: 0 on the whole census set, and no

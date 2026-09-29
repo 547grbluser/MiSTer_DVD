@@ -25,7 +25,7 @@ module audio_ring_drop_tb;
     audio_ring #(.BYTE_DEPTH(BD), .FRAME_DEPTH(FD)) dut (
         .clk(clk), .rst_n(rst_n), .aud_byte(aud_byte), .aud_valid(aud_valid),
         .aud_type(aud_type), .aud_frame_start(aud_frame_start), .drop_pulse(drop_pulse),
-        .aud_frame_pts(aud_frame_pts), .aud_frame_pts_valid(aud_frame_pts_valid),
+        .aud_frame_pts(aud_frame_pts), .aud_frame_pts_valid(aud_frame_pts_valid), .aud_frame_seamless(1'b0),
         .aud_ready(aud_ready), .out_byte(out_byte), .out_valid(out_valid), .out_ready(out_ready),
         .frame_valid(frame_valid), .frame_len(frame_len), .frame_type(frame_type),
         .frame_pts(frame_pts), .frame_pts_valid(frame_pts_valid), .frame_pop(frame_pop),

@@ -227,7 +227,7 @@ module iso_reader_auddrain_tb;
         .clk(clk), .rst_n(aud_rst_n),
         .aud_byte(aud_byte), .aud_valid(aud_valid & aud_rdy), .aud_type(aud_type),
         .aud_frame_start(aud_fs & aud_rdy), .drop_pulse(1'b0),
-        .aud_frame_pts(aud_pts), .aud_frame_pts_valid(aud_pts_valid),
+        .aud_frame_pts(aud_pts), .aud_frame_pts_valid(aud_pts_valid), .aud_frame_seamless(1'b0),
         .aud_ready(),
         .out_byte(r_byte), .out_valid(r_valid), .out_ready(r_ready),
         .frame_valid(f_valid), .frame_len(f_len), .frame_type(), .frame_pts(),

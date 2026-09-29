@@ -3,7 +3,7 @@
 # (docs/nonseamless_audio.md 4a), plus the regression suites it touches.
 #
 #   GREEN  bench/dvd/aud_retime_tb.sv       S1-S8 (join shapes, forward gap, control, liveness,
-#                                           the T2 late head, a stale latch)
+#                                           the T2 late head, a stale latch, a seamless restart, audio leading video)
 #          bench/dvd/dvd_audio_decode_tb.sv the drain gate / catch-up / de-click contract
 #          bench/dvd/flush_ctl_tb.sv        disc_rephase no longer resets audio
 #   RED    (--red) each arm removes ONE step of the re-time and must fail exactly
@@ -59,7 +59,7 @@ PYEOF
 }
 
 echo "== GREEN =="
-green aud_retime       "PASS: aud_retime_tb (S1-S8)" bench/dvd/aud_retime_tb.sv
+green aud_retime       "PASS: aud_retime_tb (S1-S10)" bench/dvd/aud_retime_tb.sv
 green dvd_audio_decode "PASS: dvd_audio_decode"   bench/dvd/dvd_audio_decode_tb.sv
 d=$(mktemp -d)
 if iverilog -g2012 -o "$d/sim" dvd/flush_ctl.sv bench/dvd/flush_ctl_tb.sv && vvp "$d/sim" > "$d/log" 2>&1 \
@@ -84,6 +84,19 @@ if [ "${1:-}" = "--red" ]; then
         python3 tools/check_aud_rephase_wiring.py dvd/emu.sv "$d/fc.sv" | grep -q "does not include aud_rephase_req" \
             && echo "  PASS wiring RED (request dropped from aud_resync is named)" \
             || { echo "  FAIL wiring RED: a dropped request passed"; fail=1; }
+        # the seamless stamp (step 7): tied off at the ring, or the decoder not reading it
+        sed "s/\.aud_frame_seamless  (cell_seamless)/.aud_frame_seamless  (1'b0)/" dvd/emu.sv > "$d/e3.sv"
+        sed "s/\.frame_seamless  (aud_frame_seamless_w)/.frame_seamless  (1'b0)/" dvd/emu.sv > "$d/e4.sv"
+        if cmp -s "$d/e3.sv" dvd/emu.sv || cmp -s "$d/e4.sv" dvd/emu.sv; then
+            echo "  FAIL wiring RED: a seamless mutation did not apply (anchor moved)"; fail=1
+        else
+            python3 tools/check_aud_rephase_wiring.py "$d/e3.sv" | grep -q "not the reader's cell_seamless" \
+                && echo "  PASS wiring RED (seamless stamp tied off at the ring is named)" \
+                || { echo "  FAIL wiring RED: a tied-off seamless stamp passed"; fail=1; }
+            python3 tools/check_aud_rephase_wiring.py "$d/e4.sv" | grep -q "not the same named net" \
+                && echo "  PASS wiring RED (decoder not reading the stamp is named)" \
+                || { echo "  FAIL wiring RED: an unread seamless stamp passed"; fail=1; }
+        fi
     fi
     rm -rf "$d"
     echo "== RED =="
@@ -110,6 +123,14 @@ if [ "${1:-}" = "--red" ]; then
     #    dropped
     red resync-off "FAIL S8: no resync_req for a stale latch" \
         "resync_req  <= 1'b1;|||resync_req  <= 1'b0;"
+    # 8. The Matrix regression (HW 2026-09-29): ignore the seamless stamp and a
+    #    white-rabbit restart is re-timed -- a gap, then the head 0.2 s late
+    red seamless-off "FAIL S9: a SEAMLESS join was re-timed" \
+        "frame_pts_valid && !frame_seamless &&|||frame_pts_valid &&"
+    # 9. no wait for the clock: the head dispatches on the old clock, latches, and
+    #    releases a whole audio-leads-video offset late (HW round 2 rework)
+    red agree-hold-off "FAIL S10: the new clip played LATE" \
+        "(draining || play_pts_valid || !arr_agree) && !(&hold_tmr)|||(draining || play_pts_valid) && !(&hold_tmr)"
     # 5. over-trigger: a detector that fires on ordinary forward steps must be caught
     #    by the continuous control
     red over-trigger "FAIL S5: a continuous stream triggered a re-time" \

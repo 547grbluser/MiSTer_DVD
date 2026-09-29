@@ -23,6 +23,11 @@ Checks, on comment-stripped source (comments here quote the old wiring):
      the SAME net, and it is not aud_disc_rephase.
   2. Nothing else drives NET (no `assign NET =`, no second `.resync_req`).
   3. dvd/flush_ctl.sv ORs aud_rephase_req into the aud_resync trigger.
+  4. THE SEAMLESS STAMP (step 7, HW round 2): audio_ring's `.aud_frame_seamless` reads
+     the reader's `cell_seamless`, and the ring's `.frame_seamless` output and the
+     decoder's `.frame_seamless` input name the same net with no other driver. Every
+     chain bench ties the ring input 0, so a tie-0 or a wrong net in emu.sv passes the
+     whole suite and silently brings back the Matrix white-rabbit gap + 0.2 s lag.
 A lookup that finds nothing, or two of something, is a NAMED FAIL, never a skip.
 
 Exit 0 = wired as designed; 1 = a named failure. Optional argv[1]/argv[2] = emu.sv /
@@ -120,6 +125,22 @@ def main():
             if len(re.findall(r'\.resync_req\s*\(\s*' + re.escape(net) + r'\s*\)', src)) != 1:
                 fails.append(f'"{net}" is driven by more than one .resync_req')
 
+    rng = instance_body(src, 'audio_ring')
+    if len(rng) != 1:
+        fails.append(f'expected ONE audio_ring instance in emu.sv, found {len(rng)}')
+    elif len(dec) == 1:
+        s_in = port_net(rng[0], 'aud_frame_seamless')
+        s_out = port_net(rng[0], 'frame_seamless')
+        d_in = port_net(dec[0], 'frame_seamless')
+        if s_in != ['cell_seamless']:
+            fails.append(f'audio_ring.aud_frame_seamless reads {s_in}, not the reader\'s cell_seamless '
+                         '(a tie-off here brings the Matrix seamless regression back)')
+        if len(s_out) != 1 or not s_out[0] or len(d_in) != 1 or s_out != d_in:
+            fails.append(f'audio_ring.frame_seamless {s_out} and dvd_audio_decode.frame_seamless '
+                         f'{d_in} are not the same named net')
+        elif re.search(r'\bassign\s+' + re.escape(s_out[0]) + r'\b', src):
+            fails.append(f'"{s_out[0]}" has an assign driver besides audio_ring')
+
     trig = re.search(r'else\s+if\s*\(([^;]*?)\)\s*aud_resync_cnt\s*<=', fsrc)
     if not trig:
         fails.append('flush_ctl.sv: no `else if (...) aud_resync_cnt <=` trigger found')
@@ -131,7 +152,8 @@ def main():
         for f in fails:
             print('FAIL: ' + f)
         return 1
-    print('PASS: check_aud_rephase_wiring (decoder resync_req -> flush_ctl.aud_rephase_req -> aud_resync)')
+    print('PASS: check_aud_rephase_wiring (decoder resync_req -> flush_ctl.aud_rephase_req -> aud_resync; '
+          'cell_seamless -> audio_ring stamp -> decoder)')
     return 0
 
 

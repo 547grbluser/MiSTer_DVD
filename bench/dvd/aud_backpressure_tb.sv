@@ -85,7 +85,7 @@ module aud_backpressure_tb;
         .clk(clk), .rst_n(rst_n),
         .aud_byte(rf_byte), .aud_valid(rf_valid), .aud_type(rf_type),
         .aud_frame_start(rf_fs),
-        .aud_frame_pts(rf_pts), .aud_frame_pts_valid(rf_pv),
+        .aud_frame_pts(rf_pts), .aud_frame_pts_valid(rf_pv), .aud_frame_seamless(1'b0),
         .aud_ready(),
         .almost_full(ring_almost_full),
         .out_byte(out_byte), .out_valid(out_valid), .out_ready(out_ready),

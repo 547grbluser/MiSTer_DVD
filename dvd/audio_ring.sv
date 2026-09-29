@@ -78,6 +78,12 @@ module audio_ring #(
     input  wire        drop_pulse,
     input  wire [32:0] aud_frame_pts,    // PES PTS for this frame (held, valid @ start)
     input  wire        aud_frame_pts_valid, // this frame's PES carried a PTS
+    // the reader's cell_seamless LEVEL, stamped per frame at its start (2026-09-29,
+    // docs/nonseamless_audio.md 4a step 7): the frame belongs to a cell authored
+    // seamless_play. Stamped HERE, at the write side, because the reader's level is
+    // for the cell being STREAMED -- ~1 s ahead of the audio the dispatcher sees --
+    // while the ring's write side is only the stream FIFO's few ms behind it.
+    input  wire        aud_frame_seamless,
     output wire        aud_ready,        // tied high — see HARD INVARIANT above
 
     // Read side, byte stream (FWFT) — for the HPS via ioctl_upload.
@@ -92,6 +98,7 @@ module audio_ring #(
     output wire  [1:0] frame_type,        // its codec (aud_type)
     output wire [32:0] frame_pts,         // PES PTS captured at frame start
     output wire        frame_pts_valid,   // that PTS is meaningful (PES had one)
+    output wire        frame_seamless,    // stamped aud_frame_seamless (see above)
     input  wire        frame_pop,         // pop the front descriptor
 
     // Status (for status-word / debug-overlay wiring later).
@@ -129,11 +136,12 @@ module audio_ring #(
     logic [1:0]          cur_type;
     logic [32:0]         cur_pts;            // PES PTS captured at this frame's start
     logic                cur_pts_valid;      // that PTS is meaningful
+    logic                cur_seamless;       // cell_seamless stamped at this frame's start
     logic                cur_dropping;       // current frame overflowed → discard
     logic                frame_open;         // a frame has been started
     logic [2:0]          drop_cnt;           // menu-transition splice: frames left to drop
 
-    // ---- Frame descriptor FIFO ({pts_valid, pts[32:0], length[15:0], type[1:0]}) ----
+    // ---- Frame descriptor FIFO ({seamless, pts_valid, pts[32:0], length[15:0], type[1:0]}) ----
     // Phase-0 ALM reclaim (2026-07-06): dmem is now a SYNC-READ M10K, fronted by a
     // FWFT head register (`head_desc`/`head_v`). The old async taps `dmem[d_rd]` on
     // four 52-bit fields synthesised as wide 64:1 muxes (~1.9k combinational ALUTs =
@@ -143,7 +151,7 @@ module audio_ring #(
     // pop while the ring refills the head — absorbed by dvd_audio_decode, which reads
     // the descriptor only in S_IDLE (gated by frame_valid) and then routes hundreds
     // of bytes before needing the next one. See docs/roadmap.md ALM-reclaim note.
-    localparam int DESC_W = 1 + 33 + 16 + 2;   // 52
+    localparam int DESC_W = 1 + 1 + 33 + 16 + 2;   // 53: {seamless, pts_valid, pts, len, type}
     logic [DESC_W-1:0]   dmem [0:FRAME_DEPTH-1];
     logic [FRAME_AW-1:0] d_wr;      // ring write pointer (commit)
     logic [FRAME_AW-1:0] d_rd;      // ring read pointer  (head refill)
@@ -166,6 +174,7 @@ module audio_ring #(
     assign frame_len        = head_desc[17:2];
     assign frame_pts        = head_desc[50:18];
     assign frame_pts_valid  = head_desc[51];
+    assign frame_seamless   = head_desc[52];
     assign frames_available = {{(16-(FRAME_AW+2)){1'b0}}, total_frames};
     // bytes_available is a 16-bit STATUS output (overlay/HPS), but `avail` is
     // BYTE_AW+1 bits wide - narrower than 16 for a small ring, but EXACTLY 17 once
@@ -217,6 +226,7 @@ module audio_ring #(
             cur_type          <= '0;
             cur_pts           <= '0;
             cur_pts_valid     <= 1'b0;
+            cur_seamless      <= 1'b0;
             cur_dropping      <= 1'b0;
             frame_open        <= 1'b0;
             drop_cnt          <= 3'd0;
@@ -250,7 +260,7 @@ module audio_ring #(
             end
 
             if (do_commit) begin
-                dmem[d_wr] <= {cur_pts_valid, cur_pts, cur_len16, cur_type};
+                dmem[d_wr] <= {cur_seamless, cur_pts_valid, cur_pts, cur_len16, cur_type};
                 d_wr       <= d_wr + 1'b1;
                 avail_t    = avail_t + cur_len[BYTE_AW:0];
             end
@@ -291,6 +301,7 @@ module audio_ring #(
                 cur_type          <= aud_type;
                 cur_pts           <= aud_frame_pts;        // stamp this frame's PES PTS
                 cur_pts_valid     <= aud_frame_pts_valid;
+                cur_seamless      <= aud_frame_seamless;
                 frame_open        <= 1'b1;
                 if (has_space) begin
                     mem[wr_addr] <= aud_byte;

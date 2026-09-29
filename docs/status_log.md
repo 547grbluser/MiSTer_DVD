@@ -50,8 +50,17 @@ predate later confirmations; the `CLAUDE.md` index carries the reconciled status
   - **Gates:** `run_pts_assoc.sh` (new `pts_thayer` fixture plus RED),
     `run_aud_retime.sh --red` (S1–S6 plus 5 RED arms), and `run_seamless_audio.sh
     --red`.
-  - **Next:** build, flash, and repeat the Thayer capture, then the regression set in
-    `docs/nonseamless_audio.md` §4b.
+  - **HW rounds 1–2** (two rigs):
+    - Thayer: **0 ms lost per join**, `play_err` 0–3 ms.
+    - ULTIMATE_T2 boot → menu: first **2.5 s late**, then rescued 0.7 s after the old
+      build. Fixed: the hold waits for `arr_agree`, a two-sided arrivals-versus-clock test.
+    - The Matrix white-rabbit cells: **~190 ms gap, then 0.2 s late**. Fixed:
+      `audio_ring` stamps the reader's `cell_seamless` on each frame, and seamless frames
+      are not re-timed.
+    - Benches S7–S10 and 4 more RED arms. The two new emu seams are in
+      `check_aud_rephase_wiring.py`.
+  - **Next:** HW round 3 (Matrix, then T2, then Thayer). Control captures are on the
+    SuperStation already (`docs/nonseamless_audio.md` §4a).
 
 - ✅ **PER-PICTURE DECODE-TIME INSTRUMENT (2026-09-29,
   ✅ MERGED PR #140; sim-gated, HW DATA TAKEN 2026-09-29).**

@@ -69,7 +69,7 @@ module dvd_audio_decode_tb;
         .lpcm_quant(2'd0),           // 16-bit LPCM in this TB
         .cdda_mode(1'b0), .cdda_fs(2'd0), .cdda_wr_en(1'b0),
         .cdda_wr_data(8'd0), .cdda_flush(1'b0), .cdda_full(),
-        .frame_pts(frame_pts), .frame_pts_valid(frame_pts_valid),
+        .frame_pts(frame_pts), .frame_pts_valid(frame_pts_valid), .frame_seamless(1'b0),
         .frame_pop(frame_pop),
         .nco_trim(22'sd0), .dispatch_pts(), .dispatch_pts_valid(),
         .sched_en(sched_en), .stc_anchored(stc_anchored), .disp_anchored(disp_anchored), .video_live(video_live),

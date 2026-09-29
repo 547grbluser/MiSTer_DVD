@@ -1299,6 +1299,7 @@ wire [32:0] ps_vid_pts;
 wire        ps_vid_pts_valid;
 wire [32:0] aud_frame_pts_w;        // audio_ring read-side frame PTS
 wire        aud_frame_pts_valid_w;
+wire        aud_frame_seamless_w;       // audio_ring read-side seamless stamp (-> dvd_audio_decode)
 wire [32:0] aud_dispatch_pts;       // dvd_audio_decode -> av_sync
 wire        aud_dispatch_pts_valid;
 wire        av_stc_anchored;        // av_sync STC locked -> dispatch schedule gate
@@ -3970,6 +3971,7 @@ audio_ring #(.BYTE_DEPTH(32768), .FRAME_DEPTH(128)) audio_ring_inst (
     .drop_pulse       (aud_drop_pulse),      // §5d: drop menu-transition splice frames
     .aud_frame_pts       (rf_aud_frame_pts),
     .aud_frame_pts_valid (rf_aud_frame_pts_valid),
+    .aud_frame_seamless  (cell_seamless),        // stamped per frame at the write side (docs/nonseamless_audio.md 4a step 7)
     .aud_ready        (),                    // ring-internal accept (always high); demux
                                              // flow control uses almost_full below
 
@@ -3984,6 +3986,7 @@ audio_ring #(.BYTE_DEPTH(32768), .FRAME_DEPTH(128)) audio_ring_inst (
     .frame_type       (aud_frame_type),
     .frame_pts        (aud_frame_pts_w),
     .frame_pts_valid  (aud_frame_pts_valid_w),
+    .frame_seamless   (aud_frame_seamless_w),
     .frame_pop        (aud_frame_pop),
 
     .frames_available (aud_frames_avail),
@@ -4169,6 +4172,7 @@ dvd_audio_decode #(.CLK_HZ(27000000), .AUD_HZ(48000)) dvd_audio_decode_inst (
     .lpcm_quant  (ps_aud_lpcm_quant),   // LPCM word length -> lpcm_unpack (20/24-bit depack)
     .frame_pts       (aud_frame_pts_w),
     .frame_pts_valid (aud_frame_pts_valid_w),
+    .frame_seamless  (aud_frame_seamless_w),   // this frame's cell is authored seamless: no re-time
     .frame_pop   (dec_frame_pop),
     // CD-DA/WAV: raw LE PCM bytes straight from the reader (see the
     // ps_stream_fifo wr_en gate -- the two sinks are exclusive on cdda_mode).

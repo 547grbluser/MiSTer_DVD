@@ -418,6 +418,39 @@ ahead of the clock):
 
 Needs a bench scenario (S7: the clock already new, the head late > WIN, arrivals current).
 
+### HW round 2 (2026-09-29, second rig: SuperStation One; build `DVD_nsaudio_20260929_1855`, 93.57/89.69 MHz)
+
+Control arm = `DVD_pictime` on the same box. Captures `.sim/nsaudio/ss_*.jsonl`.
+
+| case | old build | round-2 build |
+|---|---|---|
+| Thayer VTS_08, 10 joins | 0.8–2.3 s lost per join | **0.0 ms** lost at every join, no resets |
+| ULTIMATE_T2 boot → menu | in sync from 22.13 s | in sync from 22.82 s: the step-6 rescue fired at 22.57 s (it waited for the latch to be 0.5 s late) |
+| The Matrix white-rabbit c4 / c5 / c7 | **0 ms lost**, `av_drift` +95…105 ms | **~190 ms gap, then ~0.2 s LATE** at c4 and c7; c5 fine |
+
+**The Matrix regression** was the flagged risk. A `seamless_play` cell restarts its PTS
+while the soundtrack runs on sample for sample. At c4 the new audio restarts ~1.1 s ahead
+of the old clock, so it was held. The display then re-anchored forward to a picture
+0.21 s past the head, so it released 0.21 s late. The author's audio-versus-video offset
+at a seamless boundary is not a phase to honour.
+
+**Fixes (round 3, sim-gated):**
+- **Step 7: no re-time at an authored-seamless join.** The reader's `cell_seamless` is
+  stamped per frame into `audio_ring`'s descriptor at the write side (53 bits now:
+  `frame_seamless`), where it names the right cell. The old `flush_ctl` carve-out sampled
+  it at display time, ~1 s later in content. A discontinuity head stamped seamless is
+  just dispatched, sample-continuous.
+- **The hold waits for the clock.** `disc_hold` now also holds while `!arr_agree`. A head
+  dispatched while the clock was still elsewhere got latched, and a latch can only be
+  undone by a reset. Waiting lets the dispatch-side trim see the true lateness. So T2 is
+  trimmed at the crossing instead of rescued 0.6 s later, and audio that leads its first
+  picture lands in phase (S10). Step 6 (`resync_req`) is kept only as a safety net for a
+  second re-anchor after a correct latch (S8 reshaped to that). `HOLD_W` is a parameter
+  now so the bench can shrink it.
+- **Rejected on the way:** lowering step 6's threshold from 0.5 s to STALE. It would have
+  sent every join whose audio leads its picture by 50–500 ms to the ~1 s reset, which is
+  the original problem again.
+
 ## 4b. HW round (next)
 
 1. `USE_DOCKER=1 ./build_release.sh --compile`. Ask the UMD and H264 sessions for a

@@ -39,7 +39,11 @@ module dvd_audio_decode #(
     // Drain-gate fallback release timer width: 2^W / CLK_HZ seconds of ARMED with
     // data but no scheduled release before free-running anyway (liveness guard for
     // streams that never yield a usable PTS/anchor). 26 -> ~2.5 s. TBs shrink it.
-    parameter int ARM_TIMEOUT_W = 26
+    parameter int ARM_TIMEOUT_W = 26,
+    // In-band re-time hold bound: 2^W / CLK_HZ s a discontinuity head may wait at
+    // the ring head (for the old tail to play out AND for the clock to reach its
+    // timeline) before it is dispatched anyway. 24 -> ~0.62 s. TBs shrink it.
+    parameter int HOLD_W = 24
 ) (
     input  logic        clk,             // clk_sys
     input  logic        rst_n,
@@ -62,6 +66,7 @@ module dvd_audio_decode #(
     input  logic [1:0]  lpcm_quant,       // LPCM word length (ps_demux): 0=16,1=20,2=24-bit
     input  logic [32:0] frame_pts,        // PES PTS of the queued frame
     input  logic        frame_pts_valid,  // that PTS is meaningful
+    input  logic        frame_seamless,   // audio_ring: the frame's cell is authored seamless_play
     output logic        frame_pop,
 
     // CD-DA/WAV direct-PCM injection (feature/wav-audio): raw little-endian
@@ -389,8 +394,14 @@ module dvd_audio_decode #(
     // for the catch-up, where the sign is known -- and reads "current" for an
     // arrival any distance AHEAD of the clock, e.g. new-timeline audio seen
     // against an old clock across a forward restart. The parse front normally
-    // leads the clock by the ring + dispatch depth (~1.1-1.6 s), so the lower
-    // bound is 3 s; the upper bound is the catch-up's own STALE.
+    // leads the clock by ~1.1-1.6 s, so the lower bound is 3 s; the upper bound is
+    // the catch-up's own STALE.
+    // ⚠ SIZE ARR_LEAD_MAX FROM THE VIDEO VBUF, NOT FROM THIS RING. The demux parses
+    // audio and video out of ONE stream, so the audio arrival front can lead the
+    // clock by no more than the video buffering allows (the VBUF depth, ~1-1.6 s):
+    // the demux stalls on a full VBUF long before this ring alone would bound it.
+    // (At 64 kbps a 32 KB ring holds ~4 s -- sizing the bound from the ring would
+    // make it wrong for exactly the low-bitrate tracks.)
     localparam logic signed [34:0] ARR_LEAD_MAX = 35'sd270000;   // 3 s
     wire arr_agree = arr_seen && (arr_delta <= STALE_TICKS) && (arr_delta > -ARR_LEAD_MAX);
     wire head_catchup = sched_en && draining && stc_anchored && video_live && arr_current &&
@@ -441,9 +452,12 @@ module dvd_audio_decode #(
     // first ~1.1-1.4 s. Every such flush threw that opening away (Thayer: ~1.3 s
     // of silence at every clip; Scooby-Doo 2's "good job" -> "job" was the same
     // loss behind a different trigger).
-    //   6. A STALE LATCH: a re-time head latched while the clock was elsewhere,
-    //      and then the clock arrived on a timeline where that head is RETIME_WIN
-    //      or more late while the arrivals agree with it. Nothing already in the
+    //   6. A STALE LATCH (safety net): a re-time head latched and then the clock
+    //      moved again -- a second re-anchor -- to where that head is RETIME_WIN or
+    //      more late while the arrivals agree. Since the hold now waits for
+    //      arr_agree before dispatching (step 2), a latch normally happens on the
+    //      head's own timeline and this does not fire; it covers the HOLD_W expiry
+    //      and double re-anchors. Nothing already in the
     //      decoder can be dropped except by a reset, so the decoder asks for the
     //      audio-only re-phase (resync_req -> flush_ctl aud_resync): the same
     //      reset the old display-time path fired at every discontinuity, now only
@@ -455,15 +469,35 @@ module dvd_audio_decode #(
     localparam logic signed [34:0] DISC_BACK_TICKS = 35'sd4500;     // 50 ms
     localparam logic signed [34:0] DISC_FWD_TICKS  = 35'sd90000;    // 1 s
     localparam logic signed [34:0] RETIME_WIN      = 35'sd45000;    // 0.5 s
-    localparam int HOLD_W = 24;                                     // 2^24/27 MHz ~ 0.62 s
     logic [32:0] last_pts;          // PTS of the last tagged frame dispatched to play
     logic        last_pts_v;
     logic        cur_disc;          // the frame being dispatched is a discontinuity head
     logic [HOLD_W-1:0] hold_tmr;
     wire  signed [34:0] pts_step = $signed({2'b0, frame_pts}) - $signed({2'b0, last_pts});
-    wire  head_disc = sched_en && last_pts_v && frame_pts_valid &&
+    //   7. NOT AT AN AUTHORED-SEAMLESS JOIN (HW 2026-09-29, The Matrix white-rabbit
+    //      cells, control arm = the pre-change build). A seamless_play cell restarts
+    //      its PTS while the soundtrack runs on SAMPLE FOR SAMPLE; the author's
+    //      audio-vs-video offset at the boundary is not a phase to honour. Re-timing
+    //      there took a ~190 ms gap and then released the head ~0.2 s LATE against
+    //      the first picture (c4, c7), where the old build -- which just played on --
+    //      lost 0 ms. frame_seamless is the reader's cell_seamless stamped per frame
+    //      by audio_ring at its WRITE side (the old flush_ctl carve-out sampled the
+    //      same level at display time, ~1 s later in content -- the wrong cell).
+    //      Such a head is simply dispatched: sample-continuous, last_pts follows it.
+    //      ★ Menus never carry the stamp, BY CONSTRUCTION: the reader writes
+    //      cell_seamless only in S_CELL_LOAD2's title branch (the menu_dom branch
+    //      never does), and every PGC load and transport seek clears it -- so a
+    //      looping menu cell always takes the re-time (the #63 lip-sync case).
+    wire  head_disc = sched_en && last_pts_v && frame_pts_valid && !frame_seamless &&
                       ((pts_step < -DISC_BACK_TICKS) || (pts_step > DISC_FWD_TICKS));
-    wire  disc_hold = head_disc && (draining || play_pts_valid) && !(&hold_tmr);
+    // HOLD until (a) the old timeline's audio has played out (the gate re-armed with
+    // empty FIFOs) AND (b) the clock is on the head's timeline -- the demux's
+    // arrivals agree with it (arr_agree). (b) was added after HW round 2: a head
+    // dispatched while the clock was still elsewhere gets LATCHED, and a latch can
+    // only be undone by a reset; waiting for the clock instead lets the dispatch-
+    // side trim below see the head's true lateness and drop only the late part.
+    wire  disc_hold = head_disc && (draining || play_pts_valid || !arr_agree) && !(&hold_tmr);
+    // the bound expired with old audio still queued: force the re-arm (liveness)
     wire  hold_expired = head_disc && (draining || play_pts_valid) && (&hold_tmr);
     // 5. OVERLAP: the old cell's audio may run a little past its video, so the
     //    display can re-anchor while the old tail is still playing. The new

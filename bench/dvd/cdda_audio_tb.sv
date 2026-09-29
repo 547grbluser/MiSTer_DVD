@@ -88,7 +88,7 @@ module cdda_audio_tb;
         .ring_byte(8'd0), .ring_valid(1'b0), .ring_ready(),
         .frame_valid(1'b0), .frame_len(16'd0), .frame_type(2'd0),
         .lpcm_quant(2'd0),
-        .frame_pts(33'd0), .frame_pts_valid(1'b0), .frame_pop(),
+        .frame_pts(33'd0), .frame_pts_valid(1'b0), .frame_seamless(1'b0), .frame_pop(),
         .cdda_mode(cdda_mode_w), .cdda_fs(cdda_fs_w),
         .cdda_wr_en(stream_valid & cdda_mode_w), .cdda_wr_data(stream_data),
         .cdda_flush(cdda_flush), .cdda_full(cdda_full_w),

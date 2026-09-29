@@ -27,9 +27,18 @@
 //       after a still; the first new audio arrives 0.6 s late with current audio
 //       behind it -> the stale head is discarded, playback lands in phase (the
 //       first build held it as "other timeline" and played it 2.5 s late)
-//    S8 a head latched while the clock was elsewhere goes stale when the clock
-//       arrives (0.7 s late, arrivals agree) -> exactly one resync_req, and the
-//       fresh audio after that reset plays in phase
+//    S8 a head latched on its own timeline goes stale when a SECOND re-anchor
+//       leaves it 0.7 s behind (arrivals agree) -> exactly one resync_req, and the
+//       fresh audio after that reset plays in phase (the one case the hold cannot
+//       prevent, since the latch was correct when it was taken)
+//    S9 (HW, The Matrix white-rabbit cells) a PTS restart on frames stamped
+//       SEAMLESS (audio_ring's per-frame cell_seamless), and the display re-anchors
+//       to a picture 0.21 s off the audio -> sample-continuous: no re-time, no gap,
+//       nothing lost (the first cut re-timed it: ~190 ms gap, then 0.2 s late)
+//    S10 a NON-seamless join whose old audio ends 50 ms before its video and whose
+//       new audio starts 0.2 s BEFORE its first picture:
+//       the head must wait for the clock (arrivals agreeing) and then be trimmed to
+//       land in phase -- dispatched early it latches, and releases 0.2 s late
 //  S1-S7 must raise NO resync_req. The bench models the demux's arrival front
 //  (arr_pts = the newest committed frame) and, on resync_req, the flush_ctl
 //  aud_resync it causes (decoder reset + ring discard).
@@ -51,6 +60,8 @@ module aud_retime_tb;
     logic [15:0] desc_len  [0:NDESC-1];
     logic [32:0] desc_pts  [0:NDESC-1];
     logic        desc_ptsv [0:NDESC-1];
+    logic        desc_seam [0:NDESC-1];      // audio_ring's per-frame seamless stamp
+    logic        seam_next = 0;              // stamp for frames add_frame builds next
     integer      ndesc = 0, dptr = 0;
 
     // STAGED: frames are built into mem/desc, then PUBLISHED (made visible to the
@@ -64,6 +75,7 @@ module aud_retime_tb;
     wire  [15:0] frame_len   = desc_len[dptr];
     wire  [32:0] frame_pts   = desc_pts[dptr];
     wire         frame_pts_valid = desc_ptsv[dptr];
+    wire         frame_seamless  = desc_seam[dptr];
     wire         frame_pop;
 
     always @(posedge clk) if (rst_n) begin
@@ -99,11 +111,12 @@ module aud_retime_tb;
 
     // ARM_TIMEOUT_W 20 = 2^20 clk = 388 ms at 2.7 MHz: longer than S2's deliberate
     // 150 ms wait (the fallback must not be what releases it), short enough for S6.
-    dvd_audio_decode #(.CLK_HZ(2700000), .AUD_HZ(48000), .ARM_TIMEOUT_W(20)) dut (
+    dvd_audio_decode #(.CLK_HZ(2700000), .AUD_HZ(48000), .ARM_TIMEOUT_W(20), .HOLD_W(20)) dut (
         .clk(clk), .rst_n(rst_n), .enable(1'b1), .pause(1'b0), .aud_soft_switch(1'b0),
         .ring_byte(ring_byte), .ring_valid(ring_valid), .ring_ready(ring_ready),
         .frame_valid(frame_valid), .frame_len(frame_len), .frame_type(2'd2),   // LPCM
         .lpcm_quant(2'd0), .frame_pts(frame_pts), .frame_pts_valid(frame_pts_valid),
+        .frame_seamless(frame_seamless),
         .frame_pop(frame_pop),
         .cdda_mode(1'b0), .cdda_fs(2'd0), .cdda_wr_en(1'b0), .cdda_wr_data(8'd0),
         .cdda_flush(1'b0), .cdda_full(),
@@ -140,6 +153,7 @@ module aud_retime_tb;
             desc_len[ndesc]  = SPF * 4;
             desc_pts[ndesc]  = pts;
             desc_ptsv[ndesc] = 1'b1;
+            desc_seam[ndesc] = seam_next;
             committed = committed + SPF * 4;
             ndesc = ndesc + 1;
         end
@@ -183,12 +197,12 @@ module aud_retime_tb;
     // fresh module state + empty model for each scenario
     task automatic fresh;
         begin
-            // every scenario before S8 must finish without a resync_req
-            if (n_resync != 0) fail("a scenario before S8 raised resync_req");
+            // every scenario except S8 (which clears its own) must finish without one
+            if (n_resync != 0) fail("a scenario other than S8 raised resync_req");
             rst_n = 0; stc_run = 0;
             repeat (10) @(posedge clk);
             committed = 0; rd = 0; ndesc = 0; dptr = 0; ncap = 0; prev_l = 16'h0;
-            committed_pub = 0; ndesc_pub = 0;
+            committed_pub = 0; ndesc_pub = 0; seam_next = 0;
             n_resync = 0;
             repeat (10) @(posedge clk);
             rst_n = 1;
@@ -426,10 +440,15 @@ module aud_retime_tb;
             nf = 150;                                      // new timeline, 0..0.8 s
             for (k = 0; k < nf; k = k + 1) add_frame(2, k % 64, NEW_BASE + k * FRAME_TICKS);
             start_old;
-            run_until(4*SPF, 4_000_000);                   // old tail plays; the new head is held,
-            repeat (20000) @(posedge clk);                 // then latched as a retime arm (clock old)
+            run_until(4*SPF, 4_000_000);                   // old tail plays; the new head is HELD
+            repeat (20000) @(posedge clk);                 // (the clock is still on the old timeline)
             if (count_of(2) != 0) fail("S8: new timeline played against the OLD clock");
-            // the clock arrives on the new timeline with the latched head 0.7 s late
+            // the display crosses: the clock lands 10 ms BEFORE the head -> the head
+            // dispatches and latches as a retime arm, on its own timeline
+            stc = NEW_BASE - 33'd900;
+            repeat (400) @(posedge clk);
+            if (!dut.play_pts_valid) fail("S8: setup -- the head did not latch on its own timeline");
+            // a SECOND re-anchor leaves that latch 0.7 s behind (arrivals agreeing)
             stc = NEW_BASE + 33'd63000;
             k = 0;
             while (n_resync == 0 && k < 200000) begin @(posedge clk); k = k + 1; end
@@ -451,9 +470,57 @@ module aud_retime_tb;
                 if (n_resync != 1) fail("S8: resync_req fired more than once");
             end
             if (errs == r0) $display("  [S8] stale latch: one resync_req, fresh audio in phase (%0d ticks)", late);
+            n_resync = 0;                                  // S8's one request is accounted for
         end
 
-        if (errs == 0) $display("PASS: aud_retime_tb (S1-S8)");
+        // ======================= S9: seamless PTS restart (Matrix) ===============
+        r0 = errs;
+        fresh;
+        begin : s9
+            integer k, mx, i0n; rt0 = dbg_retime_cnt;
+            for (k = 0; k < N_OLD; k = k + 1) add_frame(1, k, OLD_BASE + k * FRAME_TICKS);
+            seam_next = 1;                                 // the next cell is authored seamless_play
+            for (k = 0; k < N_NEW; k = k + 1) add_frame(2, k, NEW_BASE + k * FRAME_TICKS);
+            start_old;
+            cross_at(OLD_END, NEW_BASE + 33'd18900);       // the first picture sits 0.21 s off the audio
+            run_until(N_OLD*SPF + N_NEW*SPF, 12_000_000);
+            if (count_of(1) != N_OLD*SPF || count_of(2) != N_NEW*SPF) fail("S9: samples lost at a seamless join");
+            if (!in_order(1, 0) || !in_order(2, 0)) fail("S9: samples out of order at a seamless join");
+            if (dbg_retime_cnt != rt0) fail("S9: a SEAMLESS join was re-timed");
+            i0n = first_of(2);
+            if (i0n > 0 && (cap_t[i0n] - cap_t[i0n-1]) > 120) fail("S9: a gap at a seamless join");
+            if (n_resync != 0) fail("S9: resync_req at a seamless join");
+            if (errs == r0) $display("  [S9] seamless restart: sample-continuous, %0d-clk step, no re-time", cap_t[i0n]-cap_t[i0n-1]);
+        end
+
+        // ======================= S10: audio leads its first picture ==============
+        r0 = errs;
+        fresh;
+        begin : s10
+            integer k;
+            // a realistic ring: ~0.43 s of the new clip queued, so after the crossing
+            // the arrival front LEADS the clock as it does in the core (8 frames =
+            // 42 ms would leave the whole segment behind it -- starvation, not this)
+            for (k = 0; k < N_OLD; k = k + 1) add_frame(1, k, OLD_BASE + k * FRAME_TICKS);
+            for (k = 0; k < 80; k = k + 1)    add_frame(2, k, NEW_BASE + k * FRAME_TICKS);
+            start_old;
+            // the old clip's audio ends 50 ms BEFORE its video (so a head dispatched at
+            // the underrun would latch on the OLD clock), and the new clip's first
+            // picture is 0.2 s after its audio head
+            cross_at(OLD_END + 33'd4500, NEW_BASE + 33'd18000);
+            run_until(N_OLD*SPF + SPF, 12_000_000);
+            f = first_of(2);
+            if (f < 0) fail("S10: the new clip never played");
+            else begin
+                late = cap_stc[f] - (NEW_BASE + cap_v[f][13:8] * FRAME_TICKS + (cap_v[f][7:0] * 15) / 8);
+                if (late > 4500 + 60) fail("S10: the new clip played LATE (the head latched on the old clock)");
+                if (late < -60)       fail("S10: the new clip played EARLY");
+            end
+            if (n_resync != 0) fail("S10: resync_req fired (the hold should have made it unnecessary)");
+            if (errs == r0) $display("  [S10] audio leads picture by 0.2 s: head waited, trimmed, in phase (%0d ticks)", late);
+        end
+
+        if (errs == 0) $display("PASS: aud_retime_tb (S1-S10)");
         else begin $display("FAIL: aud_retime_tb -- %0d error(s)", errs); $fatal(1); end
         $finish;
     end
