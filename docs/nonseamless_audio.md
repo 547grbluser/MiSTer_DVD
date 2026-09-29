@@ -121,6 +121,67 @@ Thayer's 1 s `0x09` cells between clips, the reader can already be inside a
 for the wrong cell, or the reverse. The Matrix never exposed this because its seamless
 cells are minutes long. The event-level capture (§4 step 3) decides it.
 
+### 2b. SETTLED by the 20 ms capture (2026-09-29): the `E` state is a PTS mis-tag plus the re-phase cooldown
+
+Capture: `DVD_pictime` core (= `main` RTL), the custom Main from `97bead5` (the
+`dvd_telem_fast` knob), `mister.py launch ... --telem-fast-ms 20 --telem-seconds 120`,
+`Disc Menus=Off, Title VTS Units=8`. 5,967 samples, `.sim/nsaudio/fast_auto_1.jsonl`,
+read with `.sim/nsaudio/events.py`. Events line up with the IFO cell durations to within
+~0.3 s: **PGC 1 plays its cells in order and the `still = 255` holds are not applied**
+in this mode.
+
+**Two anchors at most joins, not one.** 0.12–0.8 s *before* the real timeline change,
+the display re-anchors on a picture only **−66.8 ms** (2 frames) off its extrapolated
+timeline. Because it is backward, it counts as a content discontinuity: `aud_resync`,
+ring flushed. Then the real join arrives. `disp_lag` reads −4.9…+5.2 s there, which is
+the 16–6 s step aliased by the ±5.8 s field.
+
+**Root cause 1: `pts_assoc` tags a SECOND field.** In this field-coded video, a PES
+carrying the next I-frame's PTS starts between the two field start codes of the preceding
+B picture. The positional rule (`pts_assoc.sv`, and `tools/pts_map.py`'s golden) gives the
+mark to the first *picture start code* at or after the payload. That is the B's **second
+field**, and `disp_sched` then subtracts one field. The value proves the tag wrong. c2's mark
+is 16.377 s, **exactly the next I's display time**, while the B it lands on displays at
+16.310. So that frame is stamped ~50 ms early, the timeline extrapolates from it, and the next
+correct tag falls more than a frame behind. `disc_jump_w` fires. Under ISO 13818-1 a field
+pair is ONE access unit, so a second field's start code never begins one, and the PTS
+belongs to the next frame.
+`.sim/nsaudio/second_tags.py` lists every tag that lands on a second field in PGC 1. All 20
+are on B pictures, and the capture matches their predicted positions:
+
+| cell | second-field tag, s before cell end | spurious anchor, s before the real join |
+|---|---|---|
+| c2 | 0.13 | 0.125 |
+| c8 | 0.80 | 0.79 |
+| c11 | 0.27 | 0.33 |
+| c13 (1.07 s cell) | 0.80 | 0.35 s *after* c13 starts (the cooldown suppressed its reset) |
+| c15 | 0.53, 0.40 | 0.48 |
+| c17 | 0.13 | 0.14 |
+| c4, c6, c9, c12 | none | none |
+
+**Root cause 2: the ~0.62 s re-phase cooldown (`emu.sv` `rephase_cool`) eats the real join.**
+The spurious anchor starts the cooldown, so the real join's re-phase inside it is dropped.
+The full sequence at c12 (t = 81.74–82.09 s):
+1. The dispatcher has already crossed into the new cell's audio (`av_drift` shows a −6.1 s step).
+2. The spurious anchor flushes the ring. The clock is still on the OLD timeline (~6.3 s).
+3. The refilled ring's first frame is new-cell audio (PTS ~1.3). Against the old clock it looks
+   5 s LATE, so the gate releases at once (`play_err` +4985).
+4. The real join steps the clock back to ~0.1 s, with no audio reset (cooldown).
+5. The audio is now 1.41 s EARLY (`play_err` −1412), and stays that way for the whole clip.
+
+With the gap ≥ 0.62 s (c9: 0.79 s) the join's reset fires, and only a normal gap results.
+
+**Root cause 3 (the original report): each real join's `aud_resync` discards the new
+cell's opening**, ~1.3 s of audio the demux had already parsed. The gap is that long.
+Joins with no spurious anchor (c5, c10, c13, c14) show it alone: reset, quiet 1.3–1.6 s,
+then in phase.
+
+**Fix order.** (1) `pts_assoc` + golden: a second-field header neither claims a mark nor
+advances the drop horizon. That removes the spurious anchors, their extra gaps and the
+`E` state on this disc. (2) The cooldown silently drops a real discontinuity. That is a
+latent `E` for any two joins within 0.62 s, so revisit it after (1). (3) The head-discard
+gap at every non-seamless join (§4 requirement).
+
 **Library census (flag only, `census.py`, 1,527 ISOs parsed):** 1,064 discs have at least
 one in-title join flagged `stc_discontinuity && !seamless_play` (angle-block interiors
 skipped), and 299 have `seamless_play && stc_discontinuity` (the Matrix class). Many of these
