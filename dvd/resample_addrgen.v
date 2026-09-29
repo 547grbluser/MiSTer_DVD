@@ -1548,6 +1548,13 @@ module resample_addrgen (
    * forces every remaining macroblock of the line to fetch both rows; the next line then
    * starts from empty slots. A line wider than 64 macroblocks (the cache's column range;
    * DVD maxes out at 45) fetches everything, as before F2.
+   * TIMING (the first build missed clk_dec at -40C by 4 MHz, every top path ending here):
+   * the keys, c_same and cr_ok are REGISTERED every cycle and the decision reads the
+   * registers. disp_y moves at STATE_NEXT_MB and STATE_WAIT always follows, so at a line's
+   * FIRST_RQ the registers already hold that line -- except straight after STATE_NEXT_IMG,
+   * which enters FIRST_RQ directly (ck_stale), and after a signature change (their inputs
+   * may have moved in the last cycle). Such a line SKIPS: it fetches both rows and stores
+   * nothing, so a stale key can never be filed. Cost: two row fetches per scan.
    * FLAGS to resample_dta, resample_wr_dta[7:3] = {lcp, sl, fl, su, fu}:
    *   fu/fl  fetch the upper/lower row (and store it in slot su/sl); else read slot su/sl
    *   lcp    the lower row IS the upper row (top/bottom clamp) and is being fetched this
@@ -1559,13 +1566,29 @@ module resample_addrgen (
   wire signed [12:0] ck_mv_c   = (ck_mv + ck_mv_sgn) >>> 1;      // memory_address stage 1 (chroma)
   wire signed [12:0] ck_mv_p   = ck_mv_c >>> 1;                  // memory_address stage 2 (integer part)
   wire signed [12:0] ck_lo     = ck_up + ck_mv_p;
-
-  wire        [39:0] cr_sig    = {output_frame_sav, hcrop_en, mb_width, horizontal_size, vertical_size};
-  reg         [39:0] cr_sig_q;
-  reg                cr_chg;                  // the signature changed since this line's start (sticky)
-  wire               cr_chg_now = cr_chg | (cr_sig != cr_sig_q);
   wire         [7:0] cr_span   = mb_last_c - mb_first_c;
   wire               cr_ok     = (cr_span[7:6] == 2'b00);          // <= 64 macroblocks (6-bit column)
+
+  reg signed  [12:0] ck_up_q, ck_lo_q;        // the registered key (see TIMING)
+  reg                ck_same_q, cr_ok_q, ck_stale;
+  always @(posedge clk)
+    if (~rst) begin
+      ck_up_q <= 13'sd0; ck_lo_q <= 13'sd0; ck_same_q <= 1'b0; cr_ok_q <= 1'b0; ck_stale <= 1'b1;
+    end else if (clk_en) begin
+      ck_up_q   <= ck_up;
+      ck_lo_q   <= ck_lo;
+      ck_same_q <= (ck_up == ck_lo);
+      cr_ok_q   <= cr_ok;
+      ck_stale  <= (state == STATE_NEXT_IMG);  // disp_y moved at this edge; FIRST_RQ may be next
+    end
+
+  /* everything the address of a word depends on besides the key, plus mb_height (the key's
+   * bottom clamp reads it) */
+  wire        [47:0] cr_sig    = {output_frame_sav, hcrop_en, mb_width, mb_height, horizontal_size, vertical_size};
+  reg         [47:0] cr_sig_q;
+  reg                cr_chg;                  // the signature changed since this line's start (sticky)
+  wire               cr_chg_now = cr_chg | (cr_sig != cr_sig_q);
+  wire               cr_skip   = ~cr_ok_q | ck_stale | cr_chg_now;   // fetch both, file nothing
 
   reg                cr_line_first;           // the next FIRST_RQ opens a line
   reg          [1:0] ct_v;                    // slot valid
@@ -1573,13 +1596,13 @@ module resample_addrgen (
   reg                ct_la;                   // slot allocated last (the victim for a lone miss is the other)
   reg          [4:0] cr_ln;                   // this line's flags {lcp, sl, fl, su, fu}
 
-  wire               cv0   = ct_v[0] & ~cr_chg_now;
-  wire               cv1   = ct_v[1] & ~cr_chg_now;
-  wire               hu0   = cv0 & (ct_k0 == ck_up);
-  wire               hu1   = cv1 & (ct_k1 == ck_up);
-  wire               hl0   = cv0 & (ct_k0 == ck_lo);
-  wire               hl1   = cv1 & (ct_k1 == ck_lo);
-  wire               c_same = (ck_up == ck_lo);
+  wire               cv0   = ct_v[0];       // a line that is not skipped has no pending change
+  wire               cv1   = ct_v[1];
+  wire               hu0   = cv0 & (ct_k0 == ck_up_q);
+  wire               hu1   = cv1 & (ct_k1 == ck_up_q);
+  wire               hl0   = cv0 & (ct_k0 == ck_lo_q);
+  wire               hl1   = cv1 & (ct_k1 == ck_lo_q);
+  wire               c_same = ck_same_q;
   wire               c_hu  = hu0 | hu1;
   wire               c_hl  = hl0 | hl1;
   wire               c_su  = c_hu ? hu1 : (c_hl & ~c_same) ? ~hl1 : ~ct_la;
@@ -1587,7 +1610,7 @@ module resample_addrgen (
   wire               c_fu  = ~c_hu;
   wire               c_fl  = ~c_hl & ~c_same;
   wire               c_lcp = c_same & ~c_hu;
-  wire         [4:0] cr_dec   = cr_ok ? {c_lcp, c_sl, c_fl, c_su, c_fu} : 5'b01101;  // too wide: fetch both (slots 0/1)
+  wire         [4:0] cr_dec   = cr_skip ? 5'b01101 : {c_lcp, c_sl, c_fl, c_su, c_fu};  // skip: fetch both (slots 0/1)
   wire         [4:0] cr_force = {1'b0, cr_ln[3], 1'b1, cr_ln[1], 1'b1};             // fetch both, same slots
   wire         [4:0] cr_flags = (CHROMA_REUSE == 0) ? 5'b0
                               : cr_line_first ? cr_dec
@@ -1602,7 +1625,7 @@ module resample_addrgen (
   wire               cr_decide = clk_en && (state == FIRST_RQ) && cr_line_first;
   always @(posedge clk)
     if (~rst) begin
-      cr_sig_q <= 40'd0; cr_chg <= 1'b1; cr_ln <= 5'd0;
+      cr_sig_q <= 48'd0; cr_chg <= 1'b1; cr_ln <= 5'd0;
       ct_v <= 2'b00; ct_k0 <= 13'sd0; ct_k1 <= 13'sd0; ct_la <= 1'b1;
     end else if (clk_en && (state == STATE_NEXT_IMG)) begin
       ct_v <= 2'b00;                                   // a new scan starts from empty slots
@@ -1610,14 +1633,13 @@ module resample_addrgen (
       cr_sig_q <= cr_sig;
       cr_chg   <= 1'b0;
       cr_ln    <= cr_dec;
-      if (~cr_ok) ct_v <= 2'b00;
+      if (cr_skip) ct_v <= 2'b00;
       else begin
-        // slots not reused this line survive only if the signature held
-        ct_v <= {cv1, cv0} | {(c_fu & c_su) | (c_fl & c_sl), (c_fu & ~c_su) | (c_fl & ~c_sl)};
-        if (c_fu &  c_su) ct_k1 <= ck_up;
-        if (c_fu & ~c_su) ct_k0 <= ck_up;
-        if (c_fl &  c_sl) ct_k1 <= ck_lo;
-        if (c_fl & ~c_sl) ct_k0 <= ck_lo;
+        ct_v <= ct_v | {(c_fu & c_su) | (c_fl & c_sl), (c_fu & ~c_su) | (c_fl & ~c_sl)};
+        if (c_fu &  c_su) ct_k1 <= ck_up_q;
+        if (c_fu & ~c_su) ct_k0 <= ck_up_q;
+        if (c_fl &  c_sl) ct_k1 <= ck_lo_q;
+        if (c_fl & ~c_sl) ct_k0 <= ck_lo_q;
         if (c_fl) ct_la <= c_sl;
         else if (c_fu) ct_la <= c_su;
       end

@@ -21,26 +21,29 @@
 #   [2] THE SAVING, EXACTLY: read words per SCAN, counted from the addrgen's request states.
 #       Each expected value is derived by hand from the key arithmetic (the row memory_address
 #       fetches: delta_y + ((mv + sign) >>> 1) >>> 1) with two slots, where every distinct
-#       chroma row of a scan is fetched exactly once:
-#         words = lines * mb * 2 (Y)  +  distinct_rows * mb * 2 (U, V)
-#         prog   256 lines, rows 0..127 (128), 4 MB              -> 2048 + 1024 = 3072 / 1024
-#         weave  FRAME, interlaced upsampling, rows 0..127       -> 3072 / 1024
-#         il i   field lines 128, rows 0..126 or 1..127 (127)    -> 1024 + 1016 = 2040 / 512
+#       chroma row of a scan is fetched exactly once, plus TWO: a scan's first line SKIPS
+#       (fetches both rows, files neither -- its registered key is one cycle stale, see
+#       TIMING in resample_addrgen), so its row is fetched again by a later line:
+#         words = lines * mb * 2 (Y)  +  (distinct_rows + 2) * mb * 2 (U, V)
+#         prog   256 lines, rows 0..127 (128), 4 MB              -> 2048 + 130*8 = 3088 / 1024
+#         weave  FRAME, interlaced upsampling, rows 0..127       -> 3088 / 1024
+#         il i   field lines 128, rows 0..126 or 1..127 (127)    -> 1024 + 129*8 = 2056 / 512
 #                (the "lower" row of interlaced upsampling is the neighbouring frame row,
 #                 see the ⚠ in resample_addrgen's key comment, so a field walks 127 rows)
-#         il p   field lines 128, rows 0..127 (128)              -> 2048 / 512
-#         tall   300 lines (vsz 300), rows 0..149                -> 2400 + 1200 = 3600 / 1200
-#         tall il  TOP 151 lines (0..300) rows 0..150 (151)      -> 1208 + 1208 = 2416 / 604
-#                  BOTTOM 150 lines (1..299) rows 1..150 (150)   -> 1200 + 1200 = 2400 / 600
-#         wide   45 MB x 256 lines, 128 rows                     -> 23040 + 11520 = 34560 / 11520
-#         crop   2 MB (cols 1..2) x 256 lines, 128 rows          -> 1024 + 512 = 1536 / 512
-#         sif    22 MB x 480 output lines (2x repeat), rows 0..119 -> 21120 + 5280 = 26400 / 10560
+#         il p   field lines 128, rows 0..127 (128)              -> 1024 + 130*8 = 2064 / 512
+#         tall   300 lines (vsz 300), rows 0..149                -> 2400 + 152*8 = 3616 / 1200
+#         tall il  TOP 151 lines (0..300) rows 0..150 (151)      -> 1208 + 153*8 = 2432 / 604
+#                  BOTTOM 150 lines (1..299) rows 1..150 (150)   -> 1200 + 152*8 = 2416 / 600
+#         wide   45 MB x 256 lines, 128 rows                     -> 23040 + 130*90 = 34740 / 11520
+#         crop   2 MB (cols 1..2) x 256 lines, 128 rows          -> 1024 + 130*4 = 1544 / 512
+#         sif    22 MB x 480 output lines (2x repeat), rows 0..119 -> 21120 + 122*44 = 26488 / 10560
 #       The F1 structure reads 6 words per macroblock-line in every arm. If a count differs,
 #       the model or the slot policy is wrong: do not edit the expectation to match.
 #   [3] The seams (one knob, the fifo width, the key against mem_addr.v, the flag layout) --
 #       tools/check_chroma_reuse_wiring.py.
 #   Mutations: each must fail its own arm.
-#     M1 resample_dta pops every chroma word although the addrgen skipped some -> pixels (prog)
+#     M1 resample_dta pops every chroma word although the addrgen skipped some -> the display
+#        stalls waiting for words never requested: no picture (prog)
 #     M2 no invalidation on a geometry change -> pixels in +croptog ONLY (prog must stay green:
 #        that specificity is what shows the croptog arm reaches the invalidation)
 #     M3 the key takes mv/2 as whole rows (+-1/+-2) instead of memory_address's arithmetic:
@@ -80,19 +83,19 @@ build() {   # <out> <CHR> [file substitutions: orig=mutated ...]
 }
 
 # name | plusargs | expected words/mblines per scan (every scan, space-separated set) or -
-ARMS=("prog|+frames=4|3072/1024"
-      "weave|+weave=1 +frames=4|3072/1024"
-      "il_i|+il=1 +pfr=0 +frames=4|2040/512"
-      "il_i_tff|+il=1 +pfr=0 +tff=1 +frames=4|2040/512"
-      "il_p|+il=1 +pfr=1 +frames=4|2048/512"
-      "il_p_tff|+il=1 +pfr=1 +tff=1 +frames=4|2048/512"
-      "tall|+mbh=19 +vsz=300 +frames=4|3600/1200"
-      "tall_il|+mbh=19 +vsz=300 +il=1 +pfr=0 +frames=4|2416/604 2400/600"
-      "wide|+wide=1 +frames=3|34560/11520"
-      "crop|+vsmode=2 +frames=4|1536/512"
-      "sif|+sif=1 +frames=3|26400/10560"
-      "stall|+stallon=40 +stalloff=200 +frames=4|3072/1024"
-      "pace|+pace=2 +frames=6|3072/1024"
+ARMS=("prog|+frames=4|3088/1024"
+      "weave|+weave=1 +frames=4|3088/1024"
+      "il_i|+il=1 +pfr=0 +frames=4|2056/512"
+      "il_i_tff|+il=1 +pfr=0 +tff=1 +frames=4|2056/512"
+      "il_p|+il=1 +pfr=1 +frames=4|2064/512"
+      "il_p_tff|+il=1 +pfr=1 +tff=1 +frames=4|2064/512"
+      "tall|+mbh=19 +vsz=300 +frames=4|3616/1200"
+      "tall_il|+mbh=19 +vsz=300 +il=1 +pfr=0 +frames=4|2432/604 2416/600"
+      "wide|+wide=1 +frames=3|34740/11520"
+      "crop|+vsmode=2 +frames=4|1544/512"
+      "sif|+sif=1 +frames=3|26488/10560"
+      "stall|+stallon=40 +stalloff=200 +frames=4|3088/1024"
+      "pace|+pace=2 +frames=6|3088/1024"
       "croptog|+croptog=5 +frames=6|-")
 
 run() {   # <sim> <outfile> <plusargs...>
@@ -186,8 +189,15 @@ for k in 1 3 4 5; do [ -f "$TMP/m$k" ] && run "$TMP/m$k" "$TMP/m$k.prog" "${pa[@
 wait
 for k in 1 3 5; do
     [ -f "$TMP/m$k.prog" ] || continue
+    # 1 = pixels differ; 2 = the mutant rendered no comparable frames (the baseline arm is
+    # proven non-vacuous in [1]), i.e. the picture died -- M1's usual form: popping words
+    # that were never requested stalls resample_dta for good.
     same "$TMP/prog.base" "$TMP/m$k.prog"; r=$?
-    [ $r = 1 ] && echo "  ok   M$k pixels differ (caught)" || { echo "  FAIL M$k survived (same=$r)"; rc=1; }
+    case $r in
+        1) echo "  ok   M$k pixels differ (caught)" ;;
+        2) echo "  ok   M$k no picture ($(grep -c '^PIXSUM' "$TMP/m$k.prog") frames: the display stalled -- caught)" ;;
+        *) echo "  FAIL M$k survived (pixels identical)"; rc=1 ;;
+    esac
 done
 if [ -f "$TMP/m2.tog" ]; then
     same "$TMP/croptog.base" "$TMP/m2.tog"; r1=$?
@@ -198,7 +208,7 @@ fi
 if [ -f "$TMP/m4.prog" ]; then
     same "$TMP/prog.base" "$TMP/m4.prog"; r=$?
     w=$(grep '^RQS' "$TMP/m4.prog" | awk '{split($3,w,"="); split($4,m,"="); print w[2] "/" m[2]}' | sort -u | tr '\n' ' ')
-    if [ $r = 0 ] && [ "$w" != "3072/1024 " ]; then echo "  ok   M4 pixels identical, words $w (caught by [2] only)"
+    if [ $r = 0 ] && [ "$w" != "3088/1024 " ]; then echo "  ok   M4 pixels identical, words $w (caught by [2] only)"
     else echo "  FAIL M4: same=$r words '$w'"; rc=1; fi
 fi
 
