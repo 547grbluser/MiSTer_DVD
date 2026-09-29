@@ -489,13 +489,44 @@ structural fix, not a fallback.
 - **Gates:** `motcomp_picbuf_tb`, `run_field_order.sh`, `run_disp_sched.sh`, plus the
   full stc/pts suite.
 
-**Instrument (next, small, can ride F1's build): the per-picture maximum.**
-- The longest `picbuf_busy`-low stretch per telemetry period (the decode time of the
-  slowest picture) and the count of pictures over one frame period.
-- Spare room: word 16's marker carries a version, so it can grow to 22 words the way
-  17–20 were added.
-- It settles §6c, and it checks each of F1–F4 against the budget directly rather than
-  through lates.
+**Instrument: the per-picture maximum.** 🔧 **Built 2026-09-29** (branch
+`feature/pic-time-instrument`, on top of F2), sim-gated, ⏳ HW data pending.
+- **What a picture is:** one `picbuf_busy`-low stretch. `picbuf_busy` falls when the
+  picbuf lets the VLD start a picture and rises at the next picture's header
+  (`update_picture_buffers`, once per frame: a field pair is one picture). Its decode
+  time is the stretch's **non-starved** cycles (back + active, the average "decode ms"
+  above, per picture).
+- **Telemetry words 21–24** (`dvd/dec_duty.sv` → `dvd_telem.sv`), behind a second marker,
+  so a Main that knows only word 16's `DD01` keeps reading 17–20:
+
+  | Word | Field | Meaning |
+  |---|---|---|
+  | 21 | `PIC_MAGIC` | `0xDD02`: words 22–24 exist (older cores answer 0 past word 20) |
+  | 22 | `pic_max` | longest single-picture decode in the last completed 2^26-cycle window (0.83 s, longer than the 250 ms poll), cycles/4096. A level, held a whole window |
+  | 23 | `pic_n` | pictures decoded (wraps) |
+  | 24 | `pic_over` | … whose decode took longer than **one frame period** of the content: `frame_rate_code`'s period as an exact 81 MHz cycle count (29.97 → 2,702,700) |
+
+- **Host:** `dvd_ctl.cpp` reads 25 words and emits `pic_max`/`pic_n`/`pic_over`.
+  `mister.py telem_summary` reduces `pic_max` as a level (the max over the window's rows)
+  and the counters as reset-aware rates, into `s['pic']` = `{max_ms, n, over,
+  over_frac, over_per_s}`. `pacing_matrix.py` prints `picmax` and `over/s` per cell.
+- **A dropped B picture** fires no update, so its skipped parse folds into the previous
+  stretch: the max can read long there, never short.
+- **Gates** (`bench/dvd/run_telem.sh`, all green):
+  - `dec_duty_tb` [6]–[9]: the threshold is exact to the cycle (2,702,700 is not over,
+    2,702,701 is); starved cycles are excluded; the threshold follows
+    `frame_rate_code`; `pic_max` reads 0 until its window closes, then the window's
+    longest picture, then 0 after an empty window;
+  - `dvd_telem_tb` [7]; `test_telem_unwrap` [4]; `check_decode_duty_wiring` (the new
+    seams, `frame_rate_code` from the VLD, both markers in the Main);
+  - mutations M5–M8, each caught by its own arm.
+- **Trap hit on the way:** the threshold was first written as an `always @*` case. The
+  bench holds `frame_rate_code` constant from time zero, iverilog never evaluated the
+  block, and `thr` stayed X, so `pic_over` never counted. It is a continuous assign now.
+- **Next:** measure on the rig. §6c's Thayer boot FMV on Interlaced is the question:
+  do its lates line up with pictures over one frame period? If a single slow picture,
+  with the VLD otherwise parked, explains each late pair, F4 (a deeper output queue) is
+  justified. If they don't line up, it isn't.
 
 **Workarounds available today (manual):**
 - Video Output = **Interlaced** removes these lates on every disc measured.
@@ -515,7 +546,7 @@ structural fix, not a fallback.
 | `tools/pacing_model.py` | the pickup-discipline model (§6b) |
 | `dvd/dec_duty.sv` | where the decoder's time goes (telemetry words 16–20); instrument only, `DVD-FORK DEBUG` |
 | `bench/dvd/dec_duty_tb.sv`, `dvd_telem_tb` [6] | exclusive classes and exact scale; the words in order with every input tied off |
-| `tools/check_decode_duty_wiring.py` | motcomp → mpeg2video → emu → telem → qsf → dvd_ctl |
+| `tools/check_decode_duty_wiring.py` | motcomp → mpeg2video → emu → telem → qsf → dvd_ctl, plus the per-picture words 21–24 |
 | `bench/dvd/run_osd_read.sh`, `tools/check_osd_read_wiring.py` | F1: bit-exact without the OSD reads, 8 → 6 words |
 | `bench/dvd/run_chroma_reuse.sh`, `tools/check_chroma_reuse_wiring.py` | F2: bit-exact chroma row reuse in 14 arms, exact words per scan, M1–M5 |
 | `resample_chain_tb` `+addrhash` / `+weave` / `+croptog` | address-hashed memory, the PIXSUM / RSUM / RQS lines, interlaced content on the progressive raster, a logical-point mid-line crop toggle |

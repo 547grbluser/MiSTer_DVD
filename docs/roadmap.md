@@ -657,7 +657,9 @@ HW-confirmed on a real PAL DVD: correct 720×576 geometry, 50 Hz lock, A/V in sy
 1. **F1:** drop the dead OSD display reads (25 % of display requests; the OSD is tied
    off). ✅ MERGED (PR #138), bit-exact in sim, HW-measured 2026-09-29:
    Progressive lates ROGER 9.2→3.8/s, Office 8.2→1.0, Thayer VTS_09 7.3→0.1, MiB 1.4→0.
-2. **Per-picture maximum decode-time instrument.** It can ride F1's build.
+2. **Per-picture maximum decode-time instrument.** 🔧 Built and sim-gated 2026-09-29
+   (`feature/pic-time-instrument`, telemetry words 21–24). ⏳ Next: rig data on §6c (Thayer
+   boot FMV, Interlaced) to decide F4.
 3. **F2:** chroma-row reuse (display 6 → 3 words per macroblock-line on Progressive).
    ✅ Bit-exact in sim, HW-measured 2026-09-29 (`feature/chroma-row-reuse`): Progressive
    lates 0 on ROGER (3.6), Office (1.0), Thayer VTS_09 and MiB.

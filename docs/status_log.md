@@ -22,6 +22,17 @@ predate later confirmations; the `CLAUDE.md` index carries the reconciled status
 
 ## Hardware status (THIS fork, verified 2026-06-21)
 
+- 🔧 **PER-PICTURE DECODE-TIME INSTRUMENT (2026-09-29, branch
+  `feature/pic-time-instrument`, on F2; sim-gated, ⏳ HW data pending).**
+  - **Why:** the duty words are averages, and §6c's lates come from individual slow
+    pictures that a 0.5 s row cannot resolve. It decides whether F4 is worth building.
+  - **What:** telemetry words 21–24, behind a second marker (`0xDD02`): the longest
+    single-picture decode per 0.83 s window, pictures decoded, and pictures over one
+    frame period of the content (exact at 81 MHz).
+  - **Gates:** `run_telem.sh` all green, M5–M8. Trap: an `always @*` threshold read X
+    in iverilog, since its input never changes after time zero.
+  - Detail: `docs/decode_pacing.md` §7 "Instrument".
+
 - ✅ **DECODE PACING F2: THE DISPLAY REUSES CHROMA ROWS (2026-09-29, branch
   `feature/chroma-row-reuse`, bit-exact in sim, HW-MEASURED 2026-09-29).**
   ★ **Progressive lates now read 0 on every disc measured:** ROGER 3.58 → 0 (control arm:
