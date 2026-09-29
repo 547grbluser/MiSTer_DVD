@@ -364,7 +364,7 @@ Prog 9.22 lates/s (identical), Thayer VTS_09 7.30 (vs 7.32).
   - `tools/check_osd_read_wiring.py` pins the `resample_dta` OSD feed.
 
 **F2. Reuse chroma rows.** ✅ **Built, bit-exact in sim and HW-measured 2026-09-29**
-(branch `feature/chroma-row-reuse`, `releases/DVD_chromareuse_20260929_1223.rbf`).
+(✅ MERGED PR #139, `releases/DVD_chromareuse_20260929_1223.rbf`).
 
 **Hardware result: 0 lates on Progressive on every disc measured.** Same script
 (`tools/pacing_matrix.py`, interleaved, `--no-variants`, `Disc Menus=Off`), same discs and

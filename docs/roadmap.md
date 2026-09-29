@@ -661,7 +661,7 @@ HW-confirmed on a real PAL DVD: correct 720×576 geometry, 50 Hz lock, A/V in sy
    2026-09-29 (`feature/pic-time-instrument`, telemetry words 21–24). §6c resolved: 0
    pictures over budget, 0 lates after the First Play still.
 3. **F2:** chroma-row reuse (display 6 → 3 words per macroblock-line on Progressive).
-   ✅ Bit-exact in sim, HW-measured 2026-09-29 (`feature/chroma-row-reuse`): Progressive
+   ✅ Bit-exact in sim, HW-measured 2026-09-29, ✅ MERGED (PR #139): Progressive
    lates 0 on ROGER (3.6), Office (1.0), Thayer VTS_09 and MiB, then on the rest of the
    census set too (Thayer VTS_08, Angel, BBB PAL, VCD, the boot FMV, Bob and Blend).
    **F3/F4 are no longer needed for the measured discs.** Keep them for a disc that still
