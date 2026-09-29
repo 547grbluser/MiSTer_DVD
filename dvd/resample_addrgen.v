@@ -1542,7 +1542,8 @@ module resample_addrgen (
    * DECISION, once per line, at the line's first FIRST_RQ: each of the two rows is either
    * in a slot (reuse) or fetched into a slot the line does not need. U and V share it. With
    * two slots every distinct row is fetched once per scan in every walk measured (frame,
-   * field, weave), because consecutive lines share a row or step by one.
+   * field, weave), because consecutive lines share a row or step by one -- plus the two
+   * fetches of the scan's first line, which skips (TIMING, below).
    * INVALIDATION: at every STATE_NEXT_IMG (a new scan may show a rewritten frame slot), and
    * whenever the signature changes. A change is sticky until the next line start and
    * forces every remaining macroblock of the line to fetch both rows; the next line then

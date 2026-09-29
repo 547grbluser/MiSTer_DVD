@@ -21,16 +21,19 @@
 #   [2] THE SAVING, EXACTLY: read words per SCAN, counted from the addrgen's request states.
 #       Each expected value is derived by hand from the key arithmetic (the row memory_address
 #       fetches: delta_y + ((mv + sign) >>> 1) >>> 1) with two slots, where every distinct
-#       chroma row of a scan is fetched exactly once, plus TWO: a scan's first line SKIPS
-#       (fetches both rows, files neither -- its registered key is one cycle stale, see
-#       TIMING in resample_addrgen), so its row is fetched again by a later line:
-#         words = lines * mb * 2 (Y)  +  (distinct_rows + 2) * mb * 2 (U, V)
+#       chroma row is fetched exactly once -- except that a scan's first line SKIPS (fetches
+#       both rows, files neither: its registered key is one cycle stale, see TIMING in
+#       resample_addrgen), so:
+#         rows  = 2 (the first line) + the distinct rows the REST of the scan needs
+#         words = lines * mb * 2 (Y)  +  rows * mb * 2 (U, V)
 #         prog   256 lines, rows 0..127 (128), 4 MB              -> 2048 + 130*8 = 3088 / 1024
 #         weave  FRAME, interlaced upsampling, rows 0..127       -> 3088 / 1024
 #         il i   field lines 128, rows 0..126 or 1..127 (127)    -> 1024 + 129*8 = 2056 / 512
 #                (the "lower" row of interlaced upsampling is the neighbouring frame row,
 #                 see the ⚠ in resample_addrgen's key comment, so a field walks 127 rows)
-#         il p   field lines 128, rows 0..127 (128)              -> 1024 + 130*8 = 2064 / 512
+#         il p   TOP: the rest needs rows 0..127 (128)           -> 1024 + 130*8 = 2064 / 512
+#                BOTTOM: row 0 is read by the first line (y=1) only, the rest needs 1..127
+#                (127)                                           -> 1024 + 129*8 = 2056 / 512
 #         tall   300 lines (vsz 300), rows 0..149                -> 2400 + 152*8 = 3616 / 1200
 #         tall il  TOP 151 lines (0..300) rows 0..150 (151)      -> 1208 + 153*8 = 2432 / 604
 #                  BOTTOM 150 lines (1..299) rows 1..150 (150)   -> 1200 + 152*8 = 2416 / 600
@@ -87,8 +90,8 @@ ARMS=("prog|+frames=4|3088/1024"
       "weave|+weave=1 +frames=4|3088/1024"
       "il_i|+il=1 +pfr=0 +frames=4|2056/512"
       "il_i_tff|+il=1 +pfr=0 +tff=1 +frames=4|2056/512"
-      "il_p|+il=1 +pfr=1 +frames=4|2064/512"
-      "il_p_tff|+il=1 +pfr=1 +tff=1 +frames=4|2064/512"
+      "il_p|+il=1 +pfr=1 +frames=4|2064/512 2056/512"
+      "il_p_tff|+il=1 +pfr=1 +tff=1 +frames=4|2064/512 2056/512"
       "tall|+mbh=19 +vsz=300 +frames=4|3616/1200"
       "tall_il|+mbh=19 +vsz=300 +il=1 +pfr=0 +frames=4|2432/604 2416/600"
       "wide|+wide=1 +frames=3|34740/11520"
@@ -99,7 +102,12 @@ ARMS=("prog|+frames=4|3088/1024"
       "croptog|+croptog=5 +frames=6|-")
 
 run() {   # <sim> <outfile> <plusargs...>
-    timeout 900 vvp "$1" +addrhash=1 "${@:3}" 2>&1 | grep -E '^(PIXSUM|RSUM|RQS) ' > "$2"
+    # 28 simulations run at once; the SIF and wide arms take ~15 min each under that load.
+    # A kill must read as TIMEOUT, not as "pixels differ" (a truncated run has fewer lines):
+    # that misreport happened once, on a SIF arm that is bit-identical when run alone.
+    timeout 2400 vvp "$1" +addrhash=1 "${@:3}" > "$2.raw" 2>&1
+    [ $? = 124 ] && echo "TIMEOUT" > "$2.to"
+    grep -E '^(PIXSUM|RSUM|RQS) ' "$2.raw" > "$2"; rm -f "$2.raw"
 }
 arm_args() { local a=${1#*|}; echo "${a%%|*}"; }
 arm_name() { echo "${1%%|*}"; }
@@ -107,8 +115,9 @@ arm_exp()  { echo "${1##*|}"; }
 
 # same(): both checksums identical; the first PIXSUM frame is dropped (it may start mid-scan),
 # RSUM is compared over the common prefix (the builds finish a different number of scans).
-same() {   # <a> <b> <label> -> 0 identical, 1 differ, 2 vacuous
+same() {   # <a> <b> <label> -> 0 identical, 1 differ, 2 vacuous, 3 a run timed out
     local a=$1 b=$2
+    [ -f "$a.to" ] || [ -f "$b.to" ] && return 3
     local pa pb na nb n
     pa=$(grep '^PIXSUM' "$a" | tail -n +2); pb=$(grep '^PIXSUM' "$b" | tail -n +2)
     na=$(grep -c '^RSUM' "$a"); nb=$(grep -c '^RSUM' "$b"); n=$(( na < nb ? na : nb ))
@@ -136,7 +145,8 @@ for arm in "${ARMS[@]}"; do
     same "$TMP/$n.base" "$TMP/$n.f2"; r=$?
     case $r in
         0) echo "  ok   [$n] $(grep -c '^PIXSUM' "$TMP/$n.base") frames, $(grep -c '^RSUM' "$TMP/$n.f2") scans bit-identical" ;;
-        1) echo "  FAIL [$n] pixels differ"; diff "$TMP/$n.base" "$TMP/$n.f2" | head -6; rc=1 ;;
+        1) echo "  FAIL [$n] pixels differ"; diff <(grep -v '^RQS' "$TMP/$n.base") <(grep -v '^RQS' "$TMP/$n.f2") | head -6; rc=1 ;;
+        3) echo "  FAIL [$n] TIMEOUT (a simulation was killed; not a verdict on the pixels)"; rc=1 ;;
         *) echo "  FAIL [$n] too few frames/scans to compare -- the arm is vacuous"; rc=1 ;;
     esac
 done
@@ -196,6 +206,7 @@ for k in 1 3 5; do
     case $r in
         1) echo "  ok   M$k pixels differ (caught)" ;;
         2) echo "  ok   M$k no picture ($(grep -c '^PIXSUM' "$TMP/m$k.prog") frames: the display stalled -- caught)" ;;
+        3) echo "  FAIL M$k TIMEOUT (inconclusive)"; rc=1 ;;
         *) echo "  FAIL M$k survived (pixels identical)"; rc=1 ;;
     esac
 done
