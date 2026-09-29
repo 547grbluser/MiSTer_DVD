@@ -455,6 +455,19 @@ The other discs' "before" is F1's own table.
     **only** the croptog arm, which shows that arm reaches it. The `NEXT_IMG`
     invalidation is not gated and cannot be: a scan opens at the top rows while the slots
     hold the previous scan's bottom rows.
+- **The other display benches:** `run_osd_read`, `run_field_blend`, `run_pause_still`,
+  `run_field_phase` and `run_field_parity` pass on F2. `run_prefetch_chain` (bursty memory
+  stalls) was compared against the F1 structure from a `main` worktree:
+  - 62 % average bandwidth (12,000-cycle stalls): the deep buffer is **clean on F2 (0
+    black frames) where F1 shows 9**, at every one of 5 stall phases. F2's buffer holds
+    about twice the lines.
+  - 30 % (45,000-cycle stalls, about 26 lines, longer than either buffer): F2 scores
+    **more** "BLACK" frames (13–14 against 7–12, at every phase). That is the metric: a
+    frame counts as BLACK for a gap *inside* the picture band, and one that shows no more
+    than a short unbroken band is not counted. Over the same 19 frames F2 shows **50 %
+    more video lines** (4,319 against 2,879), completes 9 scans against 6 and spends 28 %
+    fewer cycles in underflow. Both are unwatchable in that regime; it is not a
+    regression.
 - **Cost** (against the F1 build, same seed 9): **+285 ALMs** (38,963, 93 %), +135
   registers, **+2 RAM blocks** (the 256 × 64 cache; the resample fifo's 3 → 8 bits fit
   its existing block). `clk_dec` **90.6 MHz @100 °C, 91.5 MHz @−40 °C** (F1: 92.3 / 90.5),
