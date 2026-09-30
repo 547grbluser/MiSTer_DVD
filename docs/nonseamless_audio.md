@@ -1,6 +1,6 @@
 # Audio gaps at non-seamless cell joins (Thayer's Quest VTS_08) — investigation
 
-**Status:** 🔧 fixed in sim, ⏳ HW round pending (2026-09-29). Root cause 1: `pts_assoc` second-field PTS (§2b). Root cause 3: in-band audio re-time (§4a). §4b is the next step. Branch
+**Status:** ✅ HW-CONFIRMED on branch (round 4, 2026-09-29): Thayer, ULTIMATE_T2 menu entry and The Matrix white-rabbit cells all measured against the pre-change build. Root cause 1: `pts_assoc` second-field PTS (§2b). Root cause 3: in-band audio re-time (§4a, steps 1–8). Not merged; see §4b for what is still open. Branch
 `feature/nonseamless-audio` (`CORE_VERSION dev-nsaudio`, set in its first commit).
 Symptom first recorded in `docs/decode_pacing.md` §2b.
 
@@ -533,8 +533,35 @@ Bench S12 reproduces the sequence: c2 plays in phase 18 clk after its picture, w
 reset. RED `orphan-off` fails S12 (it waits out `HOLD_W`). The RED arms now run only their
 own scenario (`+S=n`).
 
-## 4b. HW round (next)
+### HW round 4 (2026-09-29, original rig, build `DVD_nsaudio_20260930_0030` from `95e07b0`, SEED 9, 89.65/87.28 MHz)
 
+| case | old build | round 4 |
+|---|---|---|
+| ULTIMATE_T2: c2 menu audio in sync after its picture | 0.16 s, via a flush | **0.08 s, no reset** |
+| Thayer VTS_08, 10 joins | 0.8–2.3 s lost per join | **0–8.7 ms**, no resets |
+| The Matrix white-rabbit c4 / c5 / c7 | 0 ms, drift ~+100 | **0 ms**, drift ~+100 (identical), no re-time |
+
+Captures are `.sim/nsaudio/r4_*.jsonl`. No Main poll stalls on this rig during the Matrix
+window, which supports the SuperStation's stalls being environmental.
+
+The orphan release fired at c2's content jump (21.96 s), not at c1's (17.43 s). A few
+ms of c0's tail played there (`play_err` −4933 for one row). Then came the underrun,
+the re-arm, and c2's head, trimmed by 3 frames, in phase at 22.04 s. Why it did not fire
+at c1 is unexplained: the likely reason is `video_live`/`disp_anchored` during the held
+single-picture cell, or the latch forming after c1's anchor. It is harmless either way.
+
+## 4b. Still open
+
+*(The HW plan below was carried out in rounds 1–4. What remains:)*
+- **By ear:** capture-card audio across a Thayer join and a Matrix white-rabbit cell. The
+  Hagibis capture card was moved off the original rig on 2026-09-29, so ask the maintainer
+  to reconnect it first.
+- **Scooby-Doo 2 whac-a-mole ("good job")** and a play-all TV disc. Neither has run on
+  this branch.
+- **SuperStation Main stalls:** a longer soak, counting stalls per build.
+- The c1-vs-c2 orphan timing (above) is unexplained but harmless.
+
+Original plan, for the record:
 1. `USE_DOCKER=1 ./build_release.sh --compile`. Ask the UMD and H264 sessions for a
    slot, and run `mister.py state` before deploying.
 2. Thayer VTS_08 with the same launch and `--telem-fast-ms 20`, both fixes in. At every

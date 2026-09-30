@@ -22,8 +22,8 @@ predate later confirmations; the `CLAUDE.md` index carries the reconciled status
 
 ## Hardware status (THIS fork, verified 2026-06-21)
 
-- 🔧 **NON-SEAMLESS CELL-JOIN AUDIO (2026-09-29, branch `feature/nonseamless-audio`;
-  sim-gated, ⏳ HW round pending).** Full record: `docs/nonseamless_audio.md`.
+- ✅ **NON-SEAMLESS CELL-JOIN AUDIO (2026-09-29, branch `feature/nonseamless-audio`;
+  HW-CONFIRMED in round 4, not merged).** Full record: `docs/nonseamless_audio.md`.
   - **Report.** Thayer's Quest VTS_08 lost ~1.3 s of audio at every clip start. After about
     half the joins it also played audio **1.4 s early** for the whole next clip. The
     behaviour is identical on every build since v0.7.0.
@@ -59,8 +59,18 @@ predate later confirmations; the `CLAUDE.md` index carries the reconciled status
       are not re-timed.
     - Benches S7–S10 and 4 more RED arms. The two new emu seams are in
       `check_aud_rephase_wiring.py`.
-  - **Next:** HW round 3 (Matrix, then T2, then Thayer). Control captures are on the
-    SuperStation already (`docs/nonseamless_audio.md` §4a).
+  - **HW round 3:** the Matrix was fixed, but T2 still resumed ~0.7 s later than the old
+    build. Root-caused offline: an **orphaned latch**. c0's last frame latched, then the
+    display jumped BACKWARD to a one-picture, no-audio cell, and c2's head waited out
+    `HOLD_W` behind that latch (0.62 s, exactly). Fix: step 8 releases a latch that a
+    content jump (`anchor_disc` = emu `rephase_req`) left ≥ 0.5 s early. Bench S12.
+  - **HW round 4:**
+    - Thayer: 0–9 ms per join.
+    - ULTIMATE_T2: menu audio in sync **0.08 s** after its picture (old build 0.16 s,
+      rounds 2–3 0.84 s), with no reset.
+    - The Matrix: 0 ms, identical to the old build.
+  - **Open:** a by-ear capture-card check, Scooby-Doo 2, a play-all TV disc, and the
+    SuperStation Main-stall soak (§4b).
 
 - ✅ **PER-PICTURE DECODE-TIME INSTRUMENT (2026-09-29,
   ✅ MERGED PR #140; sim-gated, HW DATA TAKEN 2026-09-29).**
