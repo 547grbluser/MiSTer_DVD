@@ -22,8 +22,8 @@ predate later confirmations; the `CLAUDE.md` index carries the reconciled status
 
 ## Hardware status (THIS fork, verified 2026-06-21)
 
-- ✅ **NON-SEAMLESS CELL-JOIN AUDIO (2026-09-29, branch `feature/nonseamless-audio`;
-  HW-CONFIRMED in round 4, not merged).** Full record: `docs/nonseamless_audio.md`.
+- ✅ **NON-SEAMLESS CELL-JOIN AUDIO (2026-09-29, ✅ MERGED PR #141; HW-CONFIRMED in
+  round 4 and by the maintainer by ear).** Full record: `docs/nonseamless_audio.md`.
   - **Report.** Thayer's Quest VTS_08 lost ~1.3 s of audio at every clip start. After about
     half the joins it also played audio **1.4 s early** for the whole next clip. The
     behaviour is identical on every build since v0.7.0.

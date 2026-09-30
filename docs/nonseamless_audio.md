@@ -1,7 +1,10 @@
 # Audio gaps at non-seamless cell joins (Thayer's Quest VTS_08) — investigation
 
-**Status:** ✅ HW-CONFIRMED on branch (round 4, 2026-09-29): Thayer, ULTIMATE_T2 menu entry and The Matrix white-rabbit cells all measured against the pre-change build. Root cause 1: `pts_assoc` second-field PTS (§2b). Root cause 3: in-band audio re-time (§4a, steps 1–8). Not merged; see §4b for what is still open. Branch
-`feature/nonseamless-audio` (`CORE_VERSION dev-nsaudio`, set in its first commit).
+**Status:** ✅ MERGED (PR #141), ✅ HW-CONFIRMED (round 4 + the maintainer's by-ear pass,
+2026-09-29): Thayer, the ULTIMATE_T2 menu entry and The Matrix white-rabbit cells, all
+measured against the pre-change build. Root cause 1: `pts_assoc` second-field PTS (§2b).
+Root cause 3: in-band audio re-time (§4a, steps 1–8). §4b lists the non-blocking open
+items. Built as `CORE_VERSION dev-nsaudio`.
 Symptom first recorded in `docs/decode_pacing.md` §2b.
 
 ## 1. Symptom

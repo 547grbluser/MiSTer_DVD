@@ -438,6 +438,7 @@ otherwise; `--red` runs its mutation arms).
 | HDMI passthrough teardown (ADV7513 back to PCM) | ✅ | `hdmi_bitstream.md` §5a | `run_passthru_pcm.sh`, `main/tests` |
 | Mid-play load: full flush trio + decoder soft reset | ✅ | `av_sync.md` | `flush_ctl_tb` |
 | CSS-encrypted detect/warn/mute, density bucket (issue #59) | ✅ | `fabric_audio.md` | `run_css.sh` |
+| Non-seamless cell-join audio: in-band re-time (no display-time flush), seamless stamp, second-field PTS (PR #141) | ✅ | `nonseamless_audio.md` | `run_aud_retime.sh --red`, `run_pts_assoc.sh`, `check_aud_rephase_wiring.py` |
 
 ### Formats and physical media (mostly the custom Main, `main/`)
 
@@ -459,13 +460,6 @@ otherwise; `--red` runs its mutation arms).
 - ❌ Chapters/PTT exactness (Phase 6, `VTS_PTT_SRPT`), UDF-only images, parental control,
   GPRM counter mode, dual-mono AC-3 (acmod 0, rejected deliberately).
 - ❌ Trick play (continuous 2×/4×): needs a flush-free I-frame splice (`docs/dvd_nav.md` §2d).
-- ✅ (branch, not merged) ~1.3 s audio lost at every non-seamless cell join inside a title
-  (Thayer VTS_08, FMV games, play-all extras; 1,036 of 1,525 discs). `feature/nonseamless-audio`:
-  `pts_assoc` never tags a second field; audio re-times IN BAND at the discontinuity frame
-  (steps 1–8: hold, wait for the clock, trim, orphaned-latch release; never at a
-  seamless-stamped frame). HW round 4: Thayer 0–9 ms/join, T2 menu in sync 0.08 s after
-  its picture, Matrix white-rabbit 0 ms; maintainer by-ear pass incl. Scooby-Doo 2. `docs/nonseamless_audio.md` §4a; gates
-  `run_pts_assoc.sh`, `run_aud_retime.sh --red`, `check_aud_rephase_wiring.py`.
 - ⚠ `lates` counts one per refresh while a PGC still is held (`flags.still`), so boot and
   menu windows over-report (`docs/decode_pacing.md` §2c). The Progressive lates and the
   Thayer boot-FMV Interlaced lates are fixed by F1 + F2: 0 on the whole census set, and no
