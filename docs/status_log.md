@@ -23,7 +23,7 @@ predate later confirmations; the `CLAUDE.md` index carries the reconciled status
 ## Hardware status (THIS fork, verified 2026-06-21)
 
 - ✅ **A SEEK FLUSH RESETS THE AUDIO REFRAMERS: NO STALE PTS AFTER A BACKWARD JUMP
-  (2026-09-30, branch `fix/dpad-back-hold`, not merged; both halves HW-CONFIRMED).**
+  (2026-09-30, ✅ MERGED PR #143; both halves HW-CONFIRMED).**
   Full record: `docs/dvd_nav.md` §2h "The stale audio PTS".
   - **Report (release-candidate smoke test):** on Men in Black, about one −20 s D-pad
     gesture in three showed lates +116–124 and ~33 frames not shown (≈1.3 s held). It was
@@ -83,7 +83,8 @@ predate later confirmations; the `CLAUDE.md` index carries the reconciled status
     first seed, **SEED 7, closes it at 88.44 / 87.94 MHz** and is pinned in `DVD.qsf`.
     Timing-clean build: `DVD_dpadbackhold_20260930_1715.rbf`. Its RTL is identical to the
     HW-tested marginal build's.
-  - **Next step:** merge (PR not opened yet).
+  - **Next step:** none for this defect. The pre-existing ~1.3 s track-switch gap is
+    unowned.
 
 - 🔧 **CHROMA ROWS: THE DISPLAY INTERPOLATES FROM THE ROWS THE BILINEAR WEIGHTS EXPECT
   (2026-09-29, ✅ MERGED PR #142, sim-proven, HW-measured 2026-09-30; one ROGER Prog late ACCEPTED).**

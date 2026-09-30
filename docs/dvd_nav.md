@@ -2275,7 +2275,7 @@ time, from ffmpeg's own decode.
 The harness cannot reach that gesture (`kbd_map` routes keyboard FF/REW to the D-pad path),
 so a person holding the button is the instrument.
 
-#### The stale audio PTS: a picture hold after some backward seeks (2026-09-30) — ✅ HW-CONFIRMED on branch `fix/dpad-back-hold` (not merged)
+#### The stale audio PTS: a picture hold after some backward seeks (2026-09-30) — ✅ MERGED (PR #143), ✅ HW-CONFIRMED
 
 **Report (release-candidate smoke test, 2026-09-30).** Men in Black, Disc Menus Off, D-Pad
 Seek On. Repeating "Left Left (one −20 s gesture), wait 10 s, Right, wait 10 s": a normal
