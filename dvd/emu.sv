@@ -3108,6 +3108,7 @@ wire       realign_pend;                // an arm is open (see above)
 wire load_flush, aud_flush, aud_resync, seek_flush, mount_flush, soft_flush;
 reg  aud_disc_rephase;   // content PTS jump -> audio-only re-phase (driven below, beside the anchor CDC)
 wire aud_resync_req;     // dvd_audio_decode: its latched re-time head is stale -> audio-only re-phase
+wire aud_anchor_disc;    // = rephase_req below: a display CONTENT jump -> dvd_audio_decode step 8
 wire pipe_rst_n, aud_rst_n;
 mode_realign mode_realign_i (
     .clk             (clk_sys),
@@ -4220,6 +4221,7 @@ dvd_audio_decode #(.CLK_HZ(27000000), .AUD_HZ(48000)) dvd_audio_decode_inst (
     .stc                (av_stc),
     .anchor_pulse       (av_anchor_pulse),   // THE STC IS A CLOCK: re-base play_err across a display re-anchor
     .anchor_delta       (av_anchor_delta),
+    .anchor_disc        (aud_anchor_disc),   // display CONTENT jump (not the first anchor) -> re-time step 8
     .av_ofs             (av_ofs),
     .audio_l     (dec_audio_l),
     .audio_r     (dec_audio_r),
@@ -4705,6 +4707,7 @@ pts_cdc #(.W(35)) pts_cdc_delta (        // each re-anchor's delta + whether it 
 // old sentence as evidence that a title cannot re-anchor often.
 reg  [23:0] rephase_cool;                       // 2^24 / 27 MHz ~ 0.62 s
 wire        rephase_req = av_anchor_delta_valid && av_anchor_delta_w[34];
+assign aud_anchor_disc = rephase_req;           // the decoder's orphaned-latch trigger (IN-BAND RE-TIME step 8)
 always @(posedge clk_sys or negedge reset_n)
     if (!reset_n) begin
         rephase_cool <= 24'd0; aud_disc_rephase <= 1'b0;

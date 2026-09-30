@@ -451,6 +451,88 @@ at a seamless boundary is not a phase to honour.
   sent every join whose audio leads its picture by 50–500 ms to the ~1 s reset, which is
   the original problem again.
 
+### HW round 3 (2026-09-29, SuperStation, build `DVD_nsaudio_20260929_2037`, SEED 9, 86.7/87.34 MHz: passes, thin at the hot corner)
+
+| case | old build (same box) | round 3 |
+|---|---|---|
+| The Matrix white-rabbit c4 / c5 / c7 | 0 ms, `av_drift` ~+100 | **0.0 ms at all three**, drift +41/+82, no re-time: ✅ fixed |
+| Thayer VTS_08, 10 joins | 0.8–2.3 s per join | **0–8 ms per join**, no resets: ✅ |
+| ULTIMATE_T2 boot → menu | in sync 0.16 s after the anchor | in sync 0.84 s after the anchor, via the step-6 reset (same as round 2) |
+
+**T2 is in sync but ~0.7 s later than the old build.** The agree-hold did not prevent the
+latch, which S7/S10 predicted it would. The latch still happens before the display's
+re-anchor, and step 6 rescues it. ⏳ Open: why the arrivals read as agreeing with the
+still's clock there. The next thing to check is what `arr_pts` (ps_demux's parse-time
+PTS) carries across a still, or across the audio streams of a multi-stream menu. This
+costs up to ~0.7 s more audio at that one menu entry than the old build did. It is not a
+lip-sync error.
+*SUPERSEDED by the next section (T2 root-caused offline).* *Reading the rows (not yet benched):* `av_drift` at 25.977 s reads +4913 ms. That field
+wraps at ±5.8 s, so it is equally −6737 ms, and only the second reading is consistent
+with step 6 firing, which needs a LATE latch. On that reading, the latched head is audio
+from an OLDER timeline that arrived after the still. It agreed with the still's clock
+when it latched, and the display's content jump then left it 6.7 s behind. The old
+build's display-time reset dropped it at the anchor. Step 6 waits for the new segment's
+arrivals to agree first, and that wait is the extra ~0.7 s. **Candidate fix:** when a
+display content jump (`anchor_disc`) finds the gate armed with a latch that is now far
+off the new clock, request the re-phase at once. It needs a bench of exactly this
+sequence first: a still, stale audio after it, and a backward display jump.
+
+**Main poll stalls, observed and NOT attributed to this change.** On the SuperStation,
+both the old build (two runs: 0.38 s at 106.7 s, 0.25 s at 209.0 s) and the new builds
+(0.37–0.74 s at 191/197/213/226 s) show gaps in the 20 ms telemetry. That is Main's poll
+thread blocked, which also serves sector reads, so VBUF and the ring dip. In round 3 the
+longest one (0.74 s at 197.6 s) emptied both, and audio underran once. The new builds'
+stalls recur at the same content points, which is suggestive, but the old build stalls
+too. ⏳ To separate the two: a longer soak, with the stall count per build.
+
+**Bench correction after round 3.** `window-off` passed without the release window.
+Since the hold waits for `arr_agree`, the window matters only when the hold TIMES OUT
+(`HOLD_W`), which S11 now covers: the old audio ends 0.5 s before the crossing. It also
+needs `ARM_TIMEOUT_W` > `HOLD_W`, as in the core (2.5 s > 0.62 s); the bench had them
+equal. Two more bench races were fixed: writes to `stc` and to the arrival pulse now
+happen on negedges, because an NBA in the same timestep silently undid them.
+**Known limit restated:** a gap longer than 2.5 s between the old audio's end and the
+display's crossing releases through the `arm_timer` fallback, on the old clock.
+
+### T2 root-caused offline (2026-09-29): an ORPHANED latch, released by step 8
+
+The VM trace (`tools/dvd_vm_ref.py runboot`) shows the boot path: First Play → the
+VTS 4 PGC 3 intro → the VTS 1 **menu PGC 1**. `.sim/nsaudio/menu_cells.py` gives that
+PGC's cells:
+
+| cell | length | video PTS | audio PTS |
+|---|---|---|---|
+| c0 | 5 s | 0.045–4.750 | 0x80 0.036–4.996 |
+| c1 | 5 s | ONE picture, 0.111 | none (subpicture only) |
+| c2 | 9 s | 0.063–9.373 | 0x80 0.044–9.548 |
+| c3 | still = 255 | one picture | none |
+
+Against the capture:
+1. **17.33 s:** c0's audio underruns just before its last frame decodes. The gate
+   re-arms and **latches c0's last frame (~4.99)**.
+2. **17.43 s:** the display jumps BACKWARD to c1's single picture (0.111). The latch is
+   now ~4.9 s early and can never come due.
+3. **21.94 s:** c2's audio arrives. Its head is a discontinuity, and a latch is pending,
+   so it holds, waiting for old audio that will never play out.
+4. **22.56 s:** `HOLD_W` expires, **0.62 s after arrival, exactly**. The head is now
+   0.53 s late, and step 6 resets. That is the ~0.7 s.
+
+(The earlier reading of `av_drift` = +4913 as −6737 was wrong. Until 22.56 s `av_drift`
+still shows c0's last frame against the c1 and c2 clocks.)
+
+**Step 8, the ORPHAN release.** A display CONTENT jump (`anchor_disc` = emu's
+`rephase_req`, the disp_sched backward-jump flag) after a latch marks it. If the latch is
+then `RETIME_WIN` or more EARLY on the new clock, with the display anchored and live, it
+belongs to the timeline the display left. So it is released at once: it plays its few ms,
+underruns, and the gate re-arms cleanly for the next head. The trigger is deliberately
+NOT a raw backward `anchor_delta`. `av_sync`'s pulse also fires on the first anchor after
+a flush, which routinely steps backward from the provisional parse-front clock, and
+orphaning that startup latch would put a whole title's audio early.
+`check_aud_rephase_wiring.py` refuses both a tie-off and the raw pulse.
+Bench S12 reproduces the sequence: c2 plays in phase 18 clk after its picture, with no
+reset. RED `orphan-off` fails S12 (it waits out `HOLD_W`). The RED arms now run only their
+own scenario (`+S=n`).
+
 ## 4b. HW round (next)
 
 1. `USE_DOCKER=1 ./build_release.sh --compile`. Ask the UMD and H264 sessions for a

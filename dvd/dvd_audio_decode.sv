@@ -143,12 +143,17 @@ module dvd_audio_decode #(
     input  logic [32:0] stc,
     // THE STC IS A CLOCK (docs/stc_freerun.md): when the display re-anchors the
     // clock (a PTS discontinuity -- a menu loop, a cell boundary, a held still),
-    // it jumps by anchor_delta. A sample-continuous audio stream across the same
-    // discontinuity is still IN SYNC, so the playback-position reference moves
-    // with the clock instead of reading the jump as a phase error. Only the
-    // measurement (play_err) is re-based; nothing here re-times any sample.
+    // it jumps by anchor_delta (one pulse per re-anchor, clk_sys). The play_err
+    // re-base this was first wired for was retired (see the ⛔ note in the gate
+    // controller); both stay wired and unused. Step 8 keys on anchor_disc below.
     input  logic        anchor_pulse,
     input  logic signed [33:0] anchor_delta,
+    // one clk: the display re-anchored on a CONTENT jump (disp_sched anchor_disc:
+    // a tagged picture's PTS stepped BACKWARD off the displayed timeline). Unlike
+    // a raw backward anchor_delta it EXCLUDES the first anchor after a flush --
+    // the provisional parse-front clock routinely re-anchors backward onto the
+    // first picture, and that must never orphan the startup latch (step 8).
+    input  logic        anchor_disc,
     input  logic signed [17:0] av_ofs,   // 90 kHz ticks; >0 = audio later (OSD "A/V Offset"; 18b: +/-2.9s)
 
     // decoded stereo PCM (held; update at aud_ce ~48 kHz)
@@ -324,6 +329,7 @@ module dvd_audio_decode #(
     logic        ce_play_d;
     logic        armed_data;                    // a frame dispatched since (re-)arm
     logic        retime;                        // this arm was taken at a timeline discontinuity
+    logic        anc_bwd;                       // a BACKWARD display re-anchor came after the latch
     logic [ARM_TIMEOUT_W-1:0] arm_timer;        // fallback-release timer
 
     // ---- STALE-SKIP (v4, armed only): discard audio whose PTS is already past
@@ -1125,6 +1131,7 @@ module dvd_audio_decode #(
             nco_fs         <= 2'd1;    // 48 kHz until an MP2 header says otherwise
             dbg_play_err   <= '0;
             retime         <= 1'b0;
+            anc_bwd        <= 1'b0;
         end else begin
             ce_play_d <= aud_ce_play;
 
@@ -1142,7 +1149,11 @@ module dvd_audio_decode #(
             if (!draining && !play_pts_valid && dispatch_pts_valid) begin
                 play_pts       <= dispatch_pts;
                 play_pts_valid <= 1'b1;
+                anc_bwd        <= 1'b0;    // a latch is judged against re-anchors AFTER it
             end
+            // step 8: remember a backward display re-anchor (a content jump) taken
+            // while a latch is pending -- see the ORPHAN release below
+            if (anchor_disc) anc_bwd <= 1'b1;
 
             // an in-band re-time head just entered the re-armed gate (see IN-BAND
             // TIMELINE RE-TIME at the dispatcher): its release must land on its own
@@ -1157,6 +1168,28 @@ module dvd_audio_decode #(
                 armed_data     <= 1'b0;
                 arm_timer      <= '0;
                 retime         <= 1'b0;
+            end else if (!draining && play_pts_valid && anc_bwd && disp_anchored && video_live &&
+                         (start_delta < -RETIME_WIN)) begin
+                // step 8 -- AN ORPHANED LATCH (HW round 3, ULTIMATE_T2 boot -> menu):
+                // the gate latched the old timeline's last audio, and the display
+                // then jumped BACKWARD onto a new timeline (a one-picture still cell
+                // with no audio, c1). That latch is now far EARLY on the new clock
+                // and can never come due; the next discontinuity head then waited
+                // behind it for the whole HOLD_W (0.62 s -- measured exactly), was
+                // late by then, and took the step-6 reset: menu audio ~0.7 s later
+                // than the old build. It is the old timeline's tail -- a few ms of
+                // audio that belonged before the jump: release it now, it plays out,
+                // underruns, and the gate re-arms cleanly for the next head.
+                // Only after a BACKWARD re-anchor that followed the latch: a latch
+                // legitimately early by more than RETIME_WIN (a mux lead at start,
+                // an authored forward gap) sees no such jump and keeps waiting.
+                draining    <= 1'b1;
+                seen_valid  <= 1'b0;
+                play_anchor <= play_pts;
+                pos_ticks   <= '0;
+                pos_frac    <= '0;
+                retime      <= 1'b0;
+                anc_bwd     <= 1'b0;
             end else if (hold_expired) begin
                 // a discontinuity head waited HOLD_W without the old tail's
                 // underrun closing the gate: re-arm anyway (liveness), so it can

@@ -95,7 +95,7 @@ module cdda_audio_tb;
         .nco_trim(22'sd0), .dispatch_pts(), .dispatch_pts_valid(),
         .sched_en(1'b0), .stc_anchored(1'b0),
         .arr_pts(33'd0), .arr_pts_valid(1'b0), .video_live(1'b0),
-        .stc(33'd0), .av_ofs(18'sd0),
+        .stc(33'd0), .av_ofs(18'sd0), .anchor_disc(1'b0),
         .audio_l(audio_l), .audio_r(audio_r),
         .ac3_synced(), .ac3_err(), .dbg_ac3_resets(), .dbg_ac3_err_resets(),
         .dbg_draining(), .dbg_play_pts_valid(), .dbg_armed_data(), .dbg_skip_run(),

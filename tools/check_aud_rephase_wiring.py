@@ -28,6 +28,12 @@ Checks, on comment-stripped source (comments here quote the old wiring):
      decoder's `.frame_seamless` input name the same net with no other driver. Every
      chain bench ties the ring input 0, so a tie-0 or a wrong net in emu.sv passes the
      whole suite and silently brings back the Matrix white-rabbit gap + 0.2 s lag.
+  5. THE ORPHAN TRIGGER (step 8, HW round 3): dvd_audio_decode's `.anchor_disc` is a net
+     assigned from `rephase_req`, and rephase_req is the display's CONTENT-jump flag
+     (`av_anchor_delta_valid && av_anchor_delta_w[34]`). Not a tie-off (T2's menu entry
+     goes back to ~0.7 s late), and not the raw `av_anchor_pulse`: that also fires on the
+     first anchor after a flush, which would orphan -- and release early -- a startup
+     latch, putting a whole title's audio early.
 A lookup that finds nothing, or two of something, is a NAMED FAIL, never a skip.
 
 Exit 0 = wired as designed; 1 = a named failure. Optional argv[1]/argv[2] = emu.sv /
@@ -141,6 +147,21 @@ def main():
         elif re.search(r'\bassign\s+' + re.escape(s_out[0]) + r'\b', src):
             fails.append(f'"{s_out[0]}" has an assign driver besides audio_ring')
 
+    if len(dec) == 1:
+        ad = port_net(dec[0], 'anchor_disc')
+        if len(ad) != 1 or not re.match(r'^[A-Za-z_]\w*$', ad[0] or ''):
+            fails.append(f'dvd_audio_decode.anchor_disc: expected one named net, found {ad} '
+                         '(a tie-off brings back the T2 menu-entry delay)')
+        else:
+            drv = re.findall(r'\bassign\s+' + re.escape(ad[0]) + r'\s*=\s*([^;]*);', src)
+            if drv != ['rephase_req']:
+                fails.append(f'"{ad[0]}" (dvd_audio_decode.anchor_disc) is driven by {drv}, not rephase_req '
+                             '(the display CONTENT-jump flag; av_anchor_pulse would orphan startup latches)')
+            rq = re.findall(r'\bwire\s+rephase_req\s*=\s*([^;]*);', src)
+            if len(rq) != 1 or set(re.findall(r'[A-Za-z_]\w*', rq[0])) != {'av_anchor_delta_valid', 'av_anchor_delta_w'} \
+                    or '[34]' not in rq[0].replace(' ', ''):
+                fails.append(f'rephase_req is {rq}, not av_anchor_delta_valid && av_anchor_delta_w[34]')
+
     trig = re.search(r'else\s+if\s*\(([^;]*?)\)\s*aud_resync_cnt\s*<=', fsrc)
     if not trig:
         fails.append('flush_ctl.sv: no `else if (...) aud_resync_cnt <=` trigger found')
@@ -153,7 +174,7 @@ def main():
             print('FAIL: ' + f)
         return 1
     print('PASS: check_aud_rephase_wiring (decoder resync_req -> flush_ctl.aud_rephase_req -> aud_resync; '
-          'cell_seamless -> audio_ring stamp -> decoder)')
+          'cell_seamless -> audio_ring stamp -> decoder; rephase_req -> anchor_disc)')
     return 0
 
 
