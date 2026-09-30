@@ -79,8 +79,11 @@ predate later confirmations; the `CLAUDE.md` index carries the reconciled status
   - **Seen, not caused here:** a track switch goes silent ~1.3 s on 7 of 10 switches, on
     the unfixed candidate and on this branch alike. It is pre-existing and untouched by
     this change.
-  - **Next step:** a timing-clean build of `2a3a872` (seed sweep), then merge (PR not
-    opened yet).
+  - **Timing:** the realign netlist missed the gate at SEED 9 (83.63 MHz @100C). The sweep's
+    first seed, **SEED 7, closes it at 88.44 / 87.94 MHz** and is pinned in `DVD.qsf`.
+    Timing-clean build: `DVD_dpadbackhold_20260930_1715.rbf`. Its RTL is identical to the
+    HW-tested marginal build's.
+  - **Next step:** merge (PR not opened yet).
 
 - 🔧 **CHROMA ROWS: THE DISPLAY INTERPOLATES FROM THE ROWS THE BILINEAR WEIGHTS EXPECT
   (2026-09-29, ✅ MERGED PR #142, sim-proven, HW-measured 2026-09-30; one ROGER Prog late ACCEPTED).**
