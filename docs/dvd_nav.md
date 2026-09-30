@@ -2310,7 +2310,7 @@ the fix.
 
 The per-PR dev builds (`DVD_tmapseek_*`, `DVD_fieldblend_*`, …) were not run. A bisect needs
 a clean control, and v0.7.0 is not clean. The maintainer's 0 of 6 on v0.7.0 is what a
-~1-in-7 rate gives about a third of the time. The bad events also came in consecutive
+~1-in-11 rate (7 of 78, measured below) gives about half the time. The bad events also came in consecutive
 pairs (cycles 10–11, 6–7), so on a periodic script the gestures are not independent draws,
 and the 0 of 12 for a single Left is not evidence that single steps are immune.
 

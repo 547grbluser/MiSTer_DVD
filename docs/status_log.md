@@ -31,7 +31,7 @@ predate later confirmations; the `CLAUDE.md` index carries the reconciled status
   - **Not a regression.** Same script on one rig (a second rig), 20 ms telemetry. **v0.7.0 2 of 12,
     the current candidate 2 of 12** (−20 s). On the candidate, −30 s gave 1 of 10, a single
     −10 s gave 0 of 12, and **Previous Chapter gave 1 of 12**. The per-PR bisect was not run,
-    because the control is not clean. 0 of 6 is what a ~1-in-7 rate gives a third of the time.
+    because the control is not clean. 0 of 6 is what the measured ~1-in-11 rate gives about half the time.
   - **What the user sees:** the picture holds **~1.1–1.3 s** and audio is **silent ~2.5 s**
     after the landing. Afterwards the picture runs ~1.1–1.3 s behind the clock and audio
     ~2.1 s behind it (`disp_lag`, `av_drift`), i.e. **audio ~1 s late against the picture
