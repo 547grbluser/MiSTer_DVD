@@ -26,9 +26,24 @@
 //  it at its STATE_UPDATE for the picture, which is >= 3 cycles after the
 //  header (update_picture_buffers -> mvec fifo -> picbuf) and can be no later
 //  than the next header (the vld is frozen at the header until picbuf has
-//  rotated). A tag that lands on the SECOND field of a field pair arrives
-//  after that rotation, so it is also announced by tag_commit for picbuf to
-//  re-latch, flagged tag_second for the scheduler to subtract one field.
+//  rotated).
+//
+//  ★ A SECOND FIELD NEVER TAKES A TAG (DVD-FORK FIX, 2026-09-29). The field
+//  pair is ONE coded frame, so the second field's start code begins no access
+//  unit: a mark that lies between the two fields of a pair belongs to the NEXT
+//  frame and stays queued for it. At a second-field header nothing is popped,
+//  the tag reads invalid, and last_hdr does not advance (otherwise pop_drop
+//  would discard that pending mark the very next cycle).
+//  This used to tag the second field and have the scheduler subtract one field
+//  (tag_second). MEASURED on Thayer's Quest VTS_08 (field coded): the mark that
+//  lands there carries exactly the NEXT I-frame's display time (16.377 s, the B
+//  it landed on displays at 16.310), so the frame was stamped ~50 ms late, the
+//  next correct tag read as a 2-frame BACKWARD jump, and disp_sched treated
+//  that as a content discontinuity -- an audio flush every few clips, and when
+//  it fell within the re-phase cooldown of a real cell join, audio left 1.4 s
+//  EARLY for the whole next clip (docs/nonseamless_audio.md 2b). tag_second and
+//  the picbuf re-latch path it fed are kept as ports and now always read 0 /
+//  never fire; gated by run_pts_assoc.sh's pts_thayer arm.
 //
 //  Modular compare over 24 bits of bytes (16 MB) with the MSB-of-difference
 //  test; correct while the tracked distance is under 8 MB against a 2 MB VBUF.
@@ -104,7 +119,10 @@ module pts_assoc #(
     wire head_le_hdr  = !empty && !d_hdr[PW-1];
     wire head_le_last = !empty && hdr_seen && !d_last[PW-1];
 
-    wire pop_tag  = hdr_pulse && head_le_hdr;            // this picture's tag
+    // a second field begins no access unit: it neither claims a mark nor moves
+    // the drop horizon (see the header)
+    wire hdr_frame = hdr_pulse && !hdr_second;
+    wire pop_tag  = hdr_frame && head_le_hdr;            // this picture's tag
     wire pop_drop = !hdr_pulse && head_le_last;          // belongs to no picture
     wire do_pop   = pop_tag || pop_drop;
 
@@ -149,11 +167,13 @@ module pts_assoc #(
             if (!rst_n) dbg_ovf <= '0;
         end else begin
             if (hdr_pulse) begin
-                last_hdr   <= hdr_pos;
-                hdr_seen   <= 1'b1;
-                tag_valid  <= head_le_hdr;
+                if (!hdr_second) begin
+                    last_hdr <= hdr_pos;
+                    hdr_seen <= 1'b1;
+                end
+                tag_valid  <= head_le_hdr && !hdr_second;
                 tag_pts    <= head_pts;
-                tag_second <= hdr_second;
+                tag_second <= 1'b0;             // see the header: a second field is never tagged
                 tag_commit <= 1'b1;
             end
             if (do_push) begin

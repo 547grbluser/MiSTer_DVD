@@ -438,6 +438,7 @@ otherwise; `--red` runs its mutation arms).
 | HDMI passthrough teardown (ADV7513 back to PCM) | ✅ | `hdmi_bitstream.md` §5a | `run_passthru_pcm.sh`, `main/tests` |
 | Mid-play load: full flush trio + decoder soft reset | ✅ | `av_sync.md` | `flush_ctl_tb` |
 | CSS-encrypted detect/warn/mute, density bucket (issue #59) | ✅ | `fabric_audio.md` | `run_css.sh` |
+| Non-seamless cell-join audio: in-band re-time (no display-time flush), seamless stamp, second-field PTS (PR #141) | ✅ | `nonseamless_audio.md` | `run_aud_retime.sh --red`, `run_pts_assoc.sh`, `check_aud_rephase_wiring.py` |
 
 ### Formats and physical media (mostly the custom Main, `main/`)
 

@@ -83,29 +83,51 @@ def walk_ps(buf):
 
 
 def picture_starts(es):
-    """Every picture start code, in coded order: (offset, second_field)."""
+    """Every picture start code, in coded order: (offset, second_field).
+
+    second_field is the MPEG pairing, exactly as vld.v derives pic_hdr_second: a
+    sequence or GOP header starts a new frame; a frame picture is a whole frame; a
+    field picture is the FIRST field of a pair unless the previous picture was a
+    first field. (The old `picture_structure == 2` test was right only for
+    top-field-first pairs.)"""
     pics = []
-    i = es.find(b'\x00\x00\x01\x00')
-    while i >= 0:
-        second = 0
-        # picture_structure lives in the coding extension that follows
-        j = es.find(b'\x00\x00\x01', i + 4)
-        while j >= 0 and j + 4 <= len(es) and es[j + 3] == 0xB5:
-            if (es[j + 4] >> 4) == 0x8 and j + 7 <= len(es):
-                second = 1 if (es[j + 6] & 0x03) == 2 else 0  # bottom field, i.e. 2nd of a top-first pair
-                break
-            j = es.find(b'\x00\x00\x01', j + 4)
-        pics.append((i, second))
-        i = es.find(b'\x00\x00\x01\x00', i + 4)
+    expect_first = True
+    i = es.find(b'\x00\x00\x01')
+    while i >= 0 and i + 4 <= len(es):
+        code = es[i + 3]
+        if code in (0xB3, 0xB8):                  # sequence / GOP header
+            expect_first = True
+        elif code == 0x00:
+            struct = 3                            # MPEG-1 / no coding extension = frame
+            j = es.find(b'\x00\x00\x01', i + 4)
+            while j >= 0 and j + 7 <= len(es) and es[j + 3] == 0xB5:
+                if (es[j + 4] >> 4) == 0x8:
+                    struct = es[j + 6] & 0x03
+                    break
+                j = es.find(b'\x00\x00\x01', j + 4)
+            if struct == 3:
+                second = 0
+                expect_first = True
+            else:
+                second = 0 if expect_first else 1
+                expect_first = bool(second)
+            pics.append((i, second))
+        i = es.find(b'\x00\x00\x01', i + 4)
     return pics
 
 
 def assign(pics, marks):
-    """The MPEG rule: each mark tags the first picture start at/after it; a
-    picture takes the LATEST mark at or before it that no earlier picture
-    consumed. Returns [(offset, pts_or_None, second)]. Note picture_structure 2
-    is only a hint for 'second field' when the pair is top-first; the RTL uses
-    second_field from the vld, and the bench checks the tag, not the parity."""
+    """The MPEG rule: each mark tags the first ACCESS UNIT that starts at/after
+    it; a picture takes the LATEST mark at or before it that no earlier picture
+    consumed. Returns [(offset, pts_or_None, second)].
+
+    A SECOND FIELD starts no access unit -- the field pair is one coded frame --
+    so it never takes a mark, and a mark lying between the two fields of a pair
+    stays pending for the next frame. MEASURED on Thayer's Quest VTS_08 (field
+    coded): such a mark carries exactly the NEXT I-frame's display time (16.377 s
+    where the B it would land on displays at 16.310), and giving it to the B's
+    second field made the display re-anchor 2 frames backward -- a spurious
+    content discontinuity that flushed audio (docs/nonseamless_audio.md 2b)."""
     out = []
     mi = 0
     pending = None                       # latest unconsumed mark <= this offset
@@ -113,6 +135,9 @@ def assign(pics, marks):
         while mi < len(marks) and marks[mi][0] <= off:
             pending = marks[mi][1]       # a later mark supersedes an unconsumed one
             mi += 1
+        if second:
+            out.append((off, None, second))
+            continue                     # not an access unit: the mark stays pending
         out.append((off, pending, second))
         pending = None
     return out
@@ -127,6 +152,8 @@ def main():
     ap.add_argument('--bytes', type=int, default=2 * 1024 * 1024, help="--file: bytes to read")
     ap.add_argument('--vts', type=int, default=None)
     ap.add_argument('--start-frac', type=float, default=0.0)
+    ap.add_argument('--start-sector', type=int, default=None,
+                    help="start at this sector of the VTS title VOBs (overrides --start-frac)")
     ap.add_argument('--sectors', type=int, default=240)
     ap.add_argument('--cut', default=None, metavar='STEM')
     ap.add_argument('--stats', action='store_true')
@@ -153,7 +180,7 @@ def main():
                     return ext + idx
                 idx -= n
             return None
-        start = int(total * a.start_frac)
+        start = a.start_sector if a.start_sector is not None else int(total * a.start_frac)
         secs = []
         for k in range(a.sectors):
             s = sector_at(start + k)

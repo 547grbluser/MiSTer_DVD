@@ -22,6 +22,59 @@ predate later confirmations; the `CLAUDE.md` index carries the reconciled status
 
 ## Hardware status (THIS fork, verified 2026-06-21)
 
+- ✅ **NON-SEAMLESS CELL-JOIN AUDIO (2026-09-29, ✅ MERGED PR #141; HW-CONFIRMED in
+  round 4 and by the maintainer by ear).** Full record: `docs/nonseamless_audio.md`.
+  - **Report.** Thayer's Quest VTS_08 lost ~1.3 s of audio at every clip start. After about
+    half the joins it also played audio **1.4 s early** for the whole next clip. The
+    behaviour is identical on every build since v0.7.0.
+  - **Settled by a 20 ms telemetry capture.** That needed a new HIL knob:
+    `/tmp/dvd_telem_fast` in the custom Main, and `mister.py launch --telem-fast-ms`.
+  - **Three root causes:**
+    1. `pts_assoc` gave a PTS to a B picture's **second field**. The mark carried the
+       next I's display time. The next correct tag then read 2 frames backward, which
+       caused a spurious content discontinuity and an audio flush.
+    2. Emu's **0.62 s re-phase cooldown** swallowed the real join after a spurious
+       anchor. Audio released against the old clock stayed 1.4 s early.
+    3. The display-time **`aud_resync` reset a ring already holding the new cell's first
+       ~1.3 s**. The Scooby-Doo 2 "good job" and Matrix white-rabbit dropouts were the
+       same mechanism, each fixed earlier by removing one trigger.
+  - **Fixes:**
+    - A second field never takes a tag. `tools/pts_map.py`'s golden follows the same
+      rule.
+    - Audio **re-times in band** at the frame whose PTS steps off the timeline: hold it,
+      play the old tail out, re-arm with empty FIFOs, and release only within 0.5 s of its
+      own timeline. Heads that the overlap made slightly late are trimmed.
+    - `flush_ctl` no longer resets audio on `disc_rephase`.
+  - **Measured census:** 1,036 of 1,525 discs have backward PTS joins inside a title. They
+    are worst in FMV games (Last Bounty Hunter 96, Space Pirates 85, Mad Dog 67).
+  - **Gates:** `run_pts_assoc.sh` (new `pts_thayer` fixture plus RED),
+    `run_aud_retime.sh --red` (S1–S6 plus 5 RED arms), and `run_seamless_audio.sh
+    --red`.
+  - **HW rounds 1–2** (two rigs):
+    - Thayer: **0 ms lost per join**, `play_err` 0–3 ms.
+    - ULTIMATE_T2 boot → menu: first **2.5 s late**, then rescued 0.7 s after the old
+      build. Fixed: the hold waits for `arr_agree`, a two-sided arrivals-versus-clock test.
+    - The Matrix white-rabbit cells: **~190 ms gap, then 0.2 s late**. Fixed:
+      `audio_ring` stamps the reader's `cell_seamless` on each frame, and seamless frames
+      are not re-timed.
+    - Benches S7–S10 and 4 more RED arms. The two new emu seams are in
+      `check_aud_rephase_wiring.py`.
+  - **HW round 3:** the Matrix was fixed, but T2 still resumed ~0.7 s later than the old
+    build. Root-caused offline: an **orphaned latch**. c0's last frame latched, then the
+    display jumped BACKWARD to a one-picture, no-audio cell, and c2's head waited out
+    `HOLD_W` behind that latch (0.62 s, exactly). Fix: step 8 releases a latch that a
+    content jump (`anchor_disc` = emu `rephase_req`) left ≥ 0.5 s early. Bench S12.
+  - **HW round 4:**
+    - Thayer: 0–9 ms per join.
+    - ULTIMATE_T2: menu audio in sync **0.08 s** after its picture (old build 0.16 s,
+      rounds 2–3 0.84 s), with no reset.
+    - The Matrix: 0 ms, identical to the old build.
+  - **Maintainer by-ear pass (2026-09-29, same build):** Thayer, ULTIMATE_T2, the Matrix
+    white-rabbit cells, Scooby-Doo 2's whac-a-mole ("good job") and a play-all TV disc
+    all work on hardware.
+  - **Open, non-blocking:** the SuperStation Main-stall soak, and why the T2 orphan
+    released at c2 rather than c1 (§4b).
+
 - ✅ **PER-PICTURE DECODE-TIME INSTRUMENT (2026-09-29,
   ✅ MERGED PR #140; sim-gated, HW DATA TAKEN 2026-09-29).**
   ★ **§6c answered:** Thayer's boot FMV on Interlaced reads 0 lates from its first

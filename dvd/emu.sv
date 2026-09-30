@@ -673,7 +673,7 @@ assign CE_PIXEL = interlaced_eff ? ce_pix_q : 1'b1;
 // the branch changes the netlist anyway - and NEVER PER COMMIT. Do not derive
 // either from a git SHA or a timestamp: every compile would become a new
 // netlist. Same-day rebuilds on one branch append a digit ("dev-seekrealign2").
-`define CORE_VERSION "dev-pictime"
+`define CORE_VERSION "dev-nsaudio"
 
 parameter CONF_STR = {
     "DVD;;",
@@ -1299,6 +1299,7 @@ wire [32:0] ps_vid_pts;
 wire        ps_vid_pts_valid;
 wire [32:0] aud_frame_pts_w;        // audio_ring read-side frame PTS
 wire        aud_frame_pts_valid_w;
+wire        aud_frame_seamless_w;       // audio_ring read-side seamless stamp (-> dvd_audio_decode)
 wire [32:0] aud_dispatch_pts;       // dvd_audio_decode -> av_sync
 wire        aud_dispatch_pts_valid;
 wire        av_stc_anchored;        // av_sync STC locked -> dispatch schedule gate
@@ -3106,6 +3107,8 @@ wire       sw_blank;                    // hold the picture black across a mode 
 wire       realign_pend;                // an arm is open (see above)
 wire load_flush, aud_flush, aud_resync, seek_flush, mount_flush, soft_flush;
 reg  aud_disc_rephase;   // content PTS jump -> audio-only re-phase (driven below, beside the anchor CDC)
+wire aud_resync_req;     // dvd_audio_decode: its latched re-time head is stale -> audio-only re-phase
+wire aud_anchor_disc;    // = rephase_req below: a display CONTENT jump -> dvd_audio_decode step 8
 wire pipe_rst_n, aud_rst_n;
 mode_realign mode_realign_i (
     .clk             (clk_sys),
@@ -3169,7 +3172,7 @@ flush_ctl flush_ctl_i (
     .keep_vbuf       (keep_vbuf),
     .jump_cross      (jump_cross),        // menu<->title crossing: gates soft_flush
     .load_flush      (load_flush),
-    .disc_rephase    (aud_disc_rephase),   // content PTS jump -> audio-only re-phase (VLC's RESET_PCR analogue)
+    .aud_rephase_req (aud_resync_req),     // the audio decoder's stale-latch verdict -> audio-only re-phase (docs/nonseamless_audio.md 4a step 6)
     .cell_seamless   (cell_seamless),      // ...unless the author says this cell continues the last one
     .aud_flush       (aud_flush),
     .aud_resync      (aud_resync),
@@ -3969,6 +3972,7 @@ audio_ring #(.BYTE_DEPTH(32768), .FRAME_DEPTH(128)) audio_ring_inst (
     .drop_pulse       (aud_drop_pulse),      // §5d: drop menu-transition splice frames
     .aud_frame_pts       (rf_aud_frame_pts),
     .aud_frame_pts_valid (rf_aud_frame_pts_valid),
+    .aud_frame_seamless  (cell_seamless),        // stamped per frame at the write side (docs/nonseamless_audio.md 4a step 7)
     .aud_ready        (),                    // ring-internal accept (always high); demux
                                              // flow control uses almost_full below
 
@@ -3983,6 +3987,7 @@ audio_ring #(.BYTE_DEPTH(32768), .FRAME_DEPTH(128)) audio_ring_inst (
     .frame_type       (aud_frame_type),
     .frame_pts        (aud_frame_pts_w),
     .frame_pts_valid  (aud_frame_pts_valid_w),
+    .frame_seamless   (aud_frame_seamless_w),
     .frame_pop        (aud_frame_pop),
 
     .frames_available (aud_frames_avail),
@@ -4168,6 +4173,7 @@ dvd_audio_decode #(.CLK_HZ(27000000), .AUD_HZ(48000)) dvd_audio_decode_inst (
     .lpcm_quant  (ps_aud_lpcm_quant),   // LPCM word length -> lpcm_unpack (20/24-bit depack)
     .frame_pts       (aud_frame_pts_w),
     .frame_pts_valid (aud_frame_pts_valid_w),
+    .frame_seamless  (aud_frame_seamless_w),   // this frame's cell is authored seamless: no re-time
     .frame_pop   (dec_frame_pop),
     // CD-DA/WAV: raw LE PCM bytes straight from the reader (see the
     // ps_stream_fifo wr_en gate -- the two sinks are exclusive on cdda_mode).
@@ -4215,6 +4221,7 @@ dvd_audio_decode #(.CLK_HZ(27000000), .AUD_HZ(48000)) dvd_audio_decode_inst (
     .stc                (av_stc),
     .anchor_pulse       (av_anchor_pulse),   // THE STC IS A CLOCK: re-base play_err across a display re-anchor
     .anchor_delta       (av_anchor_delta),
+    .anchor_disc        (aud_anchor_disc),   // display CONTENT jump (not the first anchor) -> re-time step 8
     .av_ofs             (av_ofs),
     .audio_l     (dec_audio_l),
     .audio_r     (dec_audio_r),
@@ -4232,6 +4239,7 @@ dvd_audio_decode #(.CLK_HZ(27000000), .AUD_HZ(48000)) dvd_audio_decode_inst (
     .dbg_fbrel_cnt      (dbg_aud_fbrel_cnt),
     .dbg_skip_cnt       (dbg_aud_skip_cnt),
     .dbg_catch_cnt      (dbg_aud_catch_cnt),
+    .resync_req         (aud_resync_req),    // stale re-time latch -> flush_ctl.aud_rephase_req
     .dbg_play_err       (dbg_aud_play_err),
     .dbg_cur_codec      (dbg_cur_codec_w),
     .dbg_mp2_avalid     (dbg_mp2_avalid_w),
@@ -4661,6 +4669,14 @@ pts_cdc #(.W(35)) pts_cdc_delta (        // each re-anchor's delta + whether it 
     .dst_clk(clk_sys), .dst_rst_n(reset_n), .dst_data(av_anchor_delta_w), .dst_valid(av_anchor_delta_valid));
 
 // ---- CONTENT-DISCONTINUITY AUDIO RE-PHASE (2026-09-07) ---------------------
+// ⛔ RETIRED AS AN AUDIO RESET 2026-09-29: flush_ctl ignores disc_rephase now, and
+// the re-phase happens IN BAND in dvd/dvd_audio_decode.sv (IN-BAND TIMELINE
+// RE-TIME), at the audio frame whose PTS steps off the timeline. A reset here --
+// when the PICTURE crosses -- discarded the ring's ~1.1-1.4 s of the new content's
+// opening at every non-seamless join (docs/nonseamless_audio.md 4a). The pulse
+// and its cooldown below drive NOTHING now (flush_ctl's re-phase input is the
+// audio decoder's resync_req instead); the history that follows is why a
+// re-phase is needed at all.
 // The display re-anchored because a tagged picture's PTS jumped off the current
 // timeline -- a cell change, a menu hop, a PGC boundary. Re-phase the audio chain
 // so it lands on the NEW timeline instead of continuing on the old one.
@@ -4691,6 +4707,7 @@ pts_cdc #(.W(35)) pts_cdc_delta (        // each re-anchor's delta + whether it 
 // old sentence as evidence that a title cannot re-anchor often.
 reg  [23:0] rephase_cool;                       // 2^24 / 27 MHz ~ 0.62 s
 wire        rephase_req = av_anchor_delta_valid && av_anchor_delta_w[34];
+assign aud_anchor_disc = rephase_req;           // the decoder's orphaned-latch trigger (IN-BAND RE-TIME step 8)
 always @(posedge clk_sys or negedge reset_n)
     if (!reset_n) begin
         rephase_cool <= 24'd0; aud_disc_rephase <= 1'b0;

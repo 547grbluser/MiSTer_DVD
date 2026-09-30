@@ -45,7 +45,11 @@ module flush_ctl (
     input  wire jump_ack,         // 1-cycle pulse: reader executed a VM jump
     input  wire mode_switch,      // 1-cycle pulse: live raster-regime change (interlace/film)
     input  wire aud_switch,       // 1-cycle pulse: audio track switch
-    input  wire disc_rephase,     // display re-anchored on a content PTS jump (dvd/disp_sched.sv)
+    // one-cycle: the AUDIO DECODER asks for the audio-only re-phase -- its latched
+    // re-time head is stale on the clock's own timeline (dvd_audio_decode.sv
+    // resync_req, IN-BAND TIMELINE RE-TIME step 6). Was `disc_rephase` (the
+    // display's content-jump pulse) until 2026-09-29; see the aud_resync block.
+    input  wire aud_rephase_req,
     input  wire keep_vbuf,        // level (reader): menu->menu transition keeps the VBUF
     // level (reader), valid with jump_ack: this jump CROSSES the menu/title boundary.
     // NOT the complement of keep_vbuf -- a title->title jump is neither (see soft_flush).
@@ -151,7 +155,26 @@ always @(posedge clk) begin
     // cell re-anchors with genuinely restarting audio and pulses no seek_ack, so a
     // navigation-event gate would silently drop the menu case #63 was built for.
     // cell_seamless is 0 in every menu, so menus keep their re-phase untouched.
-    else if (aud_switch || (disc_rephase && !cell_seamless)) aud_resync_cnt <= 7'd64;
+    // ⛔⛔ RETIRED 2026-09-29: disc_rephase NO LONGER RESETS AUDIO (and so the
+    // cell_seamless carve-out above has nothing left to gate). Everything above
+    // explains why a discontinuity must re-phase audio; what it could not fix is
+    // WHERE this did it. The pulse comes when the PICTURE crosses the join, but it
+    // resets the RING -- a parse-front buffer that by then already holds the new
+    // content's first ~1.1-1.4 s. Every such reset threw that opening away:
+    // ~1.3 s of silence at every non-seamless cell join (Thayer's Quest: every
+    // clip; 1,036 of 1,525 library discs have such joins in a title), and the
+    // same loss behind Scooby-Doo 2's "good job" -> "job" and the Matrix
+    // white-rabbit dropouts, each once fixed by suppressing one trigger.
+    // The re-phase now happens IN BAND, in dvd/dvd_audio_decode.sv ("IN-BAND
+    // TIMELINE RE-TIME"): the audio frame whose PTS steps off the timeline is held
+    // until the old audio has played out, then released on the new timeline --
+    // nothing buffered is discarded. docs/nonseamless_audio.md 4a.
+    // The port that carried it is now aud_rephase_req: the AUDIO DECODER's own
+    // verdict that a latched re-time head is stale on the clock's timeline (step 6
+    // there) -- the one case the in-band path cannot fix without a reset, and the
+    // case the old display-time reset used to rescue (ULTIMATE_T2 boot -> menu,
+    // HW 2026-09-29). cell_seamless stays as a port and is inert.
+    else if (aud_switch || aud_rephase_req) aud_resync_cnt <= 7'd64;
     else if (aud_resync)     aud_resync_cnt <= aud_resync_cnt - 7'd1;
 end
 

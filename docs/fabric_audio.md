@@ -95,8 +95,9 @@ capture one cycle after `aud_valid` and reported ~13k/27k mismatches. So
 the switch's first cycle, while `soft_arm`/`declick_win` rise a cycle later (mutation M5). 1 LSB/cycle covers the full 16-bit range in `DECLICK_WIN` =
 65535 cycles ≈ **2.43 ms**, so the register width is the divider.
 - **Only a GENTLE reset ramps.** New input `aud_soft_switch` = emu's
-  `aud_resync & ~aud_flush`. That is a track switch, or a display re-anchor on a
-  non-seamless cell (menu loops, ~4–6/min, benefit too). A HARD reset (`aud_flush`:
+  `aud_resync & ~aud_flush`. That is a track switch. (It used to include a display
+  re-anchor on a non-seamless cell. Since 2026-09-29 a re-anchor resets no audio: the
+  re-phase happens in band, `docs/nonseamless_audio.md` §4a.) A HARD reset (`aud_flush`:
   seek, mount, jump) still cuts on the same cycle: an instant cut is correct there and
   a ramped seek would feel laggy. `~aud_flush` is there because a seek can land inside
   a switch's 64 cycles, and the hard cause must win.

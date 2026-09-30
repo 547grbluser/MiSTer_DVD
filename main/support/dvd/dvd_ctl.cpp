@@ -46,8 +46,20 @@
 
 #define TELEM_PERIOD_MS 250
 
+// HIL-only EVENT CAPTURE (docs/nonseamless_audio.md). At 250 ms a row cannot
+// order the events at a cell join (re-anchor, audio reset, gate release, the
+// play_err step); they all land in one row. When the harness creates this file
+// (text: the period in ms, clamped to 10..1000), dvd_ctl samples at that period
+// and ALSO appends every sample to DVD_TELEM_FAST_LOG, so nothing depends on a
+// shell poller keeping up. Re-checked with the arm file every 2 s; absent = the
+// normal 250 ms snapshot only. Nothing ships active: /tmp is empty at boot.
+#define DVD_TELEM_FAST     "/tmp/dvd_telem_fast"
+#define DVD_TELEM_FAST_LOG "/tmp/dvd_telem_fast.jsonl"
+
 static int  ctl_fd = -1;
 static unsigned last_telem_ms = 0;
+static unsigned telem_period_ms = TELEM_PERIOD_MS;
+static int telem_fast = 0;
 
 static void ctl_log(const char *fmt, ...)
 {
@@ -91,12 +103,7 @@ static void telem_read()
 	clock_gettime(CLOCK_MONOTONIC, &ts);
 	double t = ts.tv_sec + ts.tv_nsec / 1e9;
 
-	// Write via a temp file and rename, so a reader never sees a half-written
-	// object. The cost is one extra tmpfs metadata op every 250 ms.
-	char tmp[64];
-	snprintf(tmp, sizeof(tmp), "%s.tmp", DVD_TELEM_FILE);
-	FILE *f = fopen(tmp, "w");
-	if (!f) return;
+	char line[1536];
 	// dec_duty (words 17..20): free-running clk_dec cycle counts / 4096 of where
 	// the decoder's time goes -- parked on the display, starved of bitstream,
 	// stalled by the decode pipe, recon waiting on reference pixels. 16-bit,
@@ -117,7 +124,7 @@ static void telem_read()
 				"\"pic_max\":%u,\"pic_n\":%u,\"pic_over\":%u,",
 				w[22], w[23], w[24]);
 	}
-	fprintf(f,
+	int len = snprintf(line, sizeof(line),
 		"{\"t\":%.6f,%s\"refreshes\":%u,\"pickups\":%u,\"lates\":%u,"
 		"\"drops\":%u,\"vid_err\":%d,\"debt\":%d,\"drop_req\":%u,"
 		"\"vbuf_fill\":%u,\"aud_frames\":%u,"
@@ -155,8 +162,23 @@ static void telem_read()
 		(unsigned)((w[7] >> 4) & 1), (unsigned)((w[7] >> 5) & 1),
 		(unsigned)((w[7] >> 6) & 1), (unsigned)((w[7] >> 7) & 1),
 		(unsigned)((w[14] >> 8) & 1));
+	if (len <= 0 || len >= (int)sizeof(line)) return;
+
+	// Write via a temp file and rename, so a reader never sees a half-written
+	// object. The cost is one extra tmpfs metadata op per sample.
+	char tmp[64];
+	snprintf(tmp, sizeof(tmp), "%s.tmp", DVD_TELEM_FILE);
+	FILE *f = fopen(tmp, "w");
+	if (!f) return;
+	fputs(line, f);
 	fclose(f);
 	rename(tmp, DVD_TELEM_FILE);
+
+	if (telem_fast)
+	{
+		FILE *lf = fopen(DVD_TELEM_FAST_LOG, "a");
+		if (lf) { fputs(line, lf); fclose(lf); }
+	}
 }
 
 // ---------------------------------------------------------------------------
@@ -224,6 +246,25 @@ void dvd_ctl_tick()
 		armed = (stat(DVD_CTL_ARM, &st) == 0);
 		if (armed != was) ctl_log("DVD_CTL: %s (%s)",
 		                          armed ? "armed" : "disarmed", DVD_CTL_ARM);
+		// event-capture knob (see DVD_TELEM_FAST)
+		unsigned period = TELEM_PERIOD_MS;
+		int fast = 0;
+		FILE *kf = armed ? fopen(DVD_TELEM_FAST, "r") : NULL;
+		if (kf)
+		{
+			unsigned ms = 0;
+			if (fscanf(kf, "%u", &ms) == 1)
+			{
+				period = ms < 10 ? 10 : ms > 1000 ? 1000 : ms;
+				fast = 1;
+			}
+			fclose(kf);
+		}
+		if (fast != telem_fast || period != telem_period_ms)
+			ctl_log("DVD_CTL: telemetry every %u ms%s", period,
+			        fast ? " (event capture -> " DVD_TELEM_FAST_LOG ")" : "");
+		telem_fast = fast;
+		telem_period_ms = period;
 		if (!armed && ctl_fd >= 0)
 		{
 			close(ctl_fd);
@@ -256,7 +297,7 @@ void dvd_ctl_tick()
 	}
 
 	unsigned t = now_ms();
-	if (t - last_telem_ms >= TELEM_PERIOD_MS)
+	if (t - last_telem_ms >= telem_period_ms)
 	{
 		last_telem_ms = t;
 		telem_read();

@@ -126,7 +126,7 @@ wire aud_rst_n;
 flush_ctl fc (
     .clk(clk), .rst_n(rst_n),
     .start_streaming(1'b0), .seek_ack(1'b0), .jump_ack(1'b0), .mode_switch(1'b0),
-    .aud_switch(aud_switch), .disc_rephase(1'b0), .keep_vbuf(1'b0),
+    .aud_switch(aud_switch), .aud_rephase_req(1'b0), .keep_vbuf(1'b0),
     .jump_cross(1'b0), .cell_seamless(1'b0),
     .load_flush(), .aud_flush(), .aud_resync(), .seek_flush(), .mount_flush(),
     .soft_flush(), .pipe_rst_n(), .aud_rst_n(aud_rst_n)
@@ -138,7 +138,7 @@ logic       f_pop = 0;
 audio_ring #(.BYTE_DEPTH(32768), .FRAME_DEPTH(128)) ring (
     .clk(clk), .rst_n(aud_rst_n),
     .aud_byte(m_b), .aud_valid(m_v), .aud_type(m_t), .aud_frame_start(m_fs),
-    .drop_pulse(1'b0), .aud_frame_pts(m_p), .aud_frame_pts_valid(m_pv),
+    .drop_pulse(1'b0), .aud_frame_pts(m_p), .aud_frame_pts_valid(m_pv), .aud_frame_seamless(1'b0),
     .aud_ready(), .almost_full(almost_full),
     .out_byte(r_b), .out_valid(r_v), .out_ready(r_ready),
     .frame_valid(f_v), .frame_len(f_len), .frame_type(f_t),

@@ -17,8 +17,8 @@
 //     (soft_flush additionally needs jump_cross -- see [4] vs [4b] below)
 //   mode_switch (interlace/film raster)     x     x     x     -        -
 //   aud_switch (audio track)                -     -     -     -        x
-//   disc_rephase (content PTS jump)         -     -     -     -        x
-//   disc_rephase & cell_seamless            -     -     -     -        -
+//   aud_rephase_req (decoder: stale latch)  -     -     -     -        x   (was disc_rephase, the
+//   aud_rephase_req & cell_seamless         -     -     -     -        x    display pulse; 2026-09-29)
 //
 // mount_flush = MOUNT ONLY (pal_detect's immediate PAL re-arm: a mount is the one event
 // that may change the standard). soft_flush = the decoder soft-reset request
@@ -41,7 +41,7 @@ module flush_ctl_tb;
   reg  clk = 0;
   reg  rst_n = 0;
   reg  start_streaming = 0, seek_ack = 0, jump_ack = 0;
-  reg  mode_switch = 0, aud_switch = 0, keep_vbuf = 0, disc_rephase = 0;
+  reg  mode_switch = 0, aud_switch = 0, keep_vbuf = 0, aud_rephase_req = 0;
   reg  cell_seamless = 0;
   reg  jump_cross = 0;
   wire load_flush, aud_flush, aud_resync, seek_flush, mount_flush, soft_flush;
@@ -55,7 +55,7 @@ module flush_ctl_tb;
     .jump_ack        (jump_ack),
     .mode_switch     (mode_switch),
     .aud_switch      (aud_switch),
-    .disc_rephase    (disc_rephase),
+    .aud_rephase_req    (aud_rephase_req),
     .cell_seamless   (cell_seamless),
     .keep_vbuf       (keep_vbuf),
     .jump_cross      (jump_cross),
@@ -233,10 +233,20 @@ module flush_ctl_tb;
     //       ⚠ It must NOT raise load_flush, seek_flush or mount_flush: the video is
     //       continuous here (that is the whole point of keep_vbuf -- the authored
     //       transition plays out), so touching the video path would undo it.
-    expect_idle("[10b] not idle before disc_rephase");
-    disc_rephase = 1;
-    fork pulse_and_measure; begin @(posedge clk); disc_rephase <= 0; end join
-    check_row(0, 0, 0, 1, 0, 0, "[10b] disc_rephase must fire aud_resync only");
+    expect_idle("[10b] not idle before aud_rephase_req");
+    aud_rephase_req = 1;
+    fork pulse_and_measure; begin @(posedge clk); aud_rephase_req <= 0; end join
+    // ⛔ CHANGED 2026-09-29: it fires NOTHING now. The re-phase moved in band
+    // (dvd_audio_decode's IN-BAND TIMELINE RE-TIME, gated by run_aud_retime.sh),
+    // because a reset here -- at the picture's crossing -- discarded the new
+    // content's buffered opening (docs/nonseamless_audio.md 4a).
+    // ⛔ CHANGED 2026-09-29 (twice in one day, recorded so it is not re-derived):
+    // the input used to be disc_rephase, the DISPLAY's content-jump pulse, and it
+    // fired aud_resync -- which discarded the new content's buffered opening at
+    // every non-seamless join. The re-phase moved in band (dvd_audio_decode), and
+    // this input now carries only the DECODER's request when a latched re-time
+    // head is stale on the clock's timeline (docs/nonseamless_audio.md 4a step 6).
+    check_row(0, 0, 0, 1, 0, 0, "[10b] aud_rephase_req must fire aud_resync only");
 
     // [10c] ...but NOT on a cell the author marked seamless_play. A seamless-branch
     // junction restarts the timestamps while the soundtrack plays straight through
@@ -244,20 +254,22 @@ module flush_ctl_tb;
     // cell, the ILVU splices inside are continuous, and the disc authors no audio
     // gap), so flushing there is ~1 s of audio thrown away for a numbering change.
     // This is the white-rabbit dropout.
-    expect_idle("[10c] not idle before the seamless disc_rephase");
+    expect_idle("[10c] not idle before the seamless aud_rephase_req");
     cell_seamless = 1;
-    disc_rephase = 1;
-    fork pulse_and_measure; begin @(posedge clk); disc_rephase <= 0; end join
-    check_row(0, 0, 0, 0, 0, 0, "[10c] disc_rephase on a seamless cell must fire NOTHING");
+    aud_rephase_req = 1;
+    fork pulse_and_measure; begin @(posedge clk); aud_rephase_req <= 0; end join
+    // cell_seamless is inert now: the decoder's verdict is evidence about the
+    // audio it holds, not about how the cell was authored.
+    check_row(0, 0, 0, 1, 0, 0, "[10c] aud_rephase_req fires aud_resync on a seamless cell too");
 
     // [10d] CONTROL: the gate is a level, so it must not disable the re-phase for
     // good -- the very next non-seamless cell re-phases as before. Without this a
     // stuck-at-suppressed bug would pass [10c] and look like a fix.
     cell_seamless = 0;
-    expect_idle("[10d] not idle before the control disc_rephase");
-    disc_rephase = 1;
-    fork pulse_and_measure; begin @(posedge clk); disc_rephase <= 0; end join
-    check_row(0, 0, 0, 1, 0, 0, "[10d] disc_rephase off a seamless cell still fires aud_resync");
+    expect_idle("[10d] not idle before the control aud_rephase_req");
+    aud_rephase_req = 1;
+    fork pulse_and_measure; begin @(posedge clk); aud_rephase_req <= 0; end join
+    check_row(0, 0, 0, 1, 0, 0, "[10d] aud_rephase_req off a seamless cell fires aud_resync");
 
     // [10e] CONTROL: cell_seamless must gate ONLY the discontinuity re-phase. An
     // audio TRACK SWITCH on the same cell is a real content change and must still

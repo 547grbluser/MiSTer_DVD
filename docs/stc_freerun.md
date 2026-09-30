@@ -176,7 +176,7 @@ clk_dec cycles apart, so none is ever lost. It counts while `video_live &&
 | anchor | when | value |
 |---|---|---|
 | provisional | the first parse-front PTS after a flush, before `video_live` | that PTS, frozen — exactly today's pre-live behaviour, so the STD mux-lead hold and the audio priming work unchanged |
-| pickup | the first pickup of a TAGGED picture, or a pickup that is a DISCONTINUITY | the picture's PTS (minus a field if the tag named the second field) |
+| pickup | the first pickup of a TAGGED picture, or a pickup that is a DISCONTINUITY | the picture's PTS. (It used to subtract a field when the tag named a second field. Since 2026-09-29 a second field is never tagged: a mark between two fields belongs to the next frame, `docs/nonseamless_audio.md` §2b) |
 | untagged first pickup | a stream that never carried a PTS (bare `.m2v`) | 0 |
 
 Every anchor exports its signed delta (`anchor_req`/`anchor_delta`).
@@ -933,6 +933,12 @@ nothing about the bench — two arms initially "passed" on a build error.
 sampling an already-low `sp_active`. `red-hold` is what reported it.
 
 ### 12.2 A seamless-branch junction is not a content change
+
+> **Superseded 2026-09-29** (`docs/nonseamless_audio.md` §4a). The display-time
+> `aud_resync` this section carved seamless cells out of is retired altogether. A
+> re-anchor resets no audio; the audio re-times in band at the frame whose PTS steps off
+> the timeline. The carve-out below is kept as history. `cell_seamless` is still exported
+> and wired, but `flush_ctl` no longer reads it.
 
 `disc_rephase` (§3.7) turns the display's re-anchor into `aud_resync`, which resets
 `audio_ring` **and** `dvd_audio_decode`. It was accepted on the note at `dvd/emu.sv`:

@@ -39,16 +39,20 @@ module dvd_audio_decode #(
     // Drain-gate fallback release timer width: 2^W / CLK_HZ seconds of ARMED with
     // data but no scheduled release before free-running anyway (liveness guard for
     // streams that never yield a usable PTS/anchor). 26 -> ~2.5 s. TBs shrink it.
-    parameter int ARM_TIMEOUT_W = 26
+    parameter int ARM_TIMEOUT_W = 26,
+    // In-band re-time hold bound: 2^W / CLK_HZ s a discontinuity head may wait at
+    // the ring head (for the old tail to play out AND for the clock to reach its
+    // timeline) before it is dispatched anyway. 24 -> ~0.62 s. TBs shrink it.
+    parameter int HOLD_W = 24
 ) (
     input  logic        clk,             // clk_sys
     input  logic        rst_n,
     input  logic        enable,          // O5 "Audio" toggle (default On)
     input  logic        pause,           // gamepad transport: freeze audio (hold, silence)
     // dvd/flush_ctl.sv's aud_resync mirrored (aud_resync_o): rst_n (=aud_rst_n) is
-    // asserted for this GENTLE cause (an audio-track switch, or a display re-anchor
-    // that is not on a seamless cell -- content keeps playing, only the audio phase
-    // resets) as opposed to a HARD cause (aud_flush: seek/mount/jump, a real
+    // asserted for this GENTLE cause (an audio-track switch -- content keeps playing,
+    // only the audio phase resets; a display re-anchor no longer resets audio since
+    // 2026-09-29, see IN-BAND TIMELINE RE-TIME) as opposed to a HARD cause (aud_flush: seek/mount/jump, a real
     // discontinuity). Selects instant-cut vs. de-click ramp in the output mux below.
     input  logic        aud_soft_switch,
 
@@ -62,6 +66,7 @@ module dvd_audio_decode #(
     input  logic [1:0]  lpcm_quant,       // LPCM word length (ps_demux): 0=16,1=20,2=24-bit
     input  logic [32:0] frame_pts,        // PES PTS of the queued frame
     input  logic        frame_pts_valid,  // that PTS is meaningful
+    input  logic        frame_seamless,   // audio_ring: the frame's cell is authored seamless_play
     output logic        frame_pop,
 
     // CD-DA/WAV direct-PCM injection (feature/wav-audio): raw little-endian
@@ -138,12 +143,17 @@ module dvd_audio_decode #(
     input  logic [32:0] stc,
     // THE STC IS A CLOCK (docs/stc_freerun.md): when the display re-anchors the
     // clock (a PTS discontinuity -- a menu loop, a cell boundary, a held still),
-    // it jumps by anchor_delta. A sample-continuous audio stream across the same
-    // discontinuity is still IN SYNC, so the playback-position reference moves
-    // with the clock instead of reading the jump as a phase error. Only the
-    // measurement (play_err) is re-based; nothing here re-times any sample.
+    // it jumps by anchor_delta (one pulse per re-anchor, clk_sys). The play_err
+    // re-base this was first wired for was retired (see the ⛔ note in the gate
+    // controller); both stay wired and unused. Step 8 keys on anchor_disc below.
     input  logic        anchor_pulse,
     input  logic signed [33:0] anchor_delta,
+    // one clk: the display re-anchored on a CONTENT jump (disp_sched anchor_disc:
+    // a tagged picture's PTS stepped BACKWARD off the displayed timeline). Unlike
+    // a raw backward anchor_delta it EXCLUDES the first anchor after a flush --
+    // the provisional parse-front clock routinely re-anchors backward onto the
+    // first picture, and that must never orphan the startup latch (step 8).
+    input  logic        anchor_disc,
     input  logic signed [17:0] av_ofs,   // 90 kHz ticks; >0 = audio later (OSD "A/V Offset"; 18b: +/-2.9s)
 
     // decoded stereo PCM (held; update at aud_ce ~48 kHz)
@@ -175,6 +185,14 @@ module dvd_audio_decode #(
     // window stale-skip). Split out 2026-09-18 so telemetry can tell the two
     // apart: they discard for opposite reasons (docs/dvd_nav.md).
     output logic [3:0]  dbg_catch_cnt,
+    // In-band timeline re-times (a discontinuity head dispatched into a re-armed
+    // gate; docs/nonseamless_audio.md 4a). Saturating.
+    output logic [3:0]  dbg_retime_cnt,
+    // One-cycle request for the audio-only re-phase (flush_ctl aud_resync): a
+    // re-time head is ALREADY LATCHED and has gone stale on the clock's own
+    // timeline (see IN-BAND TIMELINE RE-TIME, step 6). Frames already dispatched
+    // cannot be un-dispatched, so the reset is the only way to drop them.
+    output logic        resync_req,
     // Playback-position error vs STC: (stc - play_anchor) - samples*1.875,
     // in 90 kHz ticks >> 4 (same 178 us/unit scale as the drift row). Positive
     // = playback LATE. Starts ~av_ofs at each release; the SLOPE is the read
@@ -310,6 +328,8 @@ module dvd_audio_decode #(
     logic        seen_valid;
     logic        ce_play_d;
     logic        armed_data;                    // a frame dispatched since (re-)arm
+    logic        retime;                        // this arm was taken at a timeline discontinuity
+    logic        anc_bwd;                       // a BACKWARD display re-anchor came after the latch
     logic [ARM_TIMEOUT_W-1:0] arm_timer;        // fallback-release timer
 
     // ---- STALE-SKIP (v4, armed only): discard audio whose PTS is already past
@@ -375,11 +395,27 @@ module dvd_audio_decode #(
     wire signed [34:0] arr_delta =
         $signed({2'b0, stc}) - $signed({2'b0, arr_pts_l}) - 35'($signed(av_ofs));
     wire arr_current = arr_seen && (arr_delta <= STALE_TICKS);
+    // TWO-SIDED "the arrivals and the clock are on the same timeline" (the re-time's
+    // discriminator, 2026-09-29). arr_current above is one-sided -- it was built
+    // for the catch-up, where the sign is known -- and reads "current" for an
+    // arrival any distance AHEAD of the clock, e.g. new-timeline audio seen
+    // against an old clock across a forward restart. The parse front normally
+    // leads the clock by ~1.1-1.6 s, so the lower bound is 3 s; the upper bound is
+    // the catch-up's own STALE.
+    // ⚠ SIZE ARR_LEAD_MAX FROM THE VIDEO VBUF, NOT FROM THIS RING. The demux parses
+    // audio and video out of ONE stream, so the audio arrival front can lead the
+    // clock by no more than the video buffering allows (the VBUF depth, ~1-1.6 s):
+    // the demux stalls on a full VBUF long before this ring alone would bound it.
+    // (At 64 kbps a 32 KB ring holds ~4 s -- sizing the bound from the ring would
+    // make it wrong for exactly the low-bitrate tracks.)
+    localparam logic signed [34:0] ARR_LEAD_MAX = 35'sd270000;   // 3 s
+    wire arr_agree = arr_seen && (arr_delta <= STALE_TICKS) && (arr_delta > -ARR_LEAD_MAX);
     wire head_catchup = sched_en && draining && stc_anchored && video_live && arr_current &&
                         ( frame_pts_valid
                             ? (head_delta > (skip_run ? STALE_TICKS : CATCHUP_TICKS))
                             : skip_run );
-    wire head_discard = head_stale || head_catchup;
+    wire head_retime_stale;           // IN-BAND RE-TIME (below): late head on the new timeline
+    wire head_discard = head_stale || head_catchup || head_retime_stale;
 
     // ---- PRE-ANCHOR DISPATCH HOLD (v5.1): audio packs reach the demux BEFORE
     // the first video PTS, so for a brief window stc_anchored=0 and the
@@ -394,6 +430,102 @@ module dvd_audio_decode #(
     // ~half-ARM_TIMEOUT fallback opens it for video-PTS-less streams (raw ES).
     logic [ARM_TIMEOUT_W-2:0] anchor_tmr;
     wire pre_anchor_hold = sched_en && !stc_anchored && !(&anchor_tmr);
+
+    // ---- IN-BAND TIMELINE RE-TIME (2026-09-29, docs/nonseamless_audio.md 4a) ----
+    // A content discontinuity (a non-seamless cell join, a menu loop, a PGC
+    // boundary) restarts the audio PTS in the stream itself: the frame that
+    // carries it is the exact point where the old timeline's audio ends and the
+    // new one's begins. Re-time HERE, at that frame, instead of flushing:
+    //   1. DETECT: a PTS-tagged head whose PTS steps off the dispatched timeline
+    //      (backward > DISC_BACK, or forward > DISC_FWD -- above the spec's
+    //      0.7 s maximum PTS spacing, so ordinary sparse tags never trip it).
+    //   2. HOLD: while the old timeline still has audio downstream (draining, or
+    //      armed with a latched play_pts) the frame is NOT popped. The decode
+    //      and PCM FIFOs play the old tail out at the normal rate -- nothing
+    //      is discarded -- until the underrun re-arm below closes the gate.
+    //   3. RE-ARM WITH EMPTY FIFOs: then the frame dispatches into the armed
+    //      gate and latches play_pts. This is the one re-arm that cannot hit the
+    //      v5.3 deadlock (a re-arm with FULL FIFOs): here they are empty.
+    //   4. RELEASE ON THE RIGHT TIMELINE: that arm is a `retime` arm, whose
+    //      release also needs stc - play_pts < RETIME_WIN. While the display
+    //      has not yet crossed, the clock is still on the OLD timeline and a
+    //      backward-stepped frame reads grossly LATE; releasing it there is how
+    //      Thayer's audio ended up 1.4 s early for whole clips (2b step 3).
+    //      The display's own re-anchor brings the clock within the window.
+    // ★ WHY NOT THE DISPLAY-TIME FLUSH IT REPLACES (flush_ctl aud_resync on
+    // disc_rephase): that fired when the PICTURE crossed the join, but it reset
+    // the RING -- a parse-front buffer that by then already held the new cell's
+    // first ~1.1-1.4 s. Every such flush threw that opening away (Thayer: ~1.3 s
+    // of silence at every clip; Scooby-Doo 2's "good job" -> "job" was the same
+    // loss behind a different trigger).
+    //   6. A STALE LATCH (safety net): a re-time head latched and then the clock
+    //      moved again -- a second re-anchor -- to where that head is RETIME_WIN or
+    //      more late while the arrivals agree. Since the hold now waits for
+    //      arr_agree before dispatching (step 2), a latch normally happens on the
+    //      head's own timeline and this does not fire; it covers the HOLD_W expiry
+    //      and double re-anchors. Nothing already in the
+    //      decoder can be dropped except by a reset, so the decoder asks for the
+    //      audio-only re-phase (resync_req -> flush_ctl aud_resync): the same
+    //      reset the old display-time path fired at every discontinuity, now only
+    //      on the decoder's own evidence that its latch is wrong.
+    // Liveness: a hold that never sees its underrun (HOLD_W, ~0.6 s) forces the
+    // re-arm; a retime arm that never reaches its window takes the ordinary
+    // arm_timer fallback. Only with scheduling on (sched_en): the A/V Sync Off
+    // diagnostic free-runs exactly as before.
+    localparam logic signed [34:0] DISC_BACK_TICKS = 35'sd4500;     // 50 ms
+    localparam logic signed [34:0] DISC_FWD_TICKS  = 35'sd90000;    // 1 s
+    localparam logic signed [34:0] RETIME_WIN      = 35'sd45000;    // 0.5 s
+    logic [32:0] last_pts;          // PTS of the last tagged frame dispatched to play
+    logic        last_pts_v;
+    logic        cur_disc;          // the frame being dispatched is a discontinuity head
+    logic [HOLD_W-1:0] hold_tmr;
+    wire  signed [34:0] pts_step = $signed({2'b0, frame_pts}) - $signed({2'b0, last_pts});
+    //   7. NOT AT AN AUTHORED-SEAMLESS JOIN (HW 2026-09-29, The Matrix white-rabbit
+    //      cells, control arm = the pre-change build). A seamless_play cell restarts
+    //      its PTS while the soundtrack runs on SAMPLE FOR SAMPLE; the author's
+    //      audio-vs-video offset at the boundary is not a phase to honour. Re-timing
+    //      there took a ~190 ms gap and then released the head ~0.2 s LATE against
+    //      the first picture (c4, c7), where the old build -- which just played on --
+    //      lost 0 ms. frame_seamless is the reader's cell_seamless stamped per frame
+    //      by audio_ring at its WRITE side (the old flush_ctl carve-out sampled the
+    //      same level at display time, ~1 s later in content -- the wrong cell).
+    //      Such a head is simply dispatched: sample-continuous, last_pts follows it.
+    //      ★ Menus never carry the stamp, BY CONSTRUCTION: the reader writes
+    //      cell_seamless only in S_CELL_LOAD2's title branch (the menu_dom branch
+    //      never does), and every PGC load and transport seek clears it -- so a
+    //      looping menu cell always takes the re-time (the #63 lip-sync case).
+    wire  head_disc = sched_en && last_pts_v && frame_pts_valid && !frame_seamless &&
+                      ((pts_step < -DISC_BACK_TICKS) || (pts_step > DISC_FWD_TICKS));
+    // HOLD until (a) the old timeline's audio has played out (the gate re-armed with
+    // empty FIFOs) AND (b) the clock is on the head's timeline -- the demux's
+    // arrivals agree with it (arr_agree). (b) was added after HW round 2: a head
+    // dispatched while the clock was still elsewhere gets LATCHED, and a latch can
+    // only be undone by a reset; waiting for the clock instead lets the dispatch-
+    // side trim below see the head's true lateness and drop only the late part.
+    wire  disc_hold = head_disc && (draining || play_pts_valid || !arr_agree) && !(&hold_tmr);
+    // the bound expired with old audio still queued: force the re-arm (liveness)
+    wire  hold_expired = head_disc && (draining || play_pts_valid) && (&hold_tmr);
+    // 5. OVERLAP: the old cell's audio may run a little past its video, so the
+    //    display can re-anchor while the old tail is still playing. The new
+    //    head then reads slightly LATE on its own timeline. Playing it anyway
+    //    would leave the whole new clip that late (the mid-play catch-up only
+    //    acts past 300 ms), so a discontinuity head that is late by more than
+    //    STALE but less than RETIME_WIN is discarded at the re-armed gate,
+    //    exactly like the load-window stale-skip -- bounded by the overlap.
+    //    Late by RETIME_WIN or more means the clock is still on the OTHER
+    //    timeline: that head is kept and waits (step 4), never discarded.
+    //    ⚠ CORRECTED 2026-09-29 (HW, ULTIMATE_T2 boot -> menu): "late by
+    //    RETIME_WIN or more means the other timeline" is NOT always true. After
+    //    a still, the display re-anchored to the new menu segment and its first
+    //    audio then arrived 0.53 s LATE on that same new timeline, with current
+    //    audio queued behind it; held as "other timeline", it went out via the
+    //    2.5 s fallback and played 2.5 s late. The discriminator is the ARRIVALS:
+    //    if the demux's newest audio agrees with the clock (arr_agree), a late
+    //    head is stale on the clock's own timeline and is discarded at any
+    //    lateness; if the arrivals disagree too, the clock is elsewhere -> wait.
+    assign head_retime_stale = head_disc && !draining && !play_pts_valid &&
+                               (head_delta > STALE_TICKS) &&
+                               ((head_delta < RETIME_WIN) || arr_agree);
 
     // codec sink readiness for the byte currently offered
     logic        ac3_full;
@@ -410,6 +542,8 @@ module dvd_audio_decode #(
     assign ring_ready = consume;                          // pop on consume only
 
     assign frame_pop = (state == S_POP);                  // 1-cycle descriptor pop
+    // a discontinuity head entering the (re-armed) decoder: its arm is a retime arm
+    wire disc_dispatch = (state == S_POP) && cur_disc && cur_pts_valid && !discard_cur;
 
     always_ff @(posedge clk) begin
         if (rst) begin
@@ -425,8 +559,17 @@ module dvd_audio_decode #(
             anchor_tmr         <= '0;
             dbg_skip_cnt       <= '0;
             dbg_catch_cnt      <= '0;
+            last_pts           <= '0;
+            last_pts_v         <= 1'b0;
+            cur_disc           <= 1'b0;
+            hold_tmr           <= '0;
+            dbg_retime_cnt     <= '0;
         end else begin
             dispatch_pts_valid <= 1'b0;       // 1-cycle pulse
+            // in-band re-time: the hold timer runs only while a discontinuity head waits
+            if (disc_hold && frame_valid && (state == S_IDLE)) hold_tmr <= hold_tmr + 1'b1;
+            else if (!head_disc)                               hold_tmr <= '0;
+            if (!sched_en) last_pts_v <= 1'b0;
             // pre-anchor fallback timer: counts while a frame waits un-anchored
             if (!sched_en)                                        anchor_tmr <= '0;
             else if (!stc_anchored && frame_valid && ~&anchor_tmr) anchor_tmr <= anchor_tmr + 1'b1;
@@ -438,8 +581,9 @@ module dvd_audio_decode #(
                 state <= S_IDLE;              // parked; audio_ring drops frames
             end else begin
                 case (state)
-                    S_IDLE: if (frame_valid && !pre_anchor_hold) begin
+                    S_IDLE: if (frame_valid && !pre_anchor_hold && !disc_hold) begin
                         bytes_left    <= frame_len;
+                        cur_disc      <= head_disc;         // dispatched as a re-time head
                         cur_type      <= frame_type;
                         cur_pts       <= frame_pts;        // latch with the descriptor
                         cur_pts_valid <= frame_pts_valid;
@@ -457,6 +601,11 @@ module dvd_audio_decode #(
                         // av_sync's telemetry)
                         dispatch_pts       <= cur_pts;
                         dispatch_pts_valid <= cur_pts_valid && !discard_cur;
+                        if (cur_pts_valid && !discard_cur && sched_en) begin
+                            last_pts   <= cur_pts;      // the timeline now playing
+                            last_pts_v <= 1'b1;
+                            if (cur_disc && !(&dbg_retime_cnt)) dbg_retime_cnt <= dbg_retime_cnt + 1'b1;
+                        end
                         if (discard_cur && !(&dbg_skip_cnt)) dbg_skip_cnt <= dbg_skip_cnt + 1'b1;
                         if (bytes_left == 16'd0) state <= S_IDLE;
                         else                     state <= S_ROUTE;
@@ -930,6 +1079,22 @@ module dvd_audio_decode #(
     // Held from reset; only O[13] A/V Sync Off bypasses (see comment above).
     assign drain_en = draining || !sched_en;
 
+    // ---- step 6: stale-latch re-phase request (one pulse per latch) ----------
+    logic resync_sent;
+    always_ff @(posedge clk) begin
+        if (rst || !sched_en) begin
+            resync_req  <= 1'b0;
+            resync_sent <= 1'b0;
+        end else begin
+            resync_req <= 1'b0;
+            if (draining || !play_pts_valid) resync_sent <= 1'b0;
+            else if (retime && !resync_sent && arr_agree && (start_delta >= RETIME_WIN)) begin
+                resync_req  <= 1'b1;
+                resync_sent <= 1'b1;
+            end
+        end
+    end
+
     // ---- Playback-position tracker (drift instrument; see dbg_play_err port) ----
     // Counts the playback position since the last release in whole 90 kHz ticks
     // plus a per-rate fractional accumulator, so the slope is exact at every
@@ -965,6 +1130,8 @@ module dvd_audio_decode #(
             pos_frac       <= '0;
             nco_fs         <= 2'd1;    // 48 kHz until an MP2 header says otherwise
             dbg_play_err   <= '0;
+            retime         <= 1'b0;
+            anc_bwd        <= 1'b0;
         end else begin
             ce_play_d <= aud_ce_play;
 
@@ -982,7 +1149,16 @@ module dvd_audio_decode #(
             if (!draining && !play_pts_valid && dispatch_pts_valid) begin
                 play_pts       <= dispatch_pts;
                 play_pts_valid <= 1'b1;
+                anc_bwd        <= 1'b0;    // a latch is judged against re-anchors AFTER it
             end
+            // step 8: remember a backward display re-anchor (a content jump) taken
+            // while a latch is pending -- see the ORPHAN release below
+            if (anchor_disc) anc_bwd <= 1'b1;
+
+            // an in-band re-time head just entered the re-armed gate (see IN-BAND
+            // TIMELINE RE-TIME at the dispatcher): its release must land on its own
+            // timeline
+            if (disc_dispatch) retime <= 1'b1;
 
             if (!sched_en) begin
                 // O[13] free-run diagnostic: keep the state clear for a clean re-arm
@@ -991,6 +1167,36 @@ module dvd_audio_decode #(
                 seen_valid     <= 1'b0;
                 armed_data     <= 1'b0;
                 arm_timer      <= '0;
+                retime         <= 1'b0;
+            end else if (!draining && play_pts_valid && anc_bwd && disp_anchored && video_live &&
+                         (start_delta < -RETIME_WIN)) begin
+                // step 8 -- AN ORPHANED LATCH (HW round 3, ULTIMATE_T2 boot -> menu):
+                // the gate latched the old timeline's last audio, and the display
+                // then jumped BACKWARD onto a new timeline (a one-picture still cell
+                // with no audio, c1). That latch is now far EARLY on the new clock
+                // and can never come due; the next discontinuity head then waited
+                // behind it for the whole HOLD_W (0.62 s -- measured exactly), was
+                // late by then, and took the step-6 reset: menu audio ~0.7 s later
+                // than the old build. It is the old timeline's tail -- a few ms of
+                // audio that belonged before the jump: release it now, it plays out,
+                // underruns, and the gate re-arms cleanly for the next head.
+                // Only after a BACKWARD re-anchor that followed the latch: a latch
+                // legitimately early by more than RETIME_WIN (a mux lead at start,
+                // an authored forward gap) sees no such jump and keeps waiting.
+                draining    <= 1'b1;
+                seen_valid  <= 1'b0;
+                play_anchor <= play_pts;
+                pos_ticks   <= '0;
+                pos_frac    <= '0;
+                retime      <= 1'b0;
+                anc_bwd     <= 1'b0;
+            end else if (hold_expired) begin
+                // a discontinuity head waited HOLD_W without the old tail's
+                // underrun closing the gate: re-arm anyway (liveness), so it can
+                // dispatch and schedule; arm_timer remains the outer bound
+                draining       <= 1'b0;
+                play_pts_valid <= 1'b0;
+                seen_valid     <= 1'b0;
             end else if (!draining) begin
                 if (frame_pop)               armed_data <= 1'b1;
                 // Liveness hardening (v5.3): the fallback timer runs whenever ARMED
@@ -1001,14 +1207,17 @@ module dvd_audio_decode #(
                 if ((armed_data || frame_valid || (state != S_IDLE)) && ~&arm_timer)
                     arm_timer <= arm_timer + 1'b1;
 
-                if (play_pts_valid && disp_anchored && video_live && (start_delta >= 0)) begin
+                if (play_pts_valid && disp_anchored && video_live && (start_delta >= 0) &&
+                    (!retime || (start_delta < RETIME_WIN))) begin
                     draining    <= 1'b1;       // scheduled release (the normal path)
+                    retime      <= 1'b0;
                     seen_valid  <= 1'b0;
                     play_anchor <= play_pts;
                     pos_ticks   <= '0;
                     pos_frac    <= '0;
                 end else if (armed_data && (&arm_timer)) begin
                     draining    <= 1'b1;       // fallback: free-run rather than wedge
+                    retime      <= 1'b0;
                     seen_valid  <= 1'b0;
                     play_anchor <= play_pts_valid ? play_pts : stc;
                     pos_ticks   <= '0;

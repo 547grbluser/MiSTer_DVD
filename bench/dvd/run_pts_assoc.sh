@@ -11,6 +11,11 @@
 #   pts_apollo  a DVD title (once-per-VOBU PTS, ~11 pictures per mark) —
 #               needs DVD_ISO_DIR pointing at a library containing APOLLO_13
 #   pts_sync    a Program Stream file (DVD_PTS_VOB, default releases/SYNC_FILM_AC3_P72.VOB)
+#   pts_thayer  FIELD-CODED video: Thayer's Quest VTS_08 around the c2/c3 join, where a
+#               mark lies between the two fields of a B pair. A second field begins no
+#               access unit, so that mark must tag the NEXT frame (the I), never the B's
+#               second field (docs/nonseamless_audio.md 2b). Found anywhere up to one
+#               directory below DVD_ISO_DIR. Its RED arm restores the pre-fix rule.
 # Without either source the corresponding arm SKIPS rather than silently passing.
 #
 # Slow: the real vld parses ~1.3 MB of ES per fixture, ~5 min wall each.
@@ -32,6 +37,11 @@ if [ -f "$VOB" ]; then
   echo "== cutting pts_sync from $VOB =="
   python3 tools/pts_map.py --file "$VOB" --skip 4000000 --bytes 2000000 --cut "$FIX/pts_sync"
 fi
+THAYER=$(find "$ISO_DIR" -maxdepth 2 -iname "Thayer*Quest*.iso" 2>/dev/null | head -1 || true)
+if [ -n "$THAYER" ]; then
+  echo "== cutting pts_thayer from $(basename "$THAYER") =="
+  python3 tools/pts_map.py "$THAYER" --vts 8 --start-sector 9300 --sectors 420 --cut "$FIX/pts_thayer"
+fi
 
 CHAIN_SRC="rtl/mpeg2/vld.v rtl/mpeg2/getbits.v rtl/mpeg2/vbuf.v rtl/mpeg2/framestore.v \
   rtl/mpeg2/framestore_request.v rtl/mpeg2/framestore_response.v rtl/mpeg2/synchronizer.v \
@@ -41,7 +51,7 @@ CHAIN_SRC="rtl/mpeg2/vld.v rtl/mpeg2/getbits.v rtl/mpeg2/vbuf.v rtl/mpeg2/frames
 # ---- [A] position, real vld over the ES ------------------------------------
 iverilog -g2012 -D__IVERILOG__ -I rtl/mpeg2 -o bench/dvd/pts_assoc_sim \
     rtl/mpeg2/vld.v rtl/mpeg2/getbits.v dvd/pts_assoc.sv bench/dvd/pts_assoc_tb.sv
-for stem in pts_apollo pts_sync; do
+for stem in pts_apollo pts_sync pts_thayer; do
   if [ -f "$FIX/$stem.hex" ]; then
     echo "== pts_assoc_tb $stem =="
     vvp bench/dvd/pts_assoc_sim +STEM="$FIX/$stem" | grep -v '^VCD' || rc=1
@@ -49,6 +59,38 @@ for stem in pts_apollo pts_sync; do
     echo "== pts_assoc_tb $stem: SKIPPED (no fixture) =="
   fi
 done
+
+# ---- [B'] RED: the pre-fix rule (a second field claims the mark) must FAIL [B] ----
+if [ -f "$FIX/pts_thayer.hex" ]; then
+  echo "== pts_assoc_tb pts_thayer (RED: second field claims the mark; must FAIL [B]) =="
+  red=$(mktemp -d)
+  python3 - "$red" <<'PYEOF'
+import sys
+s = open('dvd/pts_assoc.sv').read()
+for old, new in (("wire hdr_frame = hdr_pulse && !hdr_second;", "wire hdr_frame = hdr_pulse;"),
+                 ("if (!hdr_second) begin", "if (1'b1) begin"),
+                 ("tag_valid  <= head_le_hdr && !hdr_second;", "tag_valid  <= head_le_hdr;")):
+    assert old in s, "RED patch anchor moved -- update run_pts_assoc.sh: " + old
+    s = s.replace(old, new)
+open(sys.argv[1] + '/pts_assoc.sv', 'w').write(s)
+PYEOF
+  if ! iverilog -g2012 -D__IVERILOG__ -I rtl/mpeg2 -o "$red/sim" \
+      rtl/mpeg2/vld.v rtl/mpeg2/getbits.v "$red/pts_assoc.sv" bench/dvd/pts_assoc_tb.sv; then
+    echo "  RED arm BUILD FAILED -- the arm proves nothing"; rc=1
+  else
+    vvp "$red/sim" +STEM="$FIX/pts_thayer" 2>&1 | grep -v '^VCD' > "$red/red.log" || true
+    if [ ! -s "$red/red.log" ]; then
+      echo "  RED arm produced NO OUTPUT -- not a verdict"; rc=1
+    elif grep -q "^FAIL \[B\] pic" "$red/red.log" && ! grep -q "^FAIL pos" "$red/red.log"; then
+      echo "  RED arm failed as it must: $(grep -c '^FAIL \[B\] pic' "$red/red.log") picture(s) mis-tagged"
+    else
+      echo "  RED arm did NOT fail [B] -- the second-field rule is not load-bearing"; rc=1
+    fi
+  fi
+  rm -rf "$red"
+else
+  echo "== pts_assoc_tb pts_thayer RED: SKIPPED (no fixture) =="
+fi
 
 # ---- [C] the VBUF path across a flush (epoch-tagged reads, vbuf_pos) --------
 # A shorter cut: the real vld through the real framestore is slow, and the

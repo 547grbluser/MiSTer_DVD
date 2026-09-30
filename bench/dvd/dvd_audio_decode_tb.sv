@@ -69,13 +69,13 @@ module dvd_audio_decode_tb;
         .lpcm_quant(2'd0),           // 16-bit LPCM in this TB
         .cdda_mode(1'b0), .cdda_fs(2'd0), .cdda_wr_en(1'b0),
         .cdda_wr_data(8'd0), .cdda_flush(1'b0), .cdda_full(),
-        .frame_pts(frame_pts), .frame_pts_valid(frame_pts_valid),
+        .frame_pts(frame_pts), .frame_pts_valid(frame_pts_valid), .frame_seamless(1'b0),
         .frame_pop(frame_pop),
         .nco_trim(22'sd0), .dispatch_pts(), .dispatch_pts_valid(),
         .sched_en(sched_en), .stc_anchored(stc_anchored), .disp_anchored(disp_anchored), .video_live(video_live),
         .arr_pts(arr_pts), .arr_pts_valid(arr_pts_valid),
         .stc(stc), .av_ofs(av_ofs),
-        .anchor_pulse(1'b0), .anchor_delta(34'sd0),   // THE STC IS A CLOCK: no display re-anchor in this bench
+        .anchor_pulse(1'b0), .anchor_delta(34'sd0), .anchor_disc(1'b0),   // THE STC IS A CLOCK: no display re-anchor in this bench
         .audio_l(audio_l), .audio_r(audio_r),
         .ac3_synced(ac3_synced), .ac3_err(ac3_err),
         // drift-instrument counters (Phase C7)
@@ -395,8 +395,12 @@ module dvd_audio_decode_tb;
             mem[committed+2]=8'hC3; mem[committed+3]=8'hD4;
             desc_len[9]  = 4;
             desc_type[9] = 2'd2;
-            desc_pts[9]  = stc - 33'd9000;                    // 100 ms past due: releases
-            desc_ptsv[9] = 1'b1;                              // at once, within stale margin+ofs
+            // ⚠ PTS continues FORWARD from frame 8. This used to be stc-9000 (100 ms
+            // BEFORE frame 8): a real stream's PTS only steps backward at a timeline
+            // discontinuity, and since the in-band re-time (docs/nonseamless_audio.md
+            // 4a) such a step re-times the gate -- a different claim, tested in F*.
+            desc_pts[9]  = desc_pts[8] + 33'd2;               // the next sample: plays on
+            desc_ptsv[9] = 1'b1;                              // with no re-arm
             committed = committed + 4;
             ndesc = 10;
             t = 0;
@@ -474,7 +478,12 @@ module dvd_audio_decode_tb;
             mem[committed+0]=8'h11; mem[committed+1]=8'h22;
             mem[committed+2]=8'h33; mem[committed+3]=8'h44;
             desc_len[11]=4; desc_type[11]=2'd2;
-            desc_pts[11]=stc; desc_ptsv[11]=1'b1;
+            // 600 ms LATE already (the post-crush state this models: playback running
+            // behind), so the stale backlog below CONTINUES the timeline forward.
+            // ⚠ It used to be `stc` (on time), which put the 500/400 ms-late backlog
+            // BEFORE it in PTS -- a backward step, i.e. a timeline discontinuity to
+            // the in-band re-time, not a late backlog (docs/nonseamless_audio.md 4a).
+            desc_pts[11]=stc - 33'd54000; desc_ptsv[11]=1'b1;
             committed = committed + 4; ndesc = 12;
             t = 0;
             while (cap < cap0+1 && t < 200000) begin @(posedge clk); t = t + 1; end

@@ -122,6 +122,7 @@ module mp2_chain_tb;
     wire [15:0] frame_len;
     wire [1:0]  frame_type;
     wire [32:0] frame_pts;
+    wire        frame_seamless;   // audio_ring -> dvd_audio_decode (seamless stamp)
     wire        frame_pts_valid;
     wire        ring_almost_full;
 
@@ -129,13 +130,13 @@ module mp2_chain_tb;
         .clk(clk), .rst_n(rst_n),
         .aud_byte(rf_b), .aud_valid(rf_v), .aud_type(rf_t),
         .aud_frame_start(rf_s),
-        .aud_frame_pts(rf_p), .aud_frame_pts_valid(rf_pv),
+        .aud_frame_pts(rf_p), .aud_frame_pts_valid(rf_pv), .aud_frame_seamless(1'b0),
         .aud_ready(),
         .almost_full(ring_almost_full),
         .drop_pulse(1'b0),
         .out_byte(ring_byte), .out_valid(ring_valid), .out_ready(ring_ready),
         .frame_valid(frame_valid), .frame_len(frame_len), .frame_type(frame_type),
-        .frame_pts(frame_pts), .frame_pts_valid(frame_pts_valid),
+        .frame_pts(frame_pts), .frame_pts_valid(frame_pts_valid), .frame_seamless(frame_seamless),
         .frame_pop(frame_pop),
         .frames_available(), .bytes_available(), .overflow_count()
     );
@@ -182,10 +183,10 @@ module mp2_chain_tb;
         .lpcm_quant(2'd0),
         .cdda_mode(1'b0), .cdda_fs(2'd0), .cdda_wr_en(1'b0),
         .cdda_wr_data(8'd0), .cdda_flush(1'b0), .cdda_full(),
-        .frame_pts(frame_pts), .frame_pts_valid(frame_pts_valid),
+        .frame_pts(frame_pts), .frame_pts_valid(frame_pts_valid), .frame_seamless(frame_seamless),
         .frame_pop(frame_pop),
         .nco_trim(22'sd0),
-        .anchor_pulse(1'b0), .anchor_delta(34'sd0),   // THE STC IS A CLOCK: no display re-anchor in this bench
+        .anchor_pulse(1'b0), .anchor_delta(34'sd0), .anchor_disc(1'b0),   // THE STC IS A CLOCK: no display re-anchor in this bench
         .dispatch_pts(), .dispatch_pts_valid(),
         .sched_en(sched_mode),
         .stc_anchored(sched_mode),

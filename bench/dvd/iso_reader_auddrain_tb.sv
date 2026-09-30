@@ -186,7 +186,7 @@ module iso_reader_auddrain_tb;
         .clk(clk), .rst_n(rst_n),
         .start_streaming(start), .seek_ack(seek_ack), .jump_ack(jump_ack),
         .keep_vbuf(keep_vbuf_w), .jump_cross(jump_cross_w), .mode_switch(1'b0),
-        .aud_switch(1'b0), .disc_rephase(1'b0), .cell_seamless(1'b0),
+        .aud_switch(1'b0), .aud_rephase_req(1'b0), .cell_seamless(1'b0),
         .load_flush(load_flush_w), .pipe_rst_n(pipe_rst_n_w),
         .aud_flush(aud_flush_w), .aud_resync(aud_resync_w),
         .seek_flush(), .soft_flush(), .mount_flush()
@@ -227,7 +227,7 @@ module iso_reader_auddrain_tb;
         .clk(clk), .rst_n(aud_rst_n),
         .aud_byte(aud_byte), .aud_valid(aud_valid & aud_rdy), .aud_type(aud_type),
         .aud_frame_start(aud_fs & aud_rdy), .drop_pulse(1'b0),
-        .aud_frame_pts(aud_pts), .aud_frame_pts_valid(aud_pts_valid),
+        .aud_frame_pts(aud_pts), .aud_frame_pts_valid(aud_pts_valid), .aud_frame_seamless(1'b0),
         .aud_ready(),
         .out_byte(r_byte), .out_valid(r_valid), .out_ready(r_ready),
         .frame_valid(f_valid), .frame_len(f_len), .frame_type(), .frame_pts(),
