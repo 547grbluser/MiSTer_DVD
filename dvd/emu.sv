@@ -673,7 +673,7 @@ assign CE_PIXEL = interlaced_eff ? ce_pix_q : 1'b1;
 // the branch changes the netlist anyway - and NEVER PER COMMIT. Do not derive
 // either from a git SHA or a timestamp: every compile would become a new
 // netlist. Same-day rebuilds on one branch append a digit ("dev-seekrealign2").
-`define CORE_VERSION "dev-chromarows"
+`define CORE_VERSION "dev-dpadbackhold"
 
 parameter CONF_STR = {
     "DVD;;",
@@ -2884,7 +2884,7 @@ reg aud_realign_q;
 always @(posedge clk_sys or negedge reset_n)
     if (!reset_n) aud_realign_q <= 1'b0;
     else          aud_realign_q <= aud_switch;
-wire rf_rst_n = reset_n & ~aud_realign_q;
+// rf_rst_n (the reframers' reset) is built below flush_ctl, which declares aud_flush.
 // MENU subpicture is ALWAYS on subpicture stream 0 (substream 0x20 — the button/
 // highlight graphic; verified on T2: every menu carries 0x20 + 0x21). ps_demux
 // filters to ONE substream, so a SetSTN on the way into a submenu (SPRM2) or a
@@ -3195,17 +3195,56 @@ wire aud_drop_pulse = (jump_ack | seek_ack) & keep_vbuf;
 // (13r) is a title->title jump = a flush with no soft reset, and it fried
 // (blocky) at 7 of 12 swept flush positions until the run covered it too.
 wire es_stuff_arm  = jump_ack | seek_ack;
-// The AC-3/DTS REFRAMERS reset on `reset_n` ONLY (not per-jump pipe_rst_n). They are
-// self-healing passthroughs - on any switch they re-lock on the next 0x0B77 / 0x7FFE8001
-// sync word (frmsizcod lock), so a per-jump reset was never needed. It was actively HARMFUL
-// once the audio ring rode through a keep_vbuf transition (audio-continuity, aud_rst_n above):
-// resetting the reframer while KEEPING the ring let the reframer push one MIS-ALIGNED AC-3
-// frame into the preserved ring during re-sync = the "static pop" leaving a root menu
-// (MiB/Matrix; [[static-pops-root-cause]]). On a real flush the ring IS reset and only commits
-// on the reframer's frame_start, so the reframer's pre-lock bytes never become a committed
-// frame - no per-jump reframer reset required. Bonus: taking them off pipe_rst_n's fanout
-// (onto the already-global reset_n) also relieves routing congestion (this netlist was over
-// the routing cliff). See dvd/emu.sv reframer instantiations (.rst_n(reset_n)).
+// The AC-3/DTS/MP2 REFRAMERS' reset (rf_rst_n): the core reset, an audio-track switch
+// (aud_realign_q, above), and a HARD AUDIO FLUSH (rf_flush_q) -- never pipe_rst_n, and
+// never a keep_vbuf hop.
+// - NOT on a keep_vbuf hop: the audio ring rides through it (audio-continuity), and
+//   resetting the reframer while KEEPING the ring pushed one MIS-ALIGNED AC-3 frame into
+//   the preserved ring = the "static pop" leaving a root menu (MiB/Matrix). aud_flush is
+//   gated ~keep_vbuf in flush_ctl, so rf_flush_q never fires there.
+// - ON a hard flush (seek, flushing jump, mount, mode switch -- aud_flush, which also
+//   resets the ring and decoder via aud_rst_n). ⛔ The old rule here was "reset_n ONLY:
+//   on a real flush the ring is reset and only commits on the reframer's frame_start, so
+//   the pre-lock bytes never become a committed frame". True of BYTES, false of a frame
+//   START: ac3_reframer emits a start (stamped with the pending PES PTS) on the 0x77 of
+//   its sync, and dts_reframer then holds that start in its 4-byte pipeline until four
+//   more audio bytes arrive. A flush that lands with a start in there -- MiB's title
+//   authors 12.5 % of its AC-3 packs to end exactly 3 bytes after a sync -- keeps it
+//   across the flush; the landing's first bytes push it out, and the fresh ring commits
+//   it as its FIRST frame, carrying the OLD position's PTS. dvd_audio_decode latches that
+//   as play_pts; after a backward seek it is ~20 s in the future, so audio waits for the
+//   ~2.5 s arm_timer fallback, the full ring backpressures the demux, and the picture
+//   starves (~1.2 s held, then ~1 s behind until the next seek). docs/dvd_nav.md §2h
+//   "The stale audio PTS"; gate bench/dvd/run_seek_rf_pts.sh, tools/check_rf_flush_wiring.py.
+// - NOT on aud_resync (a track switch's gentle half, #141's in-band re-time): the byte
+//   stream is continuous there, so a start held in the pipeline belongs to the timeline
+//   that keeps playing; resetting mid-frame would only drop bytes into a live ring.
+// Registered: it drives async resets and aud_flush is a counter compare. It re-uses the
+// existing rf_rst_n net (one more LUT input), not pipe_rst_n's congested fanout.
+reg rf_flush_q;
+always @(posedge clk_sys or negedge reset_n)
+    if (!reset_n) rf_flush_q <= 1'b0;
+    else          rf_flush_q <= aud_flush;
+wire rf_rst_n = reset_n & ~aud_realign_q & ~rf_flush_q;
+// ...and the landing's audio must START ON A REAL FRAME. With the reframers reset,
+// ac3_reframer is unlocked and takes the first 0B77 it sees; the landing's first audio
+// PES begins with the TAIL of a frame that started before it, and a stray in-payload
+// 0B77 there (5 of 817 AC-3 PES in a MiB slice, docs/fabric_audio.md) became a garbage
+// first frame -- a click after the seek. ps_demux already knows how to start on a real
+// frame (aud_realign -> rlgn_pend -> skip to the PES's first_access_unit_pointer, the
+// track-switch path), but a flush holds it in reset (pipe_rst_n) and rlgn_pend resets
+// to 0. So: latch that a HARD audio flush happened, and hand the demux ONE aud_realign
+// cycle on the first clock it runs after pipe_rst_n releases. aud_flush always lies
+// inside load_flush (same triggers, same 64 cycles; a keep_vbuf hop can only extend
+// load_flush), so the latch is set before the release and the pulse cannot be eaten by
+// the reset. A keep_vbuf hop raises no aud_flush: that path is unchanged.
+// docs/dvd_nav.md §2h "The stale audio PTS"; gate bench/dvd/run_seek_rf_pts.sh.
+reg dmx_rlgn_arm;
+always @(posedge clk_sys or negedge reset_n)
+    if (!reset_n)        dmx_rlgn_arm <= 1'b0;
+    else if (aud_flush)  dmx_rlgn_arm <= 1'b1;
+    else if (pipe_rst_n) dmx_rlgn_arm <= 1'b0;
+wire dmx_rlgn_go = dmx_rlgn_arm & pipe_rst_n;   // one cycle: the demux's first after the flush
 
 // MENU VBUF CAP (docs/dvd_menu_refinements.md §5d): the "leaving a video menu lags"
 // symptom is the display trailing the parse by the KEPT video-buffer depth (keep_vbuf).
@@ -3530,7 +3569,7 @@ ps_demux ps_demux_inst (
 
     // O[8:6]: which audio substream/track to forward (default 0 = substream 0x80).
     .aud_track    (aud_track_eff),   // Phase 4: SetSTN (SPRM1) wins when set
-    .aud_realign  (aud_switch),      // new track starts on a real frame (see aud_realign_q)
+    .aud_realign  (aud_switch | dmx_rlgn_go),   // new track, or the landing after a hard flush, starts on a real frame (see dmx_rlgn_go)
 
     // Subpicture (subtitle) substream select: O[15] enable, O[26:24] track (0x20+trk).
     // Routes the selected 0x20-0x3F substream out to spu_decode (dvd/subpicture.md).
@@ -3832,7 +3871,7 @@ wire ps_aud_xfer = ps_aud_valid && ps_aud_ready;
 
 ac3_reframer ac3_reframer_inst (
     .clk                (clk_sys),
-    .rst_n              (rf_rst_n),       // core reset + an audio-track switch (aud_realign_q): a seek/jump never resets it (no re-sync pop)
+    .rst_n              (rf_rst_n),       // core reset + an audio-track switch + a hard audio flush (rf_flush_q); never a keep_vbuf hop -- see rf_rst_n
     .in_byte            (ps_aud_byte),
     .in_valid           (ps_aud_xfer),
     .in_type            (ps_aud_type),
@@ -3852,7 +3891,7 @@ ac3_reframer ac3_reframer_inst (
 // through untouched). See docs/iec61937.md.
 dts_reframer dts_reframer_inst (
     .clk                (clk_sys),
-    .rst_n              (rf_rst_n),       // core reset + an audio-track switch (see ac3_reframer)
+    .rst_n              (rf_rst_n),       // core reset + track switch + hard audio flush (see ac3_reframer)
     .in_byte            (ar_aud_byte),
     .in_valid           (ar_aud_valid),
     .in_type            (ar_aud_type),
@@ -3873,7 +3912,7 @@ dts_reframer dts_reframer_inst (
 // AC-3/DTS/LPCM pass through untouched. See docs/mpeg1.md A.3.
 mp2_reframer mp2_reframer_inst (
     .clk                (clk_sys),
-    .rst_n              (rf_rst_n),       // core reset + an audio-track switch (see ac3_reframer)
+    .rst_n              (rf_rst_n),       // core reset + track switch + hard audio flush (see ac3_reframer)
     .in_byte            (dr_aud_byte),
     .in_valid           (dr_aud_valid),
     .in_type            (dr_aud_type),

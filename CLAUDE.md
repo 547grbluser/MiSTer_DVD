@@ -440,6 +440,7 @@ otherwise; `--red` runs its mutation arms).
 | Mid-play load: full flush trio + decoder soft reset | ✅ | `av_sync.md` | `flush_ctl_tb` |
 | CSS-encrypted detect/warn/mute, density bucket (issue #59) | ✅ | `fabric_audio.md` | `run_css.sh` |
 | Non-seamless cell-join audio: in-band re-time (no display-time flush), seamless stamp, second-field PTS (PR #141) | ✅ | `nonseamless_audio.md` | `run_aud_retime.sh --red`, `run_pts_assoc.sh`, `check_aud_rephase_wiring.py` |
+| Hard flush resets the audio reframers and realigns the demux: no stale PTS (~1.2 s hold, ~2.5 s silence) after a backward jump, no stray-sync click at the landing; pre-existing, not a regression | ✅ HW (0/68 vs 7/78), MERGED PR #143 | `dvd_nav.md` §2h "The stale audio PTS" | `run_seek_rf_pts.sh --red`, `check_rf_flush_wiring.py` |
 
 ### Formats and physical media (mostly the custom Main, `main/`)
 

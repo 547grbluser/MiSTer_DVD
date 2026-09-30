@@ -22,6 +22,70 @@ predate later confirmations; the `CLAUDE.md` index carries the reconciled status
 
 ## Hardware status (THIS fork, verified 2026-06-21)
 
+- ✅ **A SEEK FLUSH RESETS THE AUDIO REFRAMERS: NO STALE PTS AFTER A BACKWARD JUMP
+  (2026-09-30, ✅ MERGED PR #143; both halves HW-CONFIRMED).**
+  Full record: `docs/dvd_nav.md` §2h "The stale audio PTS".
+  - **Report (release-candidate smoke test):** on Men in Black, about one −20 s D-pad
+    gesture in three showed lates +116–124 and ~33 frames not shown (≈1.3 s held). It was
+    read as a regression from #128 (TMAP seek), because v0.7.0 had read 0 of 6.
+  - **Not a regression.** Same script on one rig (a second rig), 20 ms telemetry. **v0.7.0 2 of 12,
+    the current candidate 2 of 12** (−20 s). On the candidate, −30 s gave 1 of 10, a single
+    −10 s gave 0 of 12, and **Previous Chapter gave 1 of 12**. The per-PR bisect was not run,
+    because the control is not clean. 0 of 6 is what the measured ~1-in-11 rate gives about half the time.
+  - **What the user sees:** the picture holds **~1.1–1.3 s** and audio is **silent ~2.5 s**
+    after the landing. Afterwards the picture runs ~1.1–1.3 s behind the clock and audio
+    ~2.1 s behind it (`disp_lag`, `av_drift`), i.e. **audio ~1 s late against the picture
+    until the next seek**. It happens after any backward flush (D-pad, chapter back,
+    presumably A-B and held rewind), at roughly 1 in 7 on this disc.
+  - **Root cause:** the reframers reset only on the core reset and on a track switch.
+    `ac3_reframer` emits a frame start, stamped with the pending PES PTS, on the sync's
+    `0x77`, and `dts_reframer` holds it in a 4-byte pipeline. MiB authors **12.5 % of its
+    AC-3 packs to end exactly 3 bytes after a sync**. When the flush lands after one, the
+    landing pushes the old start into the fresh ring as its first frame, **carrying the
+    old position's PTS**. `dvd_audio_decode` latches it as `play_pts`, which is 10–30 s in
+    the future after a backward seek. Audio then waits for the ~2.5 s `arm_timer` fallback,
+    the full ring backpressures the demux, and the video buffer drains. Measured:
+    `play_err` at the fallback unwraps to the seek distance + ~0.5 s.
+  - **Refuted:** "the clock re-anchors to the requested time and holds the first picture".
+    The clock anchors normally on the first tagged picture, and the hold is a data stall.
+    TMAP (#128) is uninvolved: v0.7.0 has no TMAP and reproduces.
+  - **Fix:** `rf_rst_n` also takes a registered `aud_flush` (`rf_flush_q`). That flush is
+    gated `~keep_vbuf`, so the static-pop case is untouched. `aud_resync` is deliberately
+    excluded.
+  - **Gates:** `bench/dvd/run_seek_rf_pts.sh --red` and `tools/check_rf_flush_wiring.py`.
+    The pre-fix wiring fails for a pack end 2–6 bytes past a sync, landing 19.97 s stale.
+  - **Second half, the landing starts on a real frame (maintainer's call: the click is a
+    bad experience):** with the reframers reset, `ac3_reframer` is unlocked and took a
+    stray `0B77` in the landing's leading partial frame as its first frame, a click
+    (~0.6 % of PES). `emu.sv` now hands `ps_demux` one `aud_realign` cycle as it leaves
+    the flush's reset (`dmx_rlgn_go`: a latch set by `aud_flush`, cleared when
+    `pipe_rst_n` releases). The demux then skips the landing PES to its
+    `first_access_unit_pointer`, the track-switch path. `ps_demux.sv` is unchanged, and
+    keep_vbuf hops are untouched. The bench's landing now carries a stray sync; `+NORLGN`
+    fails exactly the clean-first-frame check, and the wiring check covers the seam
+    (W6–W8).
+  - **Harness fix alongside:** `mister.py deploy --main` now re-points `[DVD] main=` even
+    when that Main is already running. After a `restore`, the next load had silently
+    re-exec'd into stock Main.
+  - **HW (fix build `DVD_dpadbackhold_20260930_1459.rbf`, `clk_dec` 87.86 / 91.69 MHz):**
+    **0 of 44** backward jumps went bad on rig A (the rig the report came from) (Left Left from ~6 min ×2, Previous Chapter,
+    and the maintainer's exact script), against **7 of 78** unfixed across both rigs. The
+    unfixed candidate reproduced on rig A with the maintainer's script (1 of 8). There the
+    capture card recorded a **2.51 s audio silence** at the bad landing and none at the
+    good ones; the fix arms have none.
+  - **HW, second half (rig B, `2a3a872`, timing-marginal build):** Left Left 0 of 12,
+    Previous Chapter 0 of 12. Audio resumed within 0.35 s of all 24 landings. The stray
+    sync is too rare to hit on purpose; the bench is its proof.
+  - **Seen, not caused here:** a track switch goes silent ~1.3 s on 7 of 10 switches, on
+    the unfixed candidate and on this branch alike. It is pre-existing and untouched by
+    this change.
+  - **Timing:** the realign netlist missed the gate at SEED 9 (83.63 MHz @100C). The sweep's
+    first seed, **SEED 7, closes it at 88.44 / 87.94 MHz** and is pinned in `DVD.qsf`.
+    Timing-clean build: `DVD_dpadbackhold_20260930_1715.rbf`. Its RTL is identical to the
+    HW-tested marginal build's.
+  - **Next step:** none for this defect. The pre-existing ~1.3 s track-switch gap is
+    unowned.
+
 - 🔧 **CHROMA ROWS: THE DISPLAY INTERPOLATES FROM THE ROWS THE BILINEAR WEIGHTS EXPECT
   (2026-09-29, ✅ MERGED PR #142, sim-proven, HW-measured 2026-09-30; one ROGER Prog late ACCEPTED).**
   - **What was wrong (upstream, since the import):** the "lower" chroma row used `mv ±2`

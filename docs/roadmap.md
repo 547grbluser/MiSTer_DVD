@@ -603,6 +603,16 @@ in `CONF_STR`. Design: `docs/cdda.md` "`.cue` sheets". ⛔ CHD still not support
 > **top gap confirmed = exact chapters/PTT (7/7 discs); interactive GPRM-counter/NVTMR promoted
 > above parental on measured prevalence (3/7 game discs).** Phase 3 = close gaps in that order.
 
+### ✅ A backward jump no longer stalls on a stale audio PTS (2026-09-30, ✅ MERGED PR #143)
+About 1 backward seek or chapter-back in 11 held the picture ~1.2 s and silenced audio ~2.5 s,
+then left audio ~1 s late until the next seek. The cause was a frame start carrying the old
+position's PTS in `dts_reframer`'s pipeline. The reframers now reset on a hard audio flush.
+HW: 0 of 44 with the fix, 7 of 78 without. It was pre-existing, not a regression.
+The same branch also arms `ps_demux`'s `first_access_unit_pointer` skip on a hard flush,
+so a stray `0B77` in the landing's partial frame no longer becomes a garbage first frame
+(a click). Both halves are HW-confirmed.
+Details: `docs/dvd_nav.md` §2h "The stale audio PTS".
+
 ### PAL/NTSC Framerate Sync
 The upstream core had a hardcoded 60Hz NTSC display clock; PAL content (25fps) played
 ~20% too fast.

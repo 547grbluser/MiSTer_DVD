@@ -196,10 +196,18 @@ frame. Three mechanisms:
 - The three reframers reset on `aud_realign_q` (a registered `aud_switch`, since it drives
   async resets) as well as the core reset, so the first boundary after a switch is the
   real sync the demux lined up.
-- ⚠ **Seeks/jumps are deliberately untouched.** `rlgn_pend` is set only by `aud_realign`,
-  never at reset, and the reframers still do not reset on a seek. A seek landing mid-frame
-  has the same false-sync exposure (mechanism 2). It is a separate change with its own
-  blast radius (a `keep_vbuf` menu hop resets the demux but not the ring).
+- **Seeks/jumps: the reframers reset, and the demux realigns (2026-09-30).** Since
+  2026-09-30 the reframers also reset on a registered `aud_flush` (`rf_flush_q`; a hard
+  flush, which is gated `~keep_vbuf`). Without it, a frame start held in `dts_reframer`'s
+  4-byte pipeline crossed a seek with the OLD position's PTS and became the ring's first
+  frame. After a backward seek, audio then waited ~2.5 s for the fallback and the picture
+  starved behind it (`docs/dvd_nav.md` §2h "The stale audio PTS"). The same change arms
+  the demux realign on a hard flush. `rlgn_pend` still resets to 0, but `emu.sv` hands
+  `ps_demux` one `aud_realign` cycle as it leaves the flush's reset (`dmx_rlgn_go`). A seek
+  landing mid-frame therefore starts at the PES's `first_access_unit_pointer`, as a switch
+  does, which closes the false-sync exposure (mechanism 2) for seeks. A `keep_vbuf` menu
+  hop raises no `aud_flush`, so it is unchanged: the demux resets but not the ring, and
+  its splice frames are dropped by `aud_drop_pulse`.
 
 **Gate:** `bench/dvd/run_aud_switch.sh --red` (needs `isoinfo` and MEN_IN_BLACK.iso under
 `DVD_ISO_DIR`; otherwise SKIPPED, loudly): a 38-switch sweep, three directed switches that
