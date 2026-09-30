@@ -670,8 +670,9 @@ HW-confirmed on a real PAL DVD: correct 720×576 geometry, 50 Hz lock, A/V in sy
    2026-09-29. The lower chroma row now uses the spec's neighbour (±1 row progressive,
    the same field's ±1 interlaced), and the reuse cache is banked by row parity, so
    Progressive stays at 3 words per macroblock-line and Interlaced drops 4 → 3.
-   **Next:** HW (ROGER Progressive lates must stay 0, both `clk_dec` corners), then
-   merge. `docs/decode_pacing.md` §7 "F2 follow-up".
+   Timing passes both corners. ⚠ HW: one repeatable late at ROGER's heaviest picture
+   on Progressive (4/5 launches against 0/5 on the control). **Next:** decide: accept,
+   smooth the weave fetch pattern, or wait for F3. `docs/decode_pacing.md` §7 "F2 follow-up".
 4. **F3:** display reads on the idle `ram2` port, with an explicit write-drain handshake
    at pickup.
 5. **F4:** a deeper output queue (the VLD is parked ~50 %). **Not justified** (2026-09-29):

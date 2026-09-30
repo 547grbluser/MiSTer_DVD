@@ -502,7 +502,8 @@ The other discs' "before" is F1's own table.
   `releases/DVD_chromareuse_20260929_1223.rbf`.
 
 **F2 follow-up: the right chroma rows.** 🔧 **Built on `feature/chroma-rows`, sim-proven
-2026-09-29; HW pending.** This fixes the upstream finding above that F2 preserved.
+2026-09-29; HW-measured: ⚠ one repeatable late on ROGER Progressive, decision open.** This
+fixes the upstream finding above that F2 preserved.
 - **What changes in the picture.** Every line now interpolates its chroma between the two
   rows `resample_bilinear`'s 0.75 / 0.25 weights are written for:
   - Progressive upsampling: the nearest row and the next one (+1 on odd lines, −1 on
@@ -559,6 +560,31 @@ The other discs' "before" is F1's own table.
     M7 (upstream's offsets: caught by [4] only, with [2] unchanged) join M1–M5.
   - `tools/check_chroma_reuse_wiring.py` pins the four offsets, the clamps, the bank bit,
     the 10-bit flag layout and the 512-entry cache.
+- **Build** (`releases/DVD_chromarows_20260930_0212.rbf`, seed 9): `clk_dec` **93.5 MHz
+  @100 °C, 89.9 MHz @−40 °C** (target 86.0). RAM blocks 510 → 512. At synthesis the
+  change costs **+102 LUTs, +52 registers** in `resample`: whole-design ALM estimate 40,543 →
+  40,606, against a `quartus_map` of `main`. The *fitted* figure moved 39,050 → 40,786
+  (97 %), but that is packing ("Difficulty packing design: High"), not logic.
+- **HW, 2026-09-30, ROGER, same `pacing_matrix` script, control arm first:**
+
+  | Build | Prog lates/s | Prog decode / ref ms | Ilace decode / ref ms |
+  |---|---|---|---|
+  | `main` (F2 + PR #141), control | 0.00 | 14.8 / 12.3 | 13.5 / 10.4 |
+  | chroma rows, run 1 | 0.01 | 14.8 / 12.3 | 13.1 / 10.0 |
+  | chroma rows, run 2 | 0.01 | 14.9 / 12.4 | 13.1 / 10.0 |
+
+  Per-picture cost is unchanged on Progressive, and Interlaced is 0.4 ms cheaper (4 → 3
+  words). **But the one late is repeatable.** It falls at the same picture every time,
+  about the 1,055th after launch, the disc's heaviest nearby (`pic_max` ≈ 450, about 28 ms
+  against 33; `pic_over` 0). Every launch crosses it in the first Progressive window:
+  - the control builds (F2's own run, this session's control, 3 interleaved A/B launches)
+    **0 of 5** late there;
+  - this build **4 of 5**, one late each.
+
+  Unproven explanation: the weave word count is unchanged, but the timing moved. F2
+  fetched a new chroma row on alternate lines (2, 4, 2, 4 words per macroblock); the
+  correct rows arrive in pairs (2, 2, 4, 4). At a picture already near its deadline that
+  costs one frame. Data: `.sim/chromarows/hil/` (gitignored).
 
 F1 and F2 do not violate `hw_budget_and_lessons.md` §2's "do not reach for smaller data
 first": they remove *redundant* reads and cost no quality. The port move below stays the

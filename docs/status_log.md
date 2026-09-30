@@ -23,7 +23,7 @@ predate later confirmations; the `CLAUDE.md` index carries the reconciled status
 ## Hardware status (THIS fork, verified 2026-06-21)
 
 - 🔧 **CHROMA ROWS: THE DISPLAY INTERPOLATES FROM THE ROWS THE BILINEAR WEIGHTS EXPECT
-  (2026-09-29, branch `feature/chroma-rows`, sim-proven; HW pending).**
+  (2026-09-29, branch `feature/chroma-rows`, sim-proven; ⚠ HW: one repeatable late on ROGER Prog).**
   - **What was wrong (upstream, since the import):** the "lower" chroma row used `mv ±2`
     (progressive) and `±4` (interlaced upsampling), but `memory_address` halves `mv_y`
     again for chroma. So odd progressive lines had no vertical chroma interpolation, and
@@ -39,8 +39,14 @@ predate later confirmations; the `CLAUDE.md` index carries the reconciled status
   - **Gates:** `run_chroma_reuse.sh` [4] is new: `resample_chain_tb +rowref=1` scores every
     emitted pixel against the spec's rows (8 arms, 0 bad; upstream's offsets 49,263 bad of
     99,311). M6 (no banks) and M7 (upstream offsets) are each caught by their own arm.
-  - **Next:** the Quartus build (timing both corners, M10K count), then HW: ROGER
-    Progressive lates must stay 0; a screenshot check. Then merge.
+  - **Build:** `clk_dec` 93.5 / 89.9 MHz (both corners pass), +2 RAM blocks, +102 LUTs.
+  - ⚠ **HW 2026-09-30:** ROGER is unchanged per picture on Progressive and cheaper on
+    Interlaced, **but** one late now appears at ROGER's heaviest picture (about pickup
+    1,055, ~28 ms): 4 of 5 launches on this build, 0 of 5 on the control builds.
+    Suspected cause: the correct rows arrive in pairs of lines (2, 2, 4, 4 words), where
+    F2 fetched on alternate lines (2, 4, 2, 4).
+  - **Next:** the maintainer's decision: accept the late, smooth the fetch pattern, or
+    wait for F3 (display reads on `ram2`). `docs/decode_pacing.md` §7 "F2 follow-up".
   - Full record: `docs/decode_pacing.md` §7 "F2 follow-up".
 
 - ✅ **NON-SEAMLESS CELL-JOIN AUDIO (2026-09-29, ✅ MERGED PR #141; HW-CONFIRMED in
