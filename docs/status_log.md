@@ -86,7 +86,7 @@ predate later confirmations; the `CLAUDE.md` index carries the reconciled status
   - **Next step:** none for this defect. The pre-existing ~1.3 s track-switch gap is
     unowned.
 
-- 🔧 **CHROMA ROWS: THE DISPLAY INTERPOLATES FROM THE ROWS THE BILINEAR WEIGHTS EXPECT
+- ✅ **CHROMA ROWS: THE DISPLAY INTERPOLATES FROM THE ROWS THE BILINEAR WEIGHTS EXPECT
   (2026-09-29, ✅ MERGED PR #142, sim-proven, HW-measured 2026-09-30; one ROGER Prog late ACCEPTED).**
   - **What was wrong (upstream, since the import):** the "lower" chroma row used `mv ±2`
     (progressive) and `±4` (interlaced upsampling), but `memory_address` halves `mv_y`
@@ -214,8 +214,8 @@ predate later confirmations; the `CLAUDE.md` index carries the reconciled status
     `docs/decode_pacing.md` §7. §6c (Thayer boot-FMV Interlaced tail) is still open.
   - Full record: `docs/decode_pacing.md` §7 F2.
 
-- 🔧 **DECODE PACING × OUTPUT MODE: THE PROGRESSIVE-ONLY LATES ARE DDR3 CONTENTION FROM
-  THE DISPLAY'S FRAME RE-READS, NOT A COMPUTE CEILING (2026-09-28, branch
+- ✅ **DECODE PACING × OUTPUT MODE: THE PROGRESSIVE-ONLY LATES ARE DDR3 CONTENTION FROM
+  THE DISPLAY'S FRAME RE-READS, NOT A COMPUTE CEILING (2026-09-28,
   ✅ MERGED PR #137, investigation + instrument; fix F1 ✅ MERGED PR #138).**
   ★ **F1 HW-MEASURED 2026-09-29 (no OSD display reads, 8 → 6 words per macroblock-line,
   bit-exact in sim).** Progressive lates:

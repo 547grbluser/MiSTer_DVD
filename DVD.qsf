@@ -1516,7 +1516,9 @@ set_global_assignment -name PHYSICAL_SYNTHESIS_COMBO_LOGIC OFF
 #   Removing the reader's dead debug_state port let Quartus extract its main `state` FSM
 #   (one-hot) for the first time -- a real netlist change from a "dead port" removal.
 
-# RELEASE v0.8.0 (2026-09-28, the shipping netlist): SEED 9 held FIRST roll --
+# v0.8.0 CANDIDATE 1 (2026-09-28) -- SUPERSEDED, never shipped: PRs #137-#142 merged on
+# top after its smoke test, and v0.8.0 was re-cut from that main (entry below). SEED 9
+# held FIRST roll --
 # clk_dec 87.18 MHz @100C / 86.54 MHz @-40C (gate 86.0, PASS both corners,
 # non-marginal), 38,762 / 41,910 ALMs (92 %), 52,903 registers, 508 / 553 M10K
 # (92 %), 94 / 112 DSP. Build releases/DVD_20260928.rbf, commit f473247.
