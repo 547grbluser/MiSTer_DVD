@@ -589,6 +589,17 @@ fixes the upstream finding above that F2 preserved.
   display-side cause, just as well. A fix must be judged by the interleaved launch A/B
   (`.sim/chromarows/ab.sh`, 5 + 5 launches), not by window averages, which are identical.
 
+  **Not a pattern (follow-up, same session).** The two other weave-path discs in the §3
+  census read **0 lates in every cell on both builds**: Office PAL (interlaced content)
+  and Thayer VTS_08 (field-coded, `Title VTS Units=8`), on Progressive, Interlaced and
+  Auto, 2 rounds each. (Those windows ran on stock DVDcss Main after a `restore`, so they
+  carry lates, drops and fps but no `dec_*` duty. Deploy with `--main` next time.)
+  And in sim, `resample_chain_tb +weave` under bursty memory stalls cannot tell the two
+  builds apart: 0 BLACK frames at 62 % bandwidth, 13–15 at 30 %, at each of 5 stall
+  phases (`.sim/chromarows/pf/`). So the display buffer rides the new fetch pattern
+  exactly as well as F2's. If the pattern matters, it is on the decoder's side of the
+  arbiter, which that bench does not model.
+
   Unproven explanation: the weave word count is unchanged, but the timing moved. F2
   fetched a new chroma row on alternate lines (2, 4, 2, 4 words per macroblock); the
   correct rows arrive in pairs (2, 2, 4, 4). At a picture already near its deadline that
