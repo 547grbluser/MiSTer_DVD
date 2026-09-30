@@ -12,12 +12,17 @@ pin as text than to discover in a board round:
     is only valid with OSD_READS = 0 -- the defaults in resample.v must be exactly that,
     and mpeg2video must not override either.
   * the FLAGS reach resample_dta. The resample fifo carries the reuse flags only when it
-    is 8 bits wide: its width must follow the parameter, and both of its data ports must
+    is 10 bits wide: its width must follow the parameter, and both of its data ports must
     use the same slice.
   * the KEY mirrors memory_address. A slot is tagged with the row memory_address fetches;
     if mem_addr.v's chroma motion-vector arithmetic ever changes, the key must change with
     it or reuse serves the wrong row. The two arithmetic forms are pinned side by side.
-  * the flag layout {lcp, sl, fl, su, fu} agrees between the writer and the reader.
+  * the flag layout {lcp, sl[1:0], fl, su[1:0], fu} agrees between the writer and the
+    reader, and a slot id is {bank, slot} with the bank the row's parity (key[0]).
+  * the chroma-row fix: the lower row's offsets are one chroma row (mv 4, progressive) and
+    the same field's neighbour (mv 8, interlaced), and the bottom clamps read vertical_size.
+    bench/dvd/run_chroma_reuse.sh [4] proves the rows; this pins the constants so an
+    "obvious" revert to upstream's 2 / 4 is a named failure here too.
 
 strip_comments() first (the comments quote old forms); a missing match is a named FAIL,
 never a skip.
@@ -75,15 +80,15 @@ def main():
         ok(has(plist, r"\.OSD_READS\s*\(\s*OSD_READS\s*\)"), f'{inst} #(.OSD_READS(OSD_READS))')
 
     print('== the flags reach resample_dta (resample.v fifo) ==')
-    ok(has(rs, r"localparam\s*\[8:0\]\s*RESAMPLE_WIDTH\s*=\s*CHROMA_REUSE\s*\?\s*9'd8\s*:\s*9'd3\s*;"),
-       "RESAMPLE_WIDTH = CHROMA_REUSE ? 9'd8 : 9'd3")
+    ok(has(rs, r"localparam\s*\[8:0\]\s*RESAMPLE_WIDTH\s*=\s*CHROMA_REUSE\s*\?\s*9'd10\s*:\s*9'd3\s*;"),
+       "RESAMPLE_WIDTH = CHROMA_REUSE ? 9'd10 : 9'd3")
     ok(has(rs, r"\.dta_width\s*\(\s*RESAMPLE_WIDTH\s*\)"), 'resample_fifo dta_width(RESAMPLE_WIDTH)')
     ok(has(rs, r"\.din\s*\(\s*resample_wr_dta\s*\[\s*RESAMPLE_WIDTH\s*-\s*1\s*:\s*0\s*\]\s*\)"),
        'resample_fifo din(resample_wr_dta[RESAMPLE_WIDTH-1:0])')
     ok(has(rs, r"\.dout\s*\(\s*resample_rd_dta\s*\[\s*RESAMPLE_WIDTH\s*-\s*1\s*:\s*0\s*\]\s*\)"),
        'resample_fifo dout(resample_rd_dta[RESAMPLE_WIDTH-1:0])')
-    ok(has(rs, r"wire\s*\[7:0\]\s*resample_wr_dta\s*;") and has(rs, r"wire\s*\[7:0\]\s*resample_rd_dta\s*;"),
-       'resample_wr_dta / resample_rd_dta are 8 bits')
+    ok(has(rs, r"wire\s*\[9:0\]\s*resample_wr_dta\s*;") and has(rs, r"wire\s*\[9:0\]\s*resample_rd_dta\s*;"),
+       'resample_wr_dta / resample_rd_dta are 10 bits')
 
     print('== the key mirrors memory_address (mem_addr.v vs resample_addrgen) ==')
     ma = rd(a.memaddr)
@@ -107,22 +112,39 @@ def main():
        'addrgen key: upper = the chroma delta_y of STATE_WR_U/V_*')
     ok(has(ag, r"if\s*\(progressive_upscaling\)\s*disp_delta_y\s*<=\s*\{2'b0,\s*disp_y\[11:1\]\}\s*;\s*else\s*disp_delta_y\s*<=\s*\{2'b0,\s*disp_y\[11:2\],\s*disp_y\[0\]\}"),
        'addrgen: the chroma delta_y the key copies is unchanged')
-    ok(has(ag, r"ck_mv\s*=\s*progressive_upscaling\s*\?\s*\(disp_y\[0\]\s*\?\s*disp_mv_y_plus_2\s*:\s*disp_mv_y_minus_2\)\s*:\s*\(disp_y\[1\]\s*\?\s*disp_mv_y_plus_4\s*:\s*disp_mv_y_minus_4\)"),
+    ok(has(ag, r"ck_mv\s*=\s*progressive_upscaling\s*\?\s*\(disp_y\[0\]\s*\?\s*disp_mv_y_plus_4\s*:\s*disp_mv_y_minus_4\)\s*:\s*\(disp_y\[1\]\s*\?\s*disp_mv_y_plus_8\s*:\s*disp_mv_y_minus_8\)"),
        'addrgen key: lower mv = the mv_y of STATE_WR_U/V_LOWER')
-    ok(has(ag, r"if\s*\(progressive_upscaling\)\s*disp_mv_y\s*<=\s*disp_y\[0\]\s*\?\s*disp_mv_y_plus_2\s*:\s*disp_mv_y_minus_2\s*;\s*else\s*disp_mv_y\s*<=\s*disp_y\[1\]\s*\?\s*disp_mv_y_plus_4\s*:\s*disp_mv_y_minus_4\s*;"),
+    ok(has(ag, r"if\s*\(progressive_upscaling\)\s*disp_mv_y\s*<=\s*disp_y\[0\]\s*\?\s*disp_mv_y_plus_4\s*:\s*disp_mv_y_minus_4\s*;\s*else\s*disp_mv_y\s*<=\s*disp_y\[1\]\s*\?\s*disp_mv_y_plus_8\s*:\s*disp_mv_y_minus_8\s*;"),
        'addrgen: the lower-row mv_y the key copies is unchanged')
 
-    print('== flag layout {lcp, sl, fl, su, fu} (writer and reader) ==')
-    ok(has(ag, r"cr_fu\s*=\s*resample_wr_dta\[3\]") and has(ag, r"cr_fl\s*=\s*resample_wr_dta\[5\]"),
-       'addrgen next-state reads fu = [3], fl = [5]')
-    ok(has(ag, r"\{c_lcp,\s*c_sl,\s*c_fl,\s*c_su,\s*c_fu\}"), 'addrgen writes {lcp, sl, fl, su, fu}')
+    print('== the chroma-row fix: one chroma row is mv 4 (resample_addrgen) ==')
+    for name, val in (('minus_4', r"-13'sd4"), ('plus_4', r"13'sd4"), ('minus_8', r"-13'sd8"), ('plus_8', r"13'sd8")):
+        ok(has(ag, r"disp_mv_y_" + name + r"\s*=[^;]*\?\s*13'sd0\s*:\s*" + val + r"\s*;"),
+           f'disp_mv_y_{name} is {val.replace(chr(92), "")} (or 0 at the edge)')
+    ok(has(ag, r"disp_c_rows\s*=\s*\{\s*1'b0\s*,\s*vertical_size\[13:1\]\s*\}"),
+       'bottom clamps: chroma rows = vertical_size / 2 (what memory_address clips to)')
+    ok(has(ag, r"disp_mv_y_plus_4\s*=\s*\(\(disp_c_up_pr\s*\+\s*13'd1\)\s*>=\s*disp_c_rows\)")
+       and has(ag, r"disp_mv_y_plus_8\s*=\s*\(\(disp_c_up_il\s*\+\s*13'd2\)\s*>=\s*disp_c_rows\)"),
+       'bottom clamps fire when the neighbour row does not exist')
+
+    print('== flag layout {lcp, sl[1:0], fl, su[1:0], fu} (writer and reader) ==')
+    ok(has(ag, r"output\s+reg\s*\[9:0\]\s*resample_wr_dta\s*;"), 'addrgen resample_wr_dta is 10 bits')
+    ok(has(ag, r"cr_fu\s*=\s*resample_wr_dta\[3\]") and has(ag, r"cr_fl\s*=\s*resample_wr_dta\[6\]"),
+       'addrgen next-state reads fu = [3], fl = [6]')
+    ok(has(ag, r"\{c_lcp,\s*bl,\s*c_sl,\s*c_fl,\s*bu,\s*c_su,\s*c_fu\}"),
+       'addrgen writes {lcp, {bank, slot} lower, fl, {bank, slot} upper, fu}')
+    ok(has(ag, r"\bbu\s*=\s*ck_up_q\[0\]") and has(ag, r"\bbl\s*=\s*ck_lo_q\[0\]"),
+       "addrgen: a row's bank is its key's parity")
     ok(len(re.findall(r"resample_wr_dta\s*<=\s*\{\s*cr_flags\s*,\s*ROW_", ag)) == 5,
-       'all five position arms carry cr_flags in [7:3]')
+       'all five position arms carry cr_flags in [9:3]')
     dt = rd(a.dta)
-    ok(has(dt, r"flg\s*<=\s*p_dout\[7:3\]"), 'dta captures the flags from [7:3]')
-    ok(has(dt, r"q_fetch\s*=\s*q_low\s*\?\s*flg\[2\]\s*:\s*flg\[0\]"), 'dta: fetch = fl (lower) / fu (upper)')
-    ok(has(dt, r"q_slot\s*=\s*q_low\s*\?\s*flg\[3\]\s*:\s*flg\[1\]"), 'dta: slot = sl (lower) / su (upper)')
-    ok(has(dt, r"q_copy\s*=\s*q_low\s*&\s*flg\[4\]"), 'dta: copy = lcp, lower words only')
+    ok(has(dt, r"input\s*\[9:0\]\s*resample_rd_dta\s*;"), 'dta resample_rd_dta is 10 bits')
+    ok(has(dt, r"flg\s*<=\s*p_dout\[9:3\]"), 'dta captures the flags from [9:3]')
+    ok(has(dt, r"q_fetch\s*=\s*q_low\s*\?\s*flg\[3\]\s*:\s*flg\[0\]"), 'dta: fetch = fl (lower) / fu (upper)')
+    ok(has(dt, r"q_slot\s*=\s*q_low\s*\?\s*flg\[5:4\]\s*:\s*flg\[2:1\]"), 'dta: slot = sl (lower) / su (upper)')
+    ok(has(dt, r"q_copy\s*=\s*q_low\s*&\s*flg\[6\]"), 'dta: copy = lcp, lower words only')
+    ok(has(dt, r"c_addr\s*=\s*\{\s*q\[1\]\s*,\s*q_slot\s*,\s*col\s*\}") and has(dt, r"cram\s*\[\s*0\s*:\s*511\s*\]"),
+       'dta: cache = 2 planes x 4 slots x 64 columns')
     ok(has(dt, r"parameter\s+CHROMA_REUSE\s*=\s*1\s*;") and has(ag, r"parameter\s+CHROMA_REUSE\s*=\s*1\s*;"),
        'both modules default CHROMA_REUSE = 1 (a lone instantiation cannot disagree either)')
 

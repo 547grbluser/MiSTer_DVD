@@ -47,7 +47,7 @@ module resample_dta (
   input      [63:0]disp_rd_dta;
 
   output           resample_rd_en;
-  input       [7:0]resample_rd_dta;   // DVD-FORK FIX (F2): [2:0] position code, [7:3] chroma reuse flags
+  input       [9:0]resample_rd_dta;   // DVD-FORK FIX (F2): [2:0] position code, [9:3] chroma reuse flags
   input            resample_rd_valid;
 
   /* registers to read disp_rd_dta fifo in. 
@@ -239,7 +239,8 @@ module resample_dta (
   end else begin : g_reuse
     /* ============ DVD-FORK FIX (F2): CHROMA ROW REUSE, the data half ==================
      * resample_addrgen decides, per macroblock, which chroma words it requested; the flags
-     * arrive with the position code (resample_rd_dta[7:3] = {lcp, sl, fl, su, fu}):
+     * arrive with the position code (resample_rd_dta[9:3] = {lcp, sl[1:0], fl, su[1:0], fu},
+     * a slot id being {bank, slot}, the bank the row's parity -- see resample_addrgen):
      *   fu / fl : the upper / lower row was fetched -- pop it from the display fifo and
      *             store it in slot su / sl of its plane
      *   else    : read it from slot su / sl (a row an earlier line fetched)
@@ -262,25 +263,25 @@ module resample_dta (
     reg          [2:0]rs;
     reg          [1:0]q;               // chroma word: 0 U upper, 1 U lower, 2 V upper, 3 V lower
     reg          [5:0]col;             // column within the line (cache index)
-    reg          [4:0]flg;             // {lcp, sl, fl, su, fu}
+    reg          [6:0]flg;             // {lcp, sl[1:0], fl, su[1:0], fu}
 
     wire             d_valid;
     wire       [63:0]d_dout;
     wire             p_valid;
-    wire        [7:0]p_dout;
+    wire        [9:0]p_dout;
 
     wire             q_low   = q[0];
-    wire             q_fetch = q_low ? flg[2] : flg[0];
-    wire             q_slot  = q_low ? flg[3] : flg[1];
-    wire             q_copy  = q_low & flg[4];
-    wire        [7:0]c_addr  = {q[1], q_slot, col};
+    wire             q_fetch = q_low ? flg[3] : flg[0];
+    wire        [1:0]q_slot  = q_low ? flg[5:4] : flg[2:1];
+    wire             q_copy  = q_low & flg[6];
+    wire        [8:0]c_addr  = {q[1], q_slot, col};
     wire             c_step  = (rs == R_C) && (~q_fetch || d_valid);
 
     wire             d_rd_en = (rs == R_Y0) || (rs == R_Y1) || ((rs == R_C) && q_fetch);
     wire             p_rd_en = (rs == R_POS);
 
-    /* the cache: 2 planes x 2 slots x 64 columns x 8 chroma samples */
-    reg        [63:0]cram [0:255];
+    /* the cache: 2 planes x 2 banks x 2 slots x 64 columns x 8 chroma samples */
+    reg        [63:0]cram [0:511];
     reg        [63:0]cram_q;
     wire             cram_we = (rs == R_C) && q_fetch && d_valid;
     always @(posedge clk)
@@ -318,9 +319,9 @@ module resample_dta (
       else if (clk_en && c_step) q <= q + 2'd1;
 
     always @(posedge clk)
-      if (~rst) begin flg <= 5'd0; col <= 6'd0; fifo_position <= 3'd0; end
+      if (~rst) begin flg <= 7'd0; col <= 6'd0; fifo_position <= 3'd0; end
       else if (clk_en && (rs == R_POS) && p_valid) begin
-        flg           <= p_dout[7:3];
+        flg           <= p_dout[9:3];
         fifo_position <= p_dout[2:0];
         col           <= ((p_dout[2:0] == ROW_0_COL_0) || (p_dout[2:0] == ROW_1_COL_0) ||
                           (p_dout[2:0] == ROW_X_COL_0)) ? 6'd0 : col + 6'd1;
@@ -377,7 +378,7 @@ module resample_dta (
       );
 
     fwft_reader
-      #(.dta_width(9'd8))
+      #(.dta_width(9'd10))
     resample_fwft_reader (
       .rst(rst),
       .clk(clk),

@@ -377,6 +377,65 @@ module resample_chain_tb;
   function automatic [63:0] ahash(input [21:0] a);
     ahash = {42'd0, a} * 64'h9E37_79B9_7F4A_7C15;
   endfunction
+  // ---- ROW REFERENCE mode (+rowref=1): the chroma-row fix gate --------------------------
+  // bench/dvd/run_chroma_reuse.sh [4]. The identity gate (+addrhash) compares two builds of
+  // the same rows, so it cannot tell whether the rows are the RIGHT ones. Here every chroma
+  // word names its own row: the memory decodes the component and the row from the address
+  // (mem_codes.v, MP_AT_HL layout: row = (address - base) / mb_width) and returns one signed
+  // code per row, the same in all 8 bytes. A uniform row makes resample_bilinear's horizontal
+  // taps a no-op, so every emitted chroma pixel is exactly
+  //     ((6 * code(upper) + 2 * code(lower) + 7) >>> 3) + 128
+  // and the bench scores it against the rows the SPEC wants for the line (rr_rows below),
+  // computed from disp_y alone -- never from the address generator's own arithmetic.
+  integer rowref = 0;
+  integer rr_lines = 0, rr_interp = 0, rr_bad = 0, rr_px = 0;
+  function automatic integer rr_code_cr(input integer r); rr_code_cr = ((r * 37) % 97) - 48; endfunction
+  function automatic integer rr_code_cb(input integer r); rr_code_cb = ((r * 53) % 89) - 44; endfunction
+  function automatic [63:0] rr_word(input [21:0] a);
+    integer f, base_y, base_cr, base_cb, row;
+    begin
+      rr_word = 64'h4040_4040_4040_4040;                        // luma (and anything else)
+      for (f = 0; f < 4; f = f + 1) begin
+        base_y  = f * ((1 << 18) + (2 << 16));                  // FRAME_f_Y (WIDTH_Y 18, WIDTH_C 16)
+        base_cr = base_y + (1 << 18);                           // FRAME_f_CR
+        base_cb = base_cr + (1 << 16);                          // FRAME_f_CB
+        if (a >= base_cr && a < base_cr + (1 << 16)) begin
+          row = (a - base_cr) / MB_WIDTH; rr_word = {8{8'(rr_code_cr(row))}};
+        end else if (a >= base_cb && a < base_cb + (1 << 16)) begin
+          row = (a - base_cb) / MB_WIDTH; rr_word = {8{8'(rr_code_cb(row))}};
+        end
+      end
+    end
+  endfunction
+  // The spec's rows for luma line y: 4:2:0 chroma row c sits between luma lines 2c and 2c+1
+  // (progressive) or between field lines 2c and 2c+1 of its own field (interlaced), and
+  // resample_bilinear weights the nearest row 3/4 and the other neighbour 1/4. At an edge
+  // the neighbour that does not exist is the nearest row itself (edge replication).
+  task automatic rr_rows(input integer y, input integer pu, output integer up, output integer lo);
+    integer ch, f;
+    begin
+      ch = vertical_size / 2;                                   // chroma rows in the frame
+      if (pu) begin
+        up = y / 2;
+        lo = (y % 2) ? up + 1 : up - 1;
+        if (lo < 0 || lo > ch - 1) lo = up;
+      end else begin
+        f  = y / 2;                                             // line within its field
+        up = 2 * (f / 2) + (y % 2);                             // the field's chroma row, as a frame row
+        lo = (f % 2) ? up + 2 : up - 2;
+        if (lo < 0 || lo > ch - 1) lo = up;
+      end
+      // a line past the picture (a field walk can end one line below it) reads the last
+      // row, as memory_address clips it
+      if (up > ch - 1) up = ch - 1;
+      if (lo > ch - 1) lo = ch - 1;
+    end
+  endtask
+  // disp_y and the upsampling of every line, in emission order: pushed with the line's
+  // first position code, popped at the line's first emitted pixel.
+  localparam RRD = 4096;
+  reg  [12:0] rr_q [0:RRD-1];
+  integer     rr_h = 0, rr_t = 0, rr_y = -1, rr_pu = 0;
 `ifdef OSDR
   defparam resample.OSD_READS = `OSDR;
 `endif
@@ -437,6 +496,7 @@ module resample_chain_tb;
     end else begin
       wr_dta_en <= rd_addr_valid;          // one-cycle pipe after fifo read
       wr_dta    <= (addrhash != 0) ? ahash(rd_addr)       // F1 gate: the word names its address
+                 : (rowref != 0)   ? rr_word(rd_addr)      // row reference: the word names its chroma row
                  : linetag      ? {8{ (vgrad != 0) ? (popped_line[7:0] * vgrad[7:0])
                                                    : popped_line[7:0] }}
                  : (hgrad != 0) ? {4{HG_MEM_LO, HG_MEM_HI}}   // per-column square wave
@@ -762,6 +822,39 @@ module resample_chain_tb;
     rs_sum = (rs_sum * 64'd1000003) ^ {37'd0, px_y, px_u, px_v, px_position};
     rs_n   = rs_n + 1;
   end
+  // ---- ROW REFERENCE checker (+rowref) ----
+  always @(posedge clk) if (rst && rowref != 0) begin
+    if (resample.resample_addrgen.resample_wr_en && (resample.resample_addrgen.resample_wr_dta[2:0] <= 3'b010)) begin
+      rr_q[rr_t % RRD] = {resample.resample_addrgen.progressive_upscaling, resample.resample_addrgen.disp_y};
+      rr_t = rr_t + 1;
+    end
+    if (px_wr_en) begin : rr_px_chk
+      integer up, lo, eu, ev;
+      if (px_position <= 3'b010) begin
+        if (rr_h == rr_t) begin
+          rr_bad = rr_bad + 1;
+          if (rr_bad <= 4) $display("ROWREF-ERR a line started with no position code queued");
+        end else begin
+          rr_pu = rr_q[rr_h % RRD][12]; rr_y = rr_q[rr_h % RRD][11:0]; rr_h = rr_h + 1;
+          rr_lines = rr_lines + 1;
+          rr_rows(rr_y, rr_pu, up, lo);
+          if (lo != up) rr_interp = rr_interp + 1;
+        end
+      end
+      if (rr_y >= 0) begin
+        rr_rows(rr_y, rr_pu, up, lo);
+        eu = ((6 * rr_code_cr(up) + 2 * rr_code_cr(lo) + 7) >>> 3) + 128;
+        ev = ((6 * rr_code_cb(up) + 2 * rr_code_cb(lo) + 7) >>> 3) + 128;
+        rr_px = rr_px + 1;
+        if (px_u != eu[7:0] || px_v != ev[7:0]) begin
+          rr_bad = rr_bad + 1;
+          if (rr_bad <= 4)
+            $display("ROWREF-ERR y=%0d %s rows up=%0d lo=%0d: u=%0d v=%0d want %0d %0d",
+                     rr_y, rr_pu ? "prog" : "ilace", up, lo, px_u, px_v, eu[7:0], ev[7:0]);
+        end
+      end
+    end
+  end
   // Requests per SCAN, counted from the address generator's request states (one request
   // each), so a scan's count is exact rather than straddling the memory_address pipeline.
   integer sq_words = 0, sq_mbl = 0, sq_no = 0;
@@ -815,6 +908,7 @@ module resample_chain_tb;
     void'($value$plusargs("stalloff=%d", stalloff));
     void'($value$plusargs("linetag=%d",  linetag));
     void'($value$plusargs("addrhash=%d", addrhash));
+    void'($value$plusargs("rowref=%d",   rowref));
     void'($value$plusargs("pace=%d",     pace));
     void'($value$plusargs("wide=%d",     wide));
     void'($value$plusargs("il=%d",       il));
@@ -950,6 +1044,8 @@ module resample_chain_tb;
     end
     report_frame;
     report_scanrate;
+    if (rowref != 0)
+      $display("ROWREF lines=%0d interp=%0d pixels=%0d bad=%0d", rr_lines, rr_interp, rr_px, rr_bad);
     $display("---- SUMMARY mb_height=%0d held=%0d stall=%0d/%0d : %0d frames scored, %0d BLACK %s ----",
              mbh, held_mode, stalloff, stallon, reported_frames, black_frames,
              (black_frames == 0) ? "=> CLEAN" : "=> STARVED");
