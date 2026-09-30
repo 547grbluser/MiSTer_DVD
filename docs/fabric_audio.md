@@ -196,10 +196,17 @@ frame. Three mechanisms:
 - The three reframers reset on `aud_realign_q` (a registered `aud_switch`, since it drives
   async resets) as well as the core reset, so the first boundary after a switch is the
   real sync the demux lined up.
-- ⚠ **Seeks/jumps are deliberately untouched.** `rlgn_pend` is set only by `aud_realign`,
-  never at reset, and the reframers still do not reset on a seek. A seek landing mid-frame
-  has the same false-sync exposure (mechanism 2). It is a separate change with its own
-  blast radius (a `keep_vbuf` menu hop resets the demux but not the ring).
+- ⚠ **Seeks/jumps: the reframers now reset, the demux realign still does not.** Since
+  2026-09-30 the reframers also reset on a registered `aud_flush` (`rf_flush_q`; a hard
+  flush, which is gated `~keep_vbuf`). Without it, a frame start held in `dts_reframer`'s
+  4-byte pipeline crossed a seek with the OLD position's PTS and became the ring's first
+  frame. After a backward seek, audio then waited ~2.5 s for the fallback and the picture
+  starved behind it (`docs/dvd_nav.md` §2h "The stale audio PTS"). `rlgn_pend` is still
+  set only by `aud_realign`, never at reset. So a seek landing mid-frame keeps the
+  false-sync exposure (mechanism 2), now with an unlocked reframer: one garbage frame when
+  the landing's leading partial frame carries a stray `0B77`. Arming it on a flush is a
+  separate change with its own blast radius (a `keep_vbuf` menu hop resets the demux but
+  not the ring).
 
 **Gate:** `bench/dvd/run_aud_switch.sh --red` (needs `isoinfo` and MEN_IN_BLACK.iso under
 `DVD_ISO_DIR`; otherwise SKIPPED, loudly): a 38-switch sweep, three directed switches that

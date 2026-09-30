@@ -2275,6 +2275,104 @@ time, from ffmpeg's own decode.
 The harness cannot reach that gesture (`kbd_map` routes keyboard FF/REW to the D-pad path),
 so a person holding the button is the instrument.
 
+#### The stale audio PTS: a picture hold after some backward seeks (2026-09-30) — 🔧 fixed in sim, ⏳ HW
+
+**Report (release-candidate smoke test, 2026-09-30).** Men in Black, Disc Menus Off, D-Pad
+Seek On. Repeating "Left Left (one −20 s gesture), wait 10 s, Right, wait 10 s": a normal
+step reads lates +1–2 and ~244 pickups per 10 s. A bad step reads **lates +116–124 and
+~210 pickups**, which is ~33 frames (≈1.3 s) not shown, one late per refresh while held.
+`flags.still` 0, `tmap` 1, `tmap_fb` 0. The candidate builds showed it (2 of 4, 2 of 6),
+and v0.7.0 read 0 of 6, so it was taken for a regression, with this section's TMAP seek
+(#128) as the prime suspect.
+
+**It is not a regression, and it is not TMAP.** The bisect's control arm reproduces it.
+Same script, one rig (.201), one Main, driven on the target with 20 ms telemetry
+(`tools/mister.py`'s `/tmp/dvd_telem_fast` knob):
+
+| build | gesture | bad / gestures |
+|---|---|---|
+| v0.7.0 (`DVD_20260924.rbf`) | Left Left (−20 s) | **2 / 12** |
+| current candidate (`DVD_20260930.rbf`) | Left Left (−20 s) | **2 / 12** |
+| current candidate | Left (−10 s) | 0 / 12 |
+| current candidate | Left Left Left (−30 s) | 1 / 10 |
+
+The per-PR dev builds (`DVD_tmapseek_*`, `DVD_fieldblend_*`, …) were not run. A bisect needs
+a clean control, and v0.7.0 is not clean. The maintainer's 0 of 6 on v0.7.0 is what a
+~1-in-7 rate gives about a third of the time. The bad events also came in consecutive
+pairs (cycles 10–11, 6–7), so on a periodic script the gestures are not independent draws,
+and the 0 of 12 for a single Left is not evidence that single steps are immune.
+
+**What the telemetry shows (bad landing, v0.7.0, t = the key press):**
+- +0.59 s: flush. +0.65 s video live. +0.79 s the clock anchors on a tagged picture.
+  So far this is identical to a good landing.
+- From +0.79 s **audio never releases** (`aud_play` stays 0; a good landing releases at
+  +0.10…0.40 s after the flush). `av_drift` falls 1:1 with the clock, and the ring fills
+  to its 33 frames. The ring's backpressure stalls the demux, so `vbuf_fill` drains 52 → 0
+  while pictures keep being shown.
+- +2.04 s: the video buffer is empty. Pickups stop, and lates climb 1 per refresh.
+- +3.12 s (flush + 2.53 s): the `arm_timer` **fallback** releases audio. Data flows, and
+  video resumes **~1.1–1.3 s behind the clock**. It stays there (`disp_lag` −1101…−1268 ms)
+  until the next seek, because catch-up drops barely move (+0…+7).
+- `play_err` at the fallback is the tell. It reads `stc − play_pts` (16-bit, so it wraps
+  every 11.65 s). Unwrapped, the latched `play_pts` was the seek distance **plus ~0.5 s
+  AHEAD of the new clock**: ~19.3–20.6 s for −20 s and ~30.8 s for −30 s. That is the
+  audio PTS of the position the seek **left**. Two bad events on the same build differ by
+  ~0.6 s, so it is not a constant.
+
+**Mechanism.** The three audio reframers (`ac3_reframer` → `dts_reframer` →
+`mp2_reframer`) reset on the core reset and on a track switch, **never on a seek**. Seeks
+were excluded deliberately, on the argument that "the ring is reset and only commits on the
+reframer's frame_start, so pre-lock bytes never become a committed frame". That holds for
+bytes. It does not hold for a frame **start**:
+1. `ac3_reframer` emits a start, stamped with the pending PES PTS, on the `0x77` of the
+   sync word. `dts_reframer` then holds that start, and its PTS, in its 4-byte pipeline
+   until four more audio bytes arrive. (The chain only moves while the demux is inside an
+   audio pack.)
+2. Men in Black's title authors **12.5 % of its AC-3 packs to end exactly 3 bytes after a
+   sync** (`0B 77 xx`). Every other offset from 0 to 11 is 0 %. When the flush lands after
+   such a pack, the old start is still inside the pipeline.
+3. The flush resets the demux, ring and decoder. The landing's first audio bytes then push
+   the stale start out, and the fresh ring commits it as its **first frame**: the old
+   position's PTS, followed by landing bytes.
+4. `dvd_audio_decode` latches the first PTS-tagged dispatch as `play_pts`. After a
+   **backward** seek that PTS is 10–30 s in the future, so the scheduled release
+   (`start_delta >= 0`) never comes, and audio waits for the fallback. After a
+   **forward** seek it is in the past, so the release is immediate and there is no hold.
+   That is why only backward gestures show it. Any backward flush is exposed: chapter
+   back, A-B, and held rewind (untestable from the harness) included.
+
+**Fix (`dvd/emu.sv`).** `rf_rst_n = reset_n & ~aud_realign_q & ~rf_flush_q`, where
+`rf_flush_q` is a **registered** `aud_flush`:
+- `aud_flush` is gated `~keep_vbuf` in `flush_ctl`, so a keep_vbuf menu hop (the ring is
+  kept) never resets the reframers. That is the static-pop case the old rule protected.
+- `aud_resync` is deliberately excluded (a track switch's gentle half, and #141's in-band
+  re-time). There the byte stream is continuous, so a held start belongs to the timeline
+  that keeps playing.
+- `rf_flush_q` re-uses the existing `rf_rst_n` net, so it adds no fanout.
+- As a side effect, the landing's first frame is now a clean one. Before the fix it was the
+  old sync followed by landing bytes, i.e. garbage for `ac3_front`.
+
+**Gates.** `bench/dvd/run_seek_rf_pts.sh --red`:
+- `seek_rf_pts_tb` runs the real `ps_demux` → three reframers → `audio_ring`, with
+  `flush_ctl` turning `seek_ack` into emu's reset pulses. It uses synthetic AC-3 packs, so
+  no fixture is needed. Stream A ends N bytes past a sync (N = 0–8, 100, 767); the seek
+  flushes; then stream B lands 20 s earlier.
+- On the fix, all N pass. `+PRE` (emu's old wiring) fails [2]/[3] for **N = 2–6**, landing
+  exactly 19.97 s stale; MiB authors N = 3. `+RESYNC` fails the same arms, and `+NOB` fails
+  only the vacuity check.
+- `tools/check_rf_flush_wiring.py` reads the seam out of `emu.sv`. It refuses the pre-fix
+  line, an `aud_resync` key, a raw `aud_flush`, `pipe_rst_n`, and any reframer taken off
+  `rf_rst_n` (W1–W5).
+
+**Residual (not fixed here).** A seek still does not arm `ps_demux`'s
+`first_access_unit_pointer` skip (`rlgn_pend`, track switches only). A now-unlocked
+`ac3_reframer` therefore takes the first `0B77` it sees in the landing's leading partial
+frame. A stray in-payload sync there (5 of 817 AC-3 PES in the MiB slice,
+`docs/fabric_audio.md`) makes one garbage frame, which is a click, not a hold. The fix would
+be to arm `rlgn_pend` on a flush; its blast radius is keep_vbuf hops.
+
+**HW:** ⏳ the fix build through the same script (see `docs/status_log.md`).
+
 ### 2a. Hold-to-seek — SEEK-ON-RELEASE with acceleration (`dvd/scrub_ctrl.sv`)
 
 The one-shot ±10 s scrub became **HOLD-to-seek, seek-on-release**: hold the **Fast Fwd (B10) /

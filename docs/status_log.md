@@ -22,6 +22,46 @@ predate later confirmations; the `CLAUDE.md` index carries the reconciled status
 
 ## Hardware status (THIS fork, verified 2026-06-21)
 
+- 🔧 **A SEEK FLUSH RESETS THE AUDIO REFRAMERS: NO STALE PTS AFTER A BACKWARD JUMP
+  (2026-09-30, branch `fix/dpad-back-hold`, sim-proven; ⏳ HW).**
+  Full record: `docs/dvd_nav.md` §2h "The stale audio PTS".
+  - **Report (release-candidate smoke test):** on Men in Black, about one −20 s D-pad
+    gesture in three showed lates +116–124 and ~33 frames not shown (≈1.3 s held). It was
+    read as a regression from #128 (TMAP seek), because v0.7.0 had read 0 of 6.
+  - **Not a regression.** Same script on one rig (.201), 20 ms telemetry. **v0.7.0 2 of 12,
+    the current candidate 2 of 12** (−20 s). On the candidate, −30 s gave 1 of 10, a single
+    −10 s gave 0 of 12, and **Previous Chapter gave 1 of 12**. The per-PR bisect was not run,
+    because the control is not clean. 0 of 6 is what a ~1-in-7 rate gives a third of the time.
+  - **What the user sees:** the picture holds **~1.1–1.3 s** and audio is **silent ~2.5 s**
+    after the landing. Afterwards the picture runs ~1.1–1.3 s behind the clock and audio
+    ~2.1 s behind it (`disp_lag`, `av_drift`), i.e. **audio ~1 s late against the picture
+    until the next seek**. It happens after any backward flush (D-pad, chapter back,
+    presumably A-B and held rewind), at roughly 1 in 7 on this disc.
+  - **Root cause:** the reframers reset only on the core reset and on a track switch.
+    `ac3_reframer` emits a frame start, stamped with the pending PES PTS, on the sync's
+    `0x77`, and `dts_reframer` holds it in a 4-byte pipeline. MiB authors **12.5 % of its
+    AC-3 packs to end exactly 3 bytes after a sync**. When the flush lands after one, the
+    landing pushes the old start into the fresh ring as its first frame, **carrying the
+    old position's PTS**. `dvd_audio_decode` latches it as `play_pts`, which is 10–30 s in
+    the future after a backward seek. Audio then waits for the ~2.5 s `arm_timer` fallback,
+    the full ring backpressures the demux, and the video buffer drains. Measured:
+    `play_err` at the fallback unwraps to the seek distance + ~0.5 s.
+  - **Refuted:** "the clock re-anchors to the requested time and holds the first picture".
+    The clock anchors normally on the first tagged picture, and the hold is a data stall.
+    TMAP (#128) is uninvolved: v0.7.0 has no TMAP and reproduces.
+  - **Fix:** `rf_rst_n` also takes a registered `aud_flush` (`rf_flush_q`). That flush is
+    gated `~keep_vbuf`, so the static-pop case is untouched. `aud_resync` is deliberately
+    excluded.
+  - **Gates:** `bench/dvd/run_seek_rf_pts.sh --red` and `tools/check_rf_flush_wiring.py`.
+    The pre-fix wiring fails for a pack end 2–6 bytes past a sync, landing 19.97 s stale.
+  - **Residual:** a seek still does not arm the demux's `first_access_unit_pointer` skip,
+    so a stray `0B77` in the landing's partial frame can still make one garbage frame
+    (a click).
+  - **Harness fix alongside:** `mister.py deploy --main` now re-points `[DVD] main=` even
+    when that Main is already running. After a `restore`, the next load had silently
+    re-exec'd into stock Main.
+  - **Next step:** the fix build through the same script (`DVD_dpadbackhold_*.rbf`).
+
 - 🔧 **CHROMA ROWS: THE DISPLAY INTERPOLATES FROM THE ROWS THE BILINEAR WEIGHTS EXPECT
   (2026-09-29, ✅ MERGED PR #142, sim-proven, HW-measured 2026-09-30; one ROGER Prog late ACCEPTED).**
   - **What was wrong (upstream, since the import):** the "lower" chroma row used `mv ±2`
