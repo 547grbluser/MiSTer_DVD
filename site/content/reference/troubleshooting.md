@@ -229,6 +229,23 @@ timestamp at a jump.
 The same fix also stops the last second of a voice clip being cut when the disc moves on by
 itself.
 
+### A second of sound is missing where one clip or episode runs into the next
+
+Most noticeable on laserdisc-style game discs such as *Thayer's Quest* or *Mad Dog McCree*,
+where the disc plays short clips back to back. It also shows at the join between episodes
+on a "play all" disc, and in some menus.
+
+At each join the first second or so of the new clip's sound was missing while its picture
+played. After some joins the sound instead came in early and stayed about a second ahead of
+the picture until the next clip.
+
+Many discs start each clip's timestamps again from zero. The core used to clear its sound
+buffer when the picture reached that point, and by then the buffer already held the start
+of the next clip. The sound now switches to the new clip's timing at the join itself, so
+nothing is thrown away. The old clip's last moment plays out, and the new clip starts with
+its picture. Seamless joins, such as the branch points in *The Matrix*, play straight
+through as before.
+
 ### Menu audio went silent
 
 You changed the audio track while the menu was open. It comes back when you leave the menu.
