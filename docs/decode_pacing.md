@@ -706,6 +706,23 @@ structural fix, not a fallback.
   extend the existing film-raster path, be HDMI-only, and disable Bob. It is recorded as
   an option, not recommended over F1–F3.
 
+**High-motion film re-checked on the v0.8.0 release build (2026-09-30).** The one real-world
+high-motion case the v0.8.0 smoke tests saw skip was *The Mummy Returns* (film, Progressive,
+Auto): 0.3–0.4 lates/s in its late chapters, identical from the drive and from the rip, so
+not the read-ahead. Same rig, same script, candidate 1 (`f473247`, before F1/F2) as the
+control arm, then the release build (`ed72a56`), 40 s windows:
+
+| Chapter | candidate 1 | v0.8.0 |
+|---|---|---|
+| 13 | 0.10 lates/s, 23.94 fps | 0, 23.97 fps |
+| 19 | 0.44 lates/s, 23.74 fps | 0, 23.98 fps |
+
+So the "compute-bound high-motion stutter" the manual used to warn about was this same
+contention, and on this disc F1 + F2 removed it too. On that basis the manual's remaining
+high-motion caveats were dropped for v0.8.0 (compatibility, troubleshooting "Video skips
+frames", Frame Drop, Film 24p). The residuals still documented are Film 24p Out = On over
+29.97 fps video (by design) and #142's accepted single ROGER frame (not user-facing).
+
 ## 8. Tools and gates added
 
 | File | What |

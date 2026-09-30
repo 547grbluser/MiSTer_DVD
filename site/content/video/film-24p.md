@@ -12,8 +12,7 @@ stream, and outputs at the display's native 59.94 Hz (50 Hz for PAL).
 exactly 2:5 and the clocks are locked, that conversion is exact.
 
 This second path also cuts framebuffer re-reads from 60 per second to 24, which hands the
-decoder a much larger uninterrupted memory window each frame — so it helps throughput on
-demanding discs as well as cadence.
+decoder a much larger uninterrupted memory window each frame.
 
 ## When to change it
 
@@ -83,8 +82,7 @@ left to detect. Nothing can infer it from the stream, which is why the manual **
 ## Related settings
 
 - **`Frame Drop` must stay On.** Advancing past a frame is how the player recovers time
-  it has lost, and film content on a demanding disc is exactly where it needs to. With it
-  off, the picture runs progressively later and lip sync goes with it. See
+  it has lost. With it off, the picture runs progressively later and lip sync goes with it. See
   [Settings](../playback/settings.md#frame-drop).
 - **`A/V Offset` defaults to 0 ms.** There should be no need to change it. (It was
   +100 ms in v0.4.0 and earlier, nulling an offset the current clock no longer has.)

@@ -78,8 +78,8 @@ on both Video Output settings (see
 
 It is also how the player catches up when it has fallen behind the disc's own timeline:
 advancing past a frame is the only way to recover time that has already been lost. With
-Frame Drop off there is no such mechanism, so on heavy content the picture simply runs
-progressively later and lip sync drifts with it. The Off position exists to isolate the
+Frame Drop off there is no such mechanism, so if the picture ever falls behind it simply
+runs progressively later and lip sync drifts with it. The Off position exists to isolate the
 governor when diagnosing a pacing problem, not as a quality setting.
 
 ### A/V Sync

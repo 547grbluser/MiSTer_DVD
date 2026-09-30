@@ -48,9 +48,9 @@ See [Analog and CRT output](../video/analog-crt.md#native-240p-for-vcds-and-mpeg
 **Busy video keeps up on both Video Output settings.** Earlier builds dropped a frame or
 two a second in the busiest concert and TV discs on **Progressive** output, because the
 display's memory reads competed with the decoder. The display now reads about a third as
-much per line, and every disc measured keeps up on Progressive and on Interlaced, at
-most skipping a rare single frame in its very busiest scene. The one exception is by design: **Film 24p Out = On** with 29.97 fps video
-(see [Troubleshooting](troubleshooting.md#video-skips-frames-in-busy-scenes)).
+much per line, and every disc measured keeps up on Progressive and on Interlaced,
+including its busiest scenes. The one exception is by design: **Film 24p Out = On** with
+29.97 fps video (see [Troubleshooting](troubleshooting.md#video-skips-frames)).
 
 ## Audio
 

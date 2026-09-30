@@ -421,11 +421,10 @@ Also confirm **`Frame Drop` is On** — advancing past a frame is the only way t
 can recover time once it has fallen behind, so with it off the picture just runs later and
 later.
 
-### Video skips frames in busy scenes
+### Video skips frames
 
-This should be rare on either **Video Output** setting: every disc measured keeps up in
-its busiest scenes on Progressive and on Interlaced, skipping at most a rare single frame.
-If a disc skips more than that:
+This should not happen on either **Video Output** setting: every disc measured keeps up,
+including its busiest scenes, on Progressive and on Interlaced. If a disc does skip:
 
 - Check **Film 24p Out**. With it **On**, an NTSC *video* disc (29.97 frames a second)
   skips by design: that raster runs at 23.976 Hz and cannot show 29.97 frames a second.
