@@ -102,7 +102,7 @@ two fields, and they are two different moments. `Deinterlace` chooses how they a
 |---|---|---|
 | **Weave** *(default)* | Both fields at once: full detail, but anything that moves shows **combing**, fine horizontal teeth along moving edges. | The framework scaler interleaves the fields: full detail, combing on motion. |
 | **Bob** | One field at a time, 60 (or 50) times a second, with the other field's lines filled in from the lines above and below. Motion is smooth and there is no comb; the cost is half the vertical detail, and fine horizontal edges shimmer slightly as the two fields alternate. | The framework scaler's bob, with the same trade. |
-| **Blend** | Every line mixed with the lines above and below it. The comb becomes a soft ghost of the two moments, and nothing changes from one refresh to the next, so edges and text stay perfectly steady. The cost is sharpness everywhere, including parts of the picture that were not moving. | Not offered. |
+| **Blend** | Every line mixed with the lines above and below it. The comb becomes a soft ghost of the two moments, and nothing changes from one refresh to the next, so edges and text stay perfectly steady. The cost is sharpness everywhere, including parts of the picture that were not moving. | Not offered: MiSTer's framework scaler only deinterlaces by weave or bob. |
 
 The OSD only lists the choices that apply to the current `Video Output`. If `Blend` is
 selected and you switch to Interlaced, the setting shows and behaves as `Weave` there, and
