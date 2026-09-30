@@ -552,12 +552,12 @@ single-picture cell, or the latch forming after c1's anchor. It is harmless eith
 
 ## 4b. Still open
 
-*(The HW plan below was carried out in rounds 1–4. What remains:)*
-- **By ear:** capture-card audio across a Thayer join and a Matrix white-rabbit cell. The
-  Hagibis capture card was moved off the original rig on 2026-09-29, so ask the maintainer
-  to reconnect it first.
-- **Scooby-Doo 2 whac-a-mole ("good job")** and a play-all TV disc. Neither has run on
-  this branch.
+*(The HW plan below was carried out in rounds 1–4.)*
+- ✅ **By ear, the maintainer, 2026-09-29, build `DVD_nsaudio_20260930_0030`: all four
+  work on hardware.** Thayer's Quest (every clip's opening words intact), ULTIMATE_T2's
+  menu music at the second segment, The Matrix white-rabbit cells (no click, gap or
+  lip-sync shift), and Scooby-Doo 2's whac-a-mole ("good job") plus a play-all TV disc.
+What remains:
 - **SuperStation Main stalls:** a longer soak, counting stalls per build.
 - The c1-vs-c2 orphan timing (above) is unexplained but harmless.
 

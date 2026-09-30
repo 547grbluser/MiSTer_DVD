@@ -464,7 +464,7 @@ otherwise; `--red` runs its mutation arms).
   `pts_assoc` never tags a second field; audio re-times IN BAND at the discontinuity frame
   (steps 1–8: hold, wait for the clock, trim, orphaned-latch release; never at a
   seamless-stamped frame). HW round 4: Thayer 0–9 ms/join, T2 menu in sync 0.08 s after
-  its picture, Matrix white-rabbit 0 ms. `docs/nonseamless_audio.md` §4a; gates
+  its picture, Matrix white-rabbit 0 ms; maintainer by-ear pass incl. Scooby-Doo 2. `docs/nonseamless_audio.md` §4a; gates
   `run_pts_assoc.sh`, `run_aud_retime.sh --red`, `check_aud_rephase_wiring.py`.
 - ⚠ `lates` counts one per refresh while a PGC still is held (`flags.still`), so boot and
   menu windows over-report (`docs/decode_pacing.md` §2c). The Progressive lates and the

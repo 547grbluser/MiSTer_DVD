@@ -69,8 +69,11 @@ predate later confirmations; the `CLAUDE.md` index carries the reconciled status
     - ULTIMATE_T2: menu audio in sync **0.08 s** after its picture (old build 0.16 s,
       rounds 2–3 0.84 s), with no reset.
     - The Matrix: 0 ms, identical to the old build.
-  - **Open:** a by-ear capture-card check, Scooby-Doo 2, a play-all TV disc, and the
-    SuperStation Main-stall soak (§4b).
+  - **Maintainer by-ear pass (2026-09-29, same build):** Thayer, ULTIMATE_T2, the Matrix
+    white-rabbit cells, Scooby-Doo 2's whac-a-mole ("good job") and a play-all TV disc
+    all work on hardware.
+  - **Open, non-blocking:** the SuperStation Main-stall soak, and why the T2 orphan
+    released at c2 rather than c1 (§4b).
 
 - ✅ **PER-PICTURE DECODE-TIME INSTRUMENT (2026-09-29,
   ✅ MERGED PR #140; sim-gated, HW DATA TAKEN 2026-09-29).**

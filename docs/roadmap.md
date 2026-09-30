@@ -679,8 +679,9 @@ that replaces the display-time `aud_resync` (✅ Thayer 0 ms per join on two rig
 rounds 1–2 found a T2 menu regression and a Matrix white-rabbit regression; both are
 fixed in sim (the hold waits for the clock; seamless-stamped frames are not re-timed).
 Round 4 measured all three against the old build: Thayer 0–9 ms per join, T2 menu in
-sync 0.08 s after its picture, Matrix 0 ms. Remaining before merge: a by-ear capture,
-Scooby-Doo 2 and a play-all TV disc (`docs/nonseamless_audio.md` §4b).
+sync 0.08 s after its picture, Matrix 0 ms. The maintainer then passed all of it by ear,
+plus Scooby-Doo 2's whac-a-mole and a play-all TV disc. **Ready to merge**
+(`docs/nonseamless_audio.md` §4b lists the non-blocking open items).
 
 ~~**Also open:** Thayer boot-FMV Interlaced lates (3.4/s, deterministic from boot).~~
 ✅ **Resolved (PR #140):** 0 lates from the FMV's first picture after F2, and 0 pictures
