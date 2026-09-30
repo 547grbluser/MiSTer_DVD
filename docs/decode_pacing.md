@@ -574,12 +574,20 @@ fixes the upstream finding above that F2 preserved.
   | chroma rows, run 2 | 0.01 | 14.9 / 12.4 | 13.1 / 10.0 |
 
   Per-picture cost is unchanged on Progressive, and Interlaced is 0.4 ms cheaper (4 → 3
-  words). **But the one late is repeatable.** It falls at the same picture every time,
-  about the 1,055th after launch, the disc's heaviest nearby (`pic_max` ≈ 450, about 28 ms
-  against 33; `pic_over` 0). Every launch crosses it in the first Progressive window:
+  words). **But the one late is repeatable.** It falls at the same place every time,
+  about the 1,055th picture after launch. Every launch crosses that point in the first
+  Progressive window:
   - the control builds (F2's own run, this session's control, 3 interleaved A/B launches)
     **0 of 5** late there;
   - this build **4 of 5**, one late each.
+
+  ⚠ **It is not established that the heaviest picture is what goes late.** `pic_max`
+  near that point is 449–451 on **both** builds, so no picture decoded slower. The late is
+  counted in the 0.5 s sample *before* the one where `pic_max` reaches 450. That fits a
+  late registered at the deadline while that picture is still decoding (`pic_max` records
+  a picture when it completes). It fits slack eroding over the preceding pictures, or a
+  display-side cause, just as well. A fix must be judged by the interleaved launch A/B
+  (`.sim/chromarows/ab.sh`, 5 + 5 launches), not by window averages, which are identical.
 
   Unproven explanation: the weave word count is unchanged, but the timing moved. F2
   fetched a new chroma row on alternate lines (2, 4, 2, 4 words per macroblock); the
