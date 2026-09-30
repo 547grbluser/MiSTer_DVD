@@ -22,13 +22,13 @@ predate later confirmations; the `CLAUDE.md` index carries the reconciled status
 
 ## Hardware status (THIS fork, verified 2026-06-21)
 
-- 🔧 **A SEEK FLUSH RESETS THE AUDIO REFRAMERS: NO STALE PTS AFTER A BACKWARD JUMP
-  (2026-09-30, branch `fix/dpad-back-hold`, sim-proven; ⏳ HW).**
+- ✅ **A SEEK FLUSH RESETS THE AUDIO REFRAMERS: NO STALE PTS AFTER A BACKWARD JUMP
+  (2026-09-30, branch `fix/dpad-back-hold`, not merged; sim-proven and HW-CONFIRMED).**
   Full record: `docs/dvd_nav.md` §2h "The stale audio PTS".
   - **Report (release-candidate smoke test):** on Men in Black, about one −20 s D-pad
     gesture in three showed lates +116–124 and ~33 frames not shown (≈1.3 s held). It was
     read as a regression from #128 (TMAP seek), because v0.7.0 had read 0 of 6.
-  - **Not a regression.** Same script on one rig (.201), 20 ms telemetry. **v0.7.0 2 of 12,
+  - **Not a regression.** Same script on one rig (a second rig), 20 ms telemetry. **v0.7.0 2 of 12,
     the current candidate 2 of 12** (−20 s). On the candidate, −30 s gave 1 of 10, a single
     −10 s gave 0 of 12, and **Previous Chapter gave 1 of 12**. The per-PR bisect was not run,
     because the control is not clean. 0 of 6 is what a ~1-in-7 rate gives a third of the time.
@@ -60,7 +60,14 @@ predate later confirmations; the `CLAUDE.md` index carries the reconciled status
   - **Harness fix alongside:** `mister.py deploy --main` now re-points `[DVD] main=` even
     when that Main is already running. After a `restore`, the next load had silently
     re-exec'd into stock Main.
-  - **Next step:** the fix build through the same script (`DVD_dpadbackhold_*.rbf`).
+  - **HW (fix build `DVD_dpadbackhold_20260930_1459.rbf`, `clk_dec` 87.86 / 91.69 MHz):**
+    **0 of 44** backward jumps went bad on rig A (the rig the report came from) (Left Left from ~6 min ×2, Previous Chapter,
+    and the maintainer's exact script), against **7 of 78** unfixed across both rigs. The
+    unfixed candidate reproduced on rig A with the maintainer's script (1 of 8). There the
+    capture card recorded a **2.51 s audio silence** at the bad landing and none at the
+    good ones; the fix arms have none.
+  - **Next step:** merge (PR not opened yet). Then consider arming the demux's
+    `first_access_unit_pointer` skip on a flush (the residual above).
 
 - 🔧 **CHROMA ROWS: THE DISPLAY INTERPOLATES FROM THE ROWS THE BILINEAR WEIGHTS EXPECT
   (2026-09-29, ✅ MERGED PR #142, sim-proven, HW-measured 2026-09-30; one ROGER Prog late ACCEPTED).**

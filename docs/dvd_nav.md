@@ -2275,7 +2275,7 @@ time, from ffmpeg's own decode.
 The harness cannot reach that gesture (`kbd_map` routes keyboard FF/REW to the D-pad path),
 so a person holding the button is the instrument.
 
-#### The stale audio PTS: a picture hold after some backward seeks (2026-09-30) — 🔧 fixed in sim, ⏳ HW
+#### The stale audio PTS: a picture hold after some backward seeks (2026-09-30) — ✅ HW-CONFIRMED on branch `fix/dpad-back-hold` (not merged)
 
 **Report (release-candidate smoke test, 2026-09-30).** Men in Black, Disc Menus Off, D-Pad
 Seek On. Repeating "Left Left (one −20 s gesture), wait 10 s, Right, wait 10 s": a normal
@@ -2286,15 +2286,27 @@ and v0.7.0 read 0 of 6, so it was taken for a regression, with this section's TM
 (#128) as the prime suspect.
 
 **It is not a regression, and it is not TMAP.** The bisect's control arm reproduces it.
-Same script, one rig (.201), one Main, driven on the target with 20 ms telemetry
-(`tools/mister.py`'s `/tmp/dvd_telem_fast` knob):
+Same script, one rig (rig B), one Main, driven on the target with 20 ms telemetry
+(`tools/mister.py`'s `/tmp/dvd_telem_fast` knob). Rig A is the rig the report came from, and
+it has the capture card; rig B is a second rig:
 
-| build | gesture | bad / gestures |
-|---|---|---|
-| v0.7.0 (`DVD_20260924.rbf`) | Left Left (−20 s) | **2 / 12** |
-| current candidate (`DVD_20260930.rbf`) | Left Left (−20 s) | **2 / 12** |
-| current candidate | Left (−10 s) | 0 / 12 |
-| current candidate | Left Left Left (−30 s) | 1 / 10 |
+| rig | build | gesture | bad / gestures |
+|---|---|---|---|
+| B | v0.7.0 (`DVD_20260924.rbf`) | Left Left (−20 s) | **2 / 12** |
+| B | current candidate (`DVD_20260930.rbf`) | Left Left (−20 s) | **2 / 12** |
+| B | current candidate | Left (−10 s) | 0 / 12 |
+| B | current candidate | Left Left Left (−30 s) | 1 / 10 |
+| B | current candidate | Previous Chapter | **1 / 12** |
+| A | current candidate | Left Left, from ~6 min | 0 / 12 |
+| A | current candidate | Left Left, the maintainer's script (from ~1 min) | **1 / 8** |
+| A | **fix** (`DVD_dpadbackhold_20260930_1459.rbf`) | Left Left, from ~6 min, twice | **0 / 24** |
+| A | **fix** | Previous Chapter | **0 / 12** |
+| A | **fix** | Left Left, the maintainer's script | **0 / 8** |
+
+Before the fix, 7 of 78 backward jumps went bad (~9 %). After it, 0 of 44 did. At the
+pre-fix rate a clean 44 happens by chance ~1.6 % of the time, and the bench below pins the
+mechanism. In the maintainer's script, landing 6 went bad on the control and was clean on
+the fix.
 
 The per-PR dev builds (`DVD_tmapseek_*`, `DVD_fieldblend_*`, …) were not run. A bisect needs
 a clean control, and v0.7.0 is not clean. The maintainer's 0 of 6 on v0.7.0 is what a
@@ -2371,7 +2383,12 @@ frame. A stray in-payload sync there (5 of 817 AC-3 PES in the MiB slice,
 `docs/fabric_audio.md`) makes one garbage frame, which is a click, not a hold. The fix would
 be to arm `rlgn_pend` on a flush; its blast radius is keep_vbuf hops.
 
-**HW:** ⏳ the fix build through the same script (see `docs/status_log.md`).
+**HW (2026-09-30):** ✅ the table above. The fix build is `clk_dec` 87.86 / 91.69 MHz
+(both corners pass, SEED 9, 97 % ALM). **By ear:** the capture card (on rig A) recorded one
+**2.51 s silence** at the control's bad landing, and none over 1.2 s at the seven good
+landings or anywhere in the four fix arms. The picture freeze is the stop in `pickups` (no
+new picture shown). Lip sync afterwards (audio ~1 s late) is inferred from `av_drift` −
+`disp_lag`; the capture card's video was held by OBS, so it was not measured on a capture.
 
 ### 2a. Hold-to-seek — SEEK-ON-RELEASE with acceleration (`dvd/scrub_ctrl.sv`)
 
