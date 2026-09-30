@@ -422,6 +422,7 @@ otherwise; `--red` runs its mutation arms).
 | F1: no OSD display reads (8 → 6 words per MB-line, bit-exact; Prog lates ROGER 9.2→3.8, Office 8.2→1.0, Thayer 7.3→0.1; PR #138) | ✅ HW-measured | `decode_pacing.md` §7 | `run_osd_read.sh`, `check_osd_read_wiring.py` |
 | Per-picture decode-time instrument: telemetry words 21–24 (`pic_max`, `pic_n`, `pic_over`); settled §6c, F4 not justified; PR #140 | ✅ HW data | `decode_pacing.md` §7 "Instrument" | `run_telem.sh` (M5–M8), `check_decode_duty_wiring.py` |
 | F2: chroma row reuse (6 → 3 words per MB-line on Progressive, bit-exact; Prog lates ROGER 3.6→0, Office 1.0→0; PR #139) | ✅ HW-measured | `decode_pacing.md` §7 F2 | `run_chroma_reuse.sh`, `check_chroma_reuse_wiring.py` |
+| Chroma rows: the upstream lower-row offset fix (±1 row / same-field ±1), reuse cache banked by row parity (Interlaced 4 → 3 words) | 🔧 sim-proven, ⏳ HW (`feature/chroma-rows`) | `decode_pacing.md` §7 "F2 follow-up" | `run_chroma_reuse.sh` [4] (`+rowref`), `check_chroma_reuse_wiring.py` |
 
 ### Audio and A/V sync
 
