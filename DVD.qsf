@@ -1536,4 +1536,16 @@ set_global_assignment -name PHYSICAL_SYNTHESIS_COMBO_LOGIC OFF
 # releases/DVD_dpadbackhold_20260930_1715.rbf, commit fbe0b5e (RTL = 2a3a872).
 #   A few clk_sys registers far from clk_dec re-rolled the fit -- the lottery, again.
 
+# v0.8.0 CANDIDATE 2 (2026-09-30) -- SUPERSEDED, never shipped: main at PR #142 + v0.8.0,
+# commit 45073f0 (never pushed). SEED 9 first roll, clk_dec 93.47 @100C / 90.31 @-40C,
+# 40,817 ALMs (97 %), 512 M10K. Its smoke test found the backward-seek stall that #143
+# fixed, so v0.8.0 was cut a third time.
+
+# RELEASE v0.8.0 (2026-09-30, the shipping netlist): SEED 7 held FIRST roll --
+# clk_dec 90.87 MHz @100C / 90.44 MHz @-40C (gate 86.0, PASS both corners,
+# non-marginal), 40,793 / 41,910 ALMs (97 %), 53,433 registers, 512 / 553 M10K
+# (93 %), 95 / 112 DSP. Build releases/DVD_20260930.rbf, commit ed72a56.
+#   Main at PR #143 (its SEED 7 build: 88.44/87.94) plus CORE_VERSION
+#   dev-dpadbackhold -> v0.8.0.
+
 set_global_assignment -name SEED 7
