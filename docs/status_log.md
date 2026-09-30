@@ -23,7 +23,7 @@ predate later confirmations; the `CLAUDE.md` index carries the reconciled status
 ## Hardware status (THIS fork, verified 2026-06-21)
 
 - 🔧 **CHROMA ROWS: THE DISPLAY INTERPOLATES FROM THE ROWS THE BILINEAR WEIGHTS EXPECT
-  (2026-09-29, branch `feature/chroma-rows`, sim-proven, HW-measured 2026-09-30; one ROGER Prog late ACCEPTED).**
+  (2026-09-29, ✅ MERGED PR #142, sim-proven, HW-measured 2026-09-30; one ROGER Prog late ACCEPTED).**
   - **What was wrong (upstream, since the import):** the "lower" chroma row used `mv ±2`
     (progressive) and `±4` (interlaced upsampling), but `memory_address` halves `mv_y`
     again for chroma. So odd progressive lines had no vertical chroma interpolation, and
@@ -49,7 +49,6 @@ predate later confirmations; the `CLAUDE.md` index carries the reconciled status
     both builds, and a sim stall probe finds no display-side difference. So this is one
     spot on one disc, not a pattern.
   - **Decision (maintainer, 2026-09-30): accepted.** F3 remains the structural fix.
-  - **Next:** merge (PR not yet opened).
   - Full record: `docs/decode_pacing.md` §7 "F2 follow-up".
 
 - ✅ **NON-SEAMLESS CELL-JOIN AUDIO (2026-09-29, ✅ MERGED PR #141; HW-CONFIRMED in
@@ -141,7 +140,7 @@ predate later confirmations; the `CLAUDE.md` index carries the reconciled status
     was the unregistered key → tag compare → tag write. The key is now registered, and a
     line whose registered key may be stale (the scan's first line, or a signature change)
     fetches both rows and files nothing: two extra row fetches per scan.
-  - ⚠ **Finding (preserved by F2; fixed on `feature/chroma-rows`, the entry above):** the
+  - ⚠ **Finding (preserved by F2; fixed by PR #142, the entry above):** the
     upstream "lower" chroma row is `mv/2` off.
     Odd progressive lines get no vertical chroma interpolation, and field scans
     interpolate with the opposite field's row. F2 keeps this bit for bit.

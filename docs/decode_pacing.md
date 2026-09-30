@@ -501,7 +501,7 @@ The other discs' "before" is F1's own table.
   its existing block). `clk_dec` **90.6 MHz @100 °C, 91.5 MHz @−40 °C** (F1: 92.3 / 90.5),
   `releases/DVD_chromareuse_20260929_1223.rbf`.
 
-**F2 follow-up: the right chroma rows.** ✅ **Built on `feature/chroma-rows`, sim-proven
+**F2 follow-up: the right chroma rows.** ✅ **MERGED (PR #142), sim-proven
 2026-09-29, HW-measured 2026-09-30; one repeatable late on ROGER Progressive, ACCEPTED by
 maintainer decision** (below). This fixes the upstream finding above that F2 preserved.
 - **What changes in the picture.** Every line now interpolates its chroma between the two
