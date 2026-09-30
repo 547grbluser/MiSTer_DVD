@@ -450,12 +450,12 @@ The other discs' "before" is F1's own table.
   At 720×480 and 60 Hz: Progressive 62 → **31 MB/s** (83 before F1), below the pre-F1
   Interlaced 41 MB/s where lates were about 0. Interlaced 31 → 21 MB/s.
 - **Quality cost:** none. The pixels are bit-identical.
-- ⚠ **Finding, preserved deliberately:** the upstream "lower" chroma row is not the one
-  `bilinear.txt` describes. `memory_address` halves `mv_y` for chroma a second time, so
-  `mv ±2` (progressive upsampling) lands on rows **+0 / −1**: odd lines get no vertical
-  chroma interpolation at all. `mv ±4` (interlaced upsampling) lands on **±1**, the
-  *opposite field's* chroma row, where 4:2:0 interlaced needs ±2. F2 keeps it bit for
-  bit, so F2 can be proven by identity.
+- ✅ **Finding, preserved deliberately in F2 and FIXED in its follow-up (below):** the
+  upstream "lower" chroma row was not the one `bilinear.txt` describes. `memory_address`
+  halves `mv_y` for chroma a second time, so `mv ±2` (progressive upsampling) landed on
+  rows **+0 / −1**: odd lines got no vertical chroma interpolation at all. `mv ±4`
+  (interlaced upsampling) landed on **±1**, the *opposite field's* chroma row, where 4:2:0
+  interlaced needs ±2. F2 kept it bit for bit, so F2 could be proven by identity.
   - **Pre-existing:** `mem_addr.v` and the upstream `rtl/mpeg2/resample_addrgen.v` are
     unchanged since the upstream import (`30c8a75`). Upstream's own clamps (`plus_2` on the
     last chroma row, `plus_4` on the last two) show that ±1 / ±2 rows was the intent.
@@ -466,10 +466,6 @@ The other discs' "before" is F1's own table.
     blocks look the same side by side, enlarged 4×. The difference is faint horizontal
     streaks at colour edges; on interlaced content it grows with motion (25 % of the
     chroma is from the other field).
-  - **Fix, if ever:** double the two offsets (`±2 → ±4`, `±4 → ±8`). It changes pixels, so
-    it needs a reference-filter bench, not an identity gate. The reuse cache absorbs it,
-    and field scans get cheaper (same-field rows repeat). Fixing it would be a separate, visible change,
-  and the reuse cache would absorb it (the key follows whatever row is fetched).
 - **Gates:** `bench/dvd/run_chroma_reuse.sh`:
   - [1] Bit-exact across 14 arms, CHROMA_REUSE 0 vs 1, with memory words that hash
     their own address. Two checksums: displayed pixels, and every pixel `resample` emits
@@ -504,6 +500,117 @@ The other discs' "before" is F1's own table.
   registers, **+2 RAM blocks** (the 256 × 64 cache; the resample fifo's 3 → 8 bits fit
   its existing block). `clk_dec` **90.6 MHz @100 °C, 91.5 MHz @−40 °C** (F1: 92.3 / 90.5),
   `releases/DVD_chromareuse_20260929_1223.rbf`.
+
+**F2 follow-up: the right chroma rows.** ✅ **MERGED (PR #142), sim-proven
+2026-09-29, HW-measured 2026-09-30; one repeatable late on ROGER Progressive, ACCEPTED by
+maintainer decision** (below). This fixes the upstream finding above that F2 preserved.
+- **What changes in the picture.** Every line now interpolates its chroma between the two
+  rows `resample_bilinear`'s 0.75 / 0.25 weights are written for:
+  - Progressive upsampling: the nearest row and the next one (+1 on odd lines, −1 on
+    even). Before the fix, odd lines had no vertical chroma interpolation.
+  - Interlaced upsampling: the nearest row of the line's own field and that field's
+    neighbour, two frame rows away. Before the fix, 25 % of each pixel's chroma came from
+    the other field.
+
+  The size is the measurement above: a mean of about 0.5 of 255, and faint streaks at
+  colour edges that grow with motion on interlaced content. Nothing else moves. Luma, the
+  weights and the raster are untouched.
+- **Change** (`dvd/resample_addrgen.v`, `DVD-FORK FIX (chroma rows)`):
+  - The lower row's `mv_y` doubles (`±2 → ±4`, `±4 → ±8`). `mv_y` is in luma
+    half-pixels and `memory_address` halves it once more for chroma, so one chroma row is
+    `mv 4`.
+  - The two bottom clamps now read `vertical_size / 2` (the rows `memory_address` clips to)
+    instead of `mb_height`. The two differ when the height is not a multiple of 16. There,
+    the interlaced neighbour below a field's last row would have been clipped onto the
+    *other* field's last row. DVD heights (480, 576) are multiples of 16, so for DVD this
+    is only consistency.
+  - The upstream `rtl/mpeg2/resample_addrgen.v` is not built (the `.qsf` swaps in the `dvd/`
+    copy) and keeps the old offsets.
+- **Why the cache had to change with it.** Interlaced upsampling now reads only rows of the
+  line's own field. A *frame* scan of it (weave: interlaced content on the Progressive
+  raster, the case F2 was built for) alternates fields line by line, so consecutive lines
+  share **no** row: `4m {2m, 2m−2}`, `4m+1 {2m+1, 2m−1}`, `4m+2 {2m, 2m+2}`, `4m+3 {2m+1,
+  2m+3}`. With F2's two slots per plane that misses on every line: 6 words per macroblock-line,
+  undoing F2 for ROGER. So the doubled offsets on their own would have been a pacing
+  regression.
+  - The slots are now **banked by row parity**: two per bank, four per plane. A key's bank
+    is `key[0]`, so a compare against all four slots can only hit in the row's own bank.
+  - When both of a line's rows fall in one bank, F2's two-slot rule applies inside it.
+    When they fall in different banks (progressive upsampling: one even row, one odd),
+    each bank decides alone.
+  - Flags grow to `{lcp, sl[1:0], fl, su[1:0], fu}`, a slot id being `{bank, slot}`. The
+    resample fifo grows 8 → 10 bits and the cache 256 × 64 → 512 × 64.
+- **Words per macroblock-line (sim, exact per scan):** Progressive raster **3.016**, for
+  progressive and weave alike, the same as F2. **Interlaced raster 4.016 → 3.03**
+  (1552 words / 512 macroblock-lines): a field now reads only its own 64 rows, not all 128.
+  So the fix is free on Progressive and cheaper on Interlaced.
+- **Gates** (`bench/dvd/run_chroma_reuse.sh`):
+  - [1] (identity, CHROMA_REUSE 0 vs 1) still proves the banked cache. It cannot see the
+    fix, because both builds read the same rows.
+  - **[4] is new:** `resample_chain_tb +rowref=1`. Every chroma word names its own row
+    (the bench decodes component and row from the address with the `mem_codes.v` layout),
+    and every pixel `resample` emits is scored exactly against the spec's rows for its
+    line: `((6·code(up) + 2·code(lo) + 7) >>> 3) + 128`. Those rows are computed from
+    `disp_y` alone, never from the address generator's own arithmetic. There are 8 arms
+    (progressive, weave, both field upsamplings and both field orders, `vsz=300` frame and
+    field, and the pause still).
+  - On upstream's offsets, the prog arm scores **49,263 bad pixels out of 99,311**: the odd
+    lines, exactly as the finding said.
+  - Mutations M6 (no banks: pixels identical, the weave words rise, caught by [2] only) and
+    M7 (upstream's offsets: caught by [4] only, with [2] unchanged) join M1–M5.
+  - `tools/check_chroma_reuse_wiring.py` pins the four offsets, the clamps, the bank bit,
+    the 10-bit flag layout and the 512-entry cache.
+- **Build** (`releases/DVD_chromarows_20260930_0212.rbf`, seed 9): `clk_dec` **93.5 MHz
+  @100 °C, 89.9 MHz @−40 °C** (target 86.0). RAM blocks 510 → 512. At synthesis the
+  change costs **+102 LUTs, +52 registers** in `resample`: whole-design ALM estimate 40,543 →
+  40,606, against a `quartus_map` of `main`. The *fitted* figure moved 39,050 → 40,786
+  (97 %), but that is packing ("Difficulty packing design: High"), not logic.
+- **HW, 2026-09-30, ROGER, same `pacing_matrix` script, control arm first:**
+
+  | Build | Prog lates/s | Prog decode / ref ms | Ilace decode / ref ms |
+  |---|---|---|---|
+  | `main` (F2 + PR #141), control | 0.00 | 14.8 / 12.3 | 13.5 / 10.4 |
+  | chroma rows, run 1 | 0.01 | 14.8 / 12.3 | 13.1 / 10.0 |
+  | chroma rows, run 2 | 0.01 | 14.9 / 12.4 | 13.1 / 10.0 |
+
+  Per-picture cost is unchanged on Progressive, and Interlaced is 0.4 ms cheaper (4 → 3
+  words). **But the one late is repeatable.** It falls at the same place every time,
+  about the 1,055th picture after launch. Every launch crosses that point in the first
+  Progressive window:
+  - the control builds (F2's own run, this session's control, 3 interleaved A/B launches)
+    **0 of 5** late there;
+  - this build **4 of 5**, one late each.
+
+  ⚠ **It is not established that the heaviest picture is what goes late.** `pic_max`
+  near that point is 449–451 on **both** builds, so no picture decoded slower. The late is
+  counted in the 0.5 s sample *before* the one where `pic_max` reaches 450. That fits a
+  late registered at the deadline while that picture is still decoding (`pic_max` records
+  a picture when it completes). It fits slack eroding over the preceding pictures, or a
+  display-side cause, just as well. A fix must be judged by the interleaved launch A/B
+  (`.sim/chromarows/ab.sh`, 5 + 5 launches), not by window averages, which are identical.
+
+  **Not a pattern (follow-up, same session).** The two other weave-path discs in the §3
+  census read **0 lates in every cell on both builds**: Office PAL (interlaced content)
+  and Thayer VTS_08 (field-coded, `Title VTS Units=8`), on Progressive, Interlaced and
+  Auto, 2 rounds each. (Those windows ran on stock DVDcss Main after a `restore`, so they
+  carry lates, drops and fps but no `dec_*` duty. Deploy with `--main` next time.)
+  And in sim, `resample_chain_tb +weave` under bursty memory stalls cannot tell the two
+  builds apart: 0 BLACK frames at 62 % bandwidth, 13–15 at 30 %, at each of 5 stall
+  phases (`.sim/chromarows/pf/`). So the display buffer rides the new fetch pattern
+  exactly as well as F2's. If the pattern matters, it is on the decoder's side of the
+  arbiter, which that bench does not model.
+
+  **Decision (maintainer, 2026-09-30): accept.** A correct picture on every disc is worth
+  one late per ROGER playthrough at one marginal spot. Both the gain (mean |Δchroma| about
+  0.5 of 255) and the loss are below what is visible. F3 (display reads on `ram2`) stays
+  the structural fix and would remove the late with the contention. Smoothing the fetch
+  pattern (prefetch the next same-field row one line early) was considered and not built,
+  because the sim probe found no display-side effect to smooth.
+
+  Unproven explanation: the weave word count is unchanged, but the timing moved. F2
+  fetched a new chroma row on alternate lines (2, 4, 2, 4 words per macroblock); the
+  correct rows arrive in pairs (2, 2, 4, 4). At a picture already near its deadline that
+  costs one frame. Data: `.sim/chromarows/hil/` (gitignored).
 
 F1 and F2 do not violate `hw_budget_and_lessons.md` §2's "do not reach for smaller data
 first": they remove *redundant* reads and cost no quality. The port move below stays the
@@ -611,7 +718,7 @@ structural fix, not a fallback.
 | `bench/dvd/dec_duty_tb.sv`, `dvd_telem_tb` [6] | exclusive classes and exact scale; the words in order with every input tied off |
 | `tools/check_decode_duty_wiring.py` | motcomp → mpeg2video → emu → telem → qsf → dvd_ctl, plus the per-picture words 21–24 |
 | `bench/dvd/run_osd_read.sh`, `tools/check_osd_read_wiring.py` | F1: bit-exact without the OSD reads, 8 → 6 words |
-| `bench/dvd/run_chroma_reuse.sh`, `tools/check_chroma_reuse_wiring.py` | F2: bit-exact chroma row reuse in 14 arms, exact words per scan, M1–M5 |
+| `bench/dvd/run_chroma_reuse.sh`, `tools/check_chroma_reuse_wiring.py` | F2: bit-exact chroma row reuse in 14 arms, exact words per scan; the chroma-row fix's reference arms [4] (`+rowref`); M1–M7 |
 | `resample_chain_tb` `+addrhash` / `+weave` / `+croptog` | address-hashed memory, the PIXSUM / RSUM / RQS lines, interlaced content on the progressive raster, a logical-point mid-line crop toggle |
 | `bench/dvd/run_telem.sh` | runs all of the above, plus mutations M1–M4, each caught |
 

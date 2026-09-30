@@ -127,11 +127,11 @@ module resample(
   output             scan_bob_bot;                // DVD-FORK (progressive bob): ... and keeps the BOTTOM field
 
   /* resample fifo */
-  wire          [7:0]resample_wr_dta;                 // DVD-FORK FIX (F2): position code + chroma reuse flags
+  wire          [9:0]resample_wr_dta;                 // DVD-FORK FIX (F2): position code + chroma reuse flags
   wire               resample_wr_en;
   output             resample_wr_overflow;           // to probe
   wire               resample_wr_almost_full;
-  wire          [7:0]resample_rd_dta;
+  wire          [9:0]resample_rd_dta;
   wire               resample_rd_en;
   wire               resample_rd_valid;
 
@@ -150,7 +150,7 @@ module resample(
    * reuse (requires OSD_READS = 0); 0 = the F1 structure (bench baseline). The resample
    * fifo carries the reuse flags only when it is on. docs/decode_pacing.md §7 F2. */
   parameter CHROMA_REUSE = 1;
-  localparam [8:0] RESAMPLE_WIDTH = CHROMA_REUSE ? 9'd8 : 9'd3;
+  localparam [8:0] RESAMPLE_WIDTH = CHROMA_REUSE ? 9'd10 : 9'd3;
 
   // Generates the memory read requests for displaying a frame
   resample_addrgen #(.OSD_READS(OSD_READS), .CHROMA_REUSE(CHROMA_REUSE)) resample_addrgen (
@@ -272,7 +272,7 @@ module resample(
   // fifo between resample_addr and resample_dta
   fifo_sc 
     #(.addr_width(RESAMPLE_DEPTH),
-    .dta_width(RESAMPLE_WIDTH),                     // DVD-FORK FIX (F2): 8 with chroma reuse, else 3
+    .dta_width(RESAMPLE_WIDTH),                     // DVD-FORK FIX (F2): 10 with chroma reuse, else 3
     .prog_thresh(RESAMPLE_THRESHOLD))
     resample_fifo (
     .rst(rst), 
@@ -291,8 +291,8 @@ module resample(
     .underflow()
     );
 
-  generate if (RESAMPLE_WIDTH < 9'd8) begin : g_rs_narrow
-    assign resample_rd_dta[7:RESAMPLE_WIDTH] = {(8-RESAMPLE_WIDTH){1'b0}};   // no flags without reuse
+  generate if (RESAMPLE_WIDTH < 9'd10) begin : g_rs_narrow
+    assign resample_rd_dta[9:RESAMPLE_WIDTH] = {(10-RESAMPLE_WIDTH){1'b0}};   // no flags without reuse
   end endgenerate
 
 `ifdef CHECK

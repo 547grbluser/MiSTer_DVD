@@ -22,6 +22,35 @@ predate later confirmations; the `CLAUDE.md` index carries the reconciled status
 
 ## Hardware status (THIS fork, verified 2026-06-21)
 
+- 🔧 **CHROMA ROWS: THE DISPLAY INTERPOLATES FROM THE ROWS THE BILINEAR WEIGHTS EXPECT
+  (2026-09-29, ✅ MERGED PR #142, sim-proven, HW-measured 2026-09-30; one ROGER Prog late ACCEPTED).**
+  - **What was wrong (upstream, since the import):** the "lower" chroma row used `mv ±2`
+    (progressive) and `±4` (interlaced upsampling), but `memory_address` halves `mv_y`
+    again for chroma. So odd progressive lines had no vertical chroma interpolation, and
+    interlaced lines took a quarter of their chroma from the *other* field. F2 (PR #139)
+    found this and preserved it deliberately, to keep its identity proof.
+  - **Fix:** offsets `±4` / `±8`, and the bottom clamps read `vertical_size / 2`
+    instead of `mb_height`. The weights are unchanged.
+  - ⚠ **The offsets alone would have regressed pacing.** A weave scan (interlaced content
+    on the Progressive raster) alternates fields line by line, so consecutive lines then
+    share no chroma row, and F2's two slots missed on every line (6 words per macroblock-line).
+    The reuse cache is now **banked by row parity** (4 slots per plane, fifo 8 → 10 bits,
+    cache 512 × 64). Progressive stays at 3.016 words; Interlaced drops 4.016 → 3.03.
+  - **Gates:** `run_chroma_reuse.sh` [4] is new: `resample_chain_tb +rowref=1` scores every
+    emitted pixel against the spec's rows (8 arms, 0 bad; upstream's offsets 49,263 bad of
+    99,311). M6 (no banks) and M7 (upstream offsets) are each caught by their own arm.
+  - **Build:** `clk_dec` 93.5 / 89.9 MHz (both corners pass), +2 RAM blocks, +102 LUTs.
+  - ⚠ **HW 2026-09-30:** ROGER is unchanged per picture on Progressive and cheaper on
+    Interlaced, **but** one late now appears at ROGER's heaviest picture (about pickup
+    1,055, ~28 ms): 4 of 5 launches on this build, 0 of 5 on the control builds.
+    Suspected cause: the correct rows arrive in pairs of lines (2, 2, 4, 4 words), where
+    F2 fetched on alternate lines (2, 4, 2, 4).
+  - **Follow-up:** Office PAL and Thayer VTS_08 (the same weave path) read 0 lates on
+    both builds, and a sim stall probe finds no display-side difference. So this is one
+    spot on one disc, not a pattern.
+  - **Decision (maintainer, 2026-09-30): accepted.** F3 remains the structural fix.
+  - Full record: `docs/decode_pacing.md` §7 "F2 follow-up".
+
 - ✅ **NON-SEAMLESS CELL-JOIN AUDIO (2026-09-29, ✅ MERGED PR #141; HW-CONFIRMED in
   round 4 and by the maintainer by ear).** Full record: `docs/nonseamless_audio.md`.
   - **Report.** Thayer's Quest VTS_08 lost ~1.3 s of audio at every clip start. After about
@@ -111,7 +140,8 @@ predate later confirmations; the `CLAUDE.md` index carries the reconciled status
     was the unregistered key → tag compare → tag write. The key is now registered, and a
     line whose registered key may be stale (the scan's first line, or a signature change)
     fetches both rows and files nothing: two extra row fetches per scan.
-  - ⚠ **Finding (preserved, not fixed):** the upstream "lower" chroma row is `mv/2` off.
+  - ⚠ **Finding (preserved by F2; fixed by PR #142, the entry above):** the
+    upstream "lower" chroma row is `mv/2` off.
     Odd progressive lines get no vertical chroma interpolation, and field scans
     interpolate with the opposite field's row. F2 keeps this bit for bit.
   - **Gates:** `bench/dvd/run_chroma_reuse.sh` (M1–M5) and

@@ -666,6 +666,13 @@ HW-confirmed on a real PAL DVD: correct 720×576 geometry, 50 Hz lock, A/V in sy
    census set too (Thayer VTS_08, Angel, BBB PAL, VCD, the boot FMV, Bob and Blend).
    **F3/F4 are no longer needed for the measured discs.** Keep them for a disc that still
    lates, or for a new display-side master.
+   **F2 follow-up, the upstream chroma rows:** ✅ MERGED (PR #142), sim-proven
+   2026-09-29, HW-measured 2026-09-30. The lower chroma row now uses the spec's neighbour (±1 row progressive,
+   the same field's ±1 interlaced), and the reuse cache is banked by row parity, so
+   Progressive stays at 3 words per macroblock-line and Interlaced drops 4 → 3.
+   Timing passes both corners. HW: one repeatable late at one ROGER spot on Progressive
+   (4/5 launches against 0/5 on the control). Office PAL and Thayer VTS_08 read 0 on both
+   builds. **Accepted** (maintainer, 2026-09-30); F3 is the structural fix. `docs/decode_pacing.md` §7 "F2 follow-up".
 4. **F3:** display reads on the idle `ram2` port, with an explicit write-drain handshake
    at pickup.
 5. **F4:** a deeper output queue (the VLD is parked ~50 %). **Not justified** (2026-09-29):
