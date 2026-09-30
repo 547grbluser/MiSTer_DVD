@@ -449,9 +449,13 @@ def deploy_main(path):
                      "readlink /proc/$p/exe 2>/dev/null; done | grep MiSTer | head -1\n",
                      check=False)
     if running.strip() == target:
+        # ...but STILL re-point [DVD] main=. After a `restore` the running Main is
+        # this binary while the ini names stock MiSTer_DVDcss, so returning here
+        # made the next core load re-exec into STOCK Main -- no telemetry knob, no
+        # dvd_ctl -- with nothing said (2026-09-30, a rig handed back mid-session).
         print('  already running this exact binary -- nothing to copy')
-        return
-    scp(path, target)
+    else:
+        scp(path, target)
     script = INI_MAIN_SCRIPT.replace('@NAME@', name).replace('@AGENT@', AGENT_DST)
     _, out = ssh(script)
     print(out.rstrip())
