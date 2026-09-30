@@ -23,7 +23,8 @@ predate later confirmations; the `CLAUDE.md` index carries the reconciled status
 ## Hardware status (THIS fork, verified 2026-06-21)
 
 - ✅ **A SEEK FLUSH RESETS THE AUDIO REFRAMERS: NO STALE PTS AFTER A BACKWARD JUMP
-  (2026-09-30, branch `fix/dpad-back-hold`, not merged; sim-proven and HW-CONFIRMED).**
+  (2026-09-30, branch `fix/dpad-back-hold`, not merged; reframer reset HW-CONFIRMED,
+  demux realign sim-proven ⏳ HW).**
   Full record: `docs/dvd_nav.md` §2h "The stale audio PTS".
   - **Report (release-candidate smoke test):** on Men in Black, about one −20 s D-pad
     gesture in three showed lates +116–124 and ~33 frames not shown (≈1.3 s held). It was
@@ -54,9 +55,16 @@ predate later confirmations; the `CLAUDE.md` index carries the reconciled status
     excluded.
   - **Gates:** `bench/dvd/run_seek_rf_pts.sh --red` and `tools/check_rf_flush_wiring.py`.
     The pre-fix wiring fails for a pack end 2–6 bytes past a sync, landing 19.97 s stale.
-  - **Residual:** a seek still does not arm the demux's `first_access_unit_pointer` skip,
-    so a stray `0B77` in the landing's partial frame can still make one garbage frame
-    (a click).
+  - **Second half, the landing starts on a real frame (maintainer's call: the click is a
+    bad experience):** with the reframers reset, `ac3_reframer` is unlocked and took a
+    stray `0B77` in the landing's leading partial frame as its first frame, a click
+    (~0.6 % of PES). `emu.sv` now hands `ps_demux` one `aud_realign` cycle as it leaves
+    the flush's reset (`dmx_rlgn_go`: a latch set by `aud_flush`, cleared when
+    `pipe_rst_n` releases). The demux then skips the landing PES to its
+    `first_access_unit_pointer`, the track-switch path. `ps_demux.sv` is unchanged, and
+    keep_vbuf hops are untouched. The bench's landing now carries a stray sync; `+NORLGN`
+    fails exactly the clean-first-frame check, and the wiring check covers the seam
+    (W6–W8).
   - **Harness fix alongside:** `mister.py deploy --main` now re-points `[DVD] main=` even
     when that Main is already running. After a `restore`, the next load had silently
     re-exec'd into stock Main.
@@ -66,8 +74,10 @@ predate later confirmations; the `CLAUDE.md` index carries the reconciled status
     unfixed candidate reproduced on rig A with the maintainer's script (1 of 8). There the
     capture card recorded a **2.51 s audio silence** at the bad landing and none at the
     good ones; the fix arms have none.
-  - **Next step:** merge (PR not opened yet). Then consider arming the demux's
-    `first_access_unit_pointer` skip on a flush (the residual above).
+  - **HW, second half:** ⏳ the realign build (`2a3a872` onward) on a rig: seeks, chapter
+    back, a track switch and a mount still start audio promptly, and the hold stays fixed.
+    The stray sync itself is too rare to hit on purpose; the bench is its proof.
+  - **Next step:** that HW run, then merge (PR not opened yet).
 
 - 🔧 **CHROMA ROWS: THE DISPLAY INTERPOLATES FROM THE ROWS THE BILINEAR WEIGHTS EXPECT
   (2026-09-29, ✅ MERGED PR #142, sim-proven, HW-measured 2026-09-30; one ROGER Prog late ACCEPTED).**

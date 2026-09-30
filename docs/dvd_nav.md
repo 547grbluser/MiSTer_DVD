@@ -2275,7 +2275,7 @@ time, from ffmpeg's own decode.
 The harness cannot reach that gesture (`kbd_map` routes keyboard FF/REW to the D-pad path),
 so a person holding the button is the instrument.
 
-#### The stale audio PTS: a picture hold after some backward seeks (2026-09-30) — ✅ HW-CONFIRMED on branch `fix/dpad-back-hold` (not merged)
+#### The stale audio PTS: a picture hold after some backward seeks (2026-09-30) — ✅ HW-CONFIRMED (reframer reset), ⏳ HW (demux realign) on branch `fix/dpad-back-hold` (not merged)
 
 **Report (release-candidate smoke test, 2026-09-30).** Men in Black, Disc Menus Off, D-Pad
 Seek On. Repeating "Left Left (one −20 s gesture), wait 10 s, Right, wait 10 s": a normal
@@ -2369,26 +2369,45 @@ bytes. It does not hold for a frame **start**:
   `flush_ctl` turning `seek_ack` into emu's reset pulses. It uses synthetic AC-3 packs, so
   no fixture is needed. Stream A ends N bytes past a sync (N = 0–8, 100, 767); the seek
   flushes; then stream B lands 20 s earlier.
-- On the fix, all N pass. `+PRE` (emu's old wiring) fails [2]/[3] for **N = 2–6**, landing
-  exactly 19.97 s stale; MiB authors N = 3. `+RESYNC` fails the same arms, and `+NOB` fails
-  only the vacuity check.
-- `tools/check_rf_flush_wiring.py` reads the seam out of `emu.sv`. It refuses the pre-fix
+- Stream B's leading partial frame carries a **stray `0B77`** (see "second half" below).
+- On the fix, all N pass. `+PRE` (emu's old wiring) fails [1]/[2]/[3]; the PTS lands
+  exactly 19.97 s stale for **N = 2–6**, and MiB authors N = 3. `+NORLGN` (reframers reset,
+  demux realign unwired) fails **only [1]**: the stray sync becomes the first frame.
+  `+RESYNC` fails [2]/[3], and `+NOB` fails only the vacuity check.
+- `tools/check_rf_flush_wiring.py` reads both seams out of `emu.sv`. It refuses the pre-fix
   line, an `aud_resync` key, a raw `aud_flush`, `pipe_rst_n`, and any reframer taken off
-  `rf_rst_n` (W1–W5).
+  `rf_rst_n` (W1–W5). It also refuses a demux realign that is not armed by the flush, is
+  armed from `aud_resync`, or is never cleared (W6–W8).
 
-**Residual (not fixed here).** A seek still does not arm `ps_demux`'s
-`first_access_unit_pointer` skip (`rlgn_pend`, track switches only). A now-unlocked
-`ac3_reframer` therefore takes the first `0B77` it sees in the landing's leading partial
-frame. A stray in-payload sync there (5 of 817 AC-3 PES in the MiB slice,
-`docs/fabric_audio.md`) makes one garbage frame, which is a click, not a hold. The fix would
-be to arm `rlgn_pend` on a flush; its blast radius is keep_vbuf hops.
+**Second half: the landing's audio starts on a real frame (same branch, maintainer's
+call: a click after a seek is a bad experience).** With the reframers reset,
+`ac3_reframer` is unlocked at the landing and takes the first `0B77` it sees. The landing's
+first audio PES begins with the tail of a frame that started before it. A stray in-payload
+sync there (5 of 817 AC-3 PES in the MiB slice, `docs/fabric_audio.md`) became one garbage
+first frame, i.e. a click.
+- `ps_demux` already starts a track switch on a real frame: `aud_realign` → `rlgn_pend` →
+  skip the PES to its `first_access_unit_pointer`. But a flush holds the demux in reset
+  (`pipe_rst_n`), and `rlgn_pend` resets to 0.
+- `emu.sv` now latches that a hard audio flush happened (`dmx_rlgn_arm`: set by `aud_flush`,
+  cleared once `pipe_rst_n` releases). It hands the demux **one** `aud_realign` cycle on its
+  first clock after the reset (`dmx_rlgn_go`).
+- `aud_flush` always lies inside `load_flush` (same triggers, same 64 cycles; a keep_vbuf
+  hop can only extend `load_flush`), so the reset cannot eat the pulse.
+- A keep_vbuf hop raises no `aud_flush`, so that path is unchanged. `ps_demux.sv` is untouched.
+- LPCM and MP2 are forwarded as before: the skip applies to AC-3/DTS PES only, and a stray
+  `rlgn_pend` is never consulted outside the `0xBD` sub-header.
 
-**HW (2026-09-30):** ✅ the table above. The fix build is `clk_dec` 87.86 / 91.69 MHz
+**HW (2026-09-30), first half (reframer reset):** ✅ the table above. The fix build is `clk_dec` 87.86 / 91.69 MHz
 (both corners pass, SEED 9, 97 % ALM). **By ear:** the capture card (on rig A) recorded one
 **2.51 s silence** at the control's bad landing, and none over 1.2 s at the seven good
 landings or anywhere in the four fix arms. The picture freeze is the stop in `pickups` (no
 new picture shown). Lip sync afterwards (audio ~1 s late) is inferred from `av_drift` −
 `disp_lag`; the capture card's video was held by OBS, so it was not measured on a capture.
+
+**HW, second half (demux realign):** ⏳ build `DVD_dpadbackhold_*` from `2a3a872` onward.
+The stray sync is ~0.6 % of PES, too rare for a rig run to hit on purpose, so its proof is
+the bench (`+NORLGN`). The rig run checks that seeks still land with prompt audio and that
+the hold stays fixed (see `docs/status_log.md`).
 
 ### 2a. Hold-to-seek — SEEK-ON-RELEASE with acceleration (`dvd/scrub_ctrl.sv`)
 

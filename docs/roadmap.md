@@ -608,8 +608,9 @@ About 1 backward seek or chapter-back in 11 held the picture ~1.2 s and silenced
 then left audio ~1 s late until the next seek. The cause was a frame start carrying the old
 position's PTS in `dts_reframer`'s pipeline. The reframers now reset on a hard audio flush.
 HW: 0 of 44 with the fix, 7 of 78 without. It was pre-existing, not a regression.
-**Open follow-up:** arm `ps_demux`'s `first_access_unit_pointer` skip on a flush, so a
-stray `0B77` in the landing's partial frame cannot make one garbage frame (a click).
+The same branch also arms `ps_demux`'s `first_access_unit_pointer` skip on a hard flush,
+so a stray `0B77` in the landing's partial frame no longer becomes a garbage first frame
+(a click). That half is sim-proven, ⏳ HW.
 Details: `docs/dvd_nav.md` §2h "The stale audio PTS".
 
 ### PAL/NTSC Framerate Sync
