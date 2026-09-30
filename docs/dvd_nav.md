@@ -2275,7 +2275,7 @@ time, from ffmpeg's own decode.
 The harness cannot reach that gesture (`kbd_map` routes keyboard FF/REW to the D-pad path),
 so a person holding the button is the instrument.
 
-#### The stale audio PTS: a picture hold after some backward seeks (2026-09-30) — ✅ HW-CONFIRMED (reframer reset), ⏳ HW (demux realign) on branch `fix/dpad-back-hold` (not merged)
+#### The stale audio PTS: a picture hold after some backward seeks (2026-09-30) — ✅ HW-CONFIRMED on branch `fix/dpad-back-hold` (not merged)
 
 **Report (release-candidate smoke test, 2026-09-30).** Men in Black, Disc Menus Off, D-Pad
 Seek On. Repeating "Left Left (one −20 s gesture), wait 10 s, Right, wait 10 s": a normal
@@ -2404,10 +2404,17 @@ landings or anywhere in the four fix arms. The picture freeze is the stop in `pi
 new picture shown). Lip sync afterwards (audio ~1 s late) is inferred from `av_drift` −
 `disp_lag`; the capture card's video was held by OBS, so it was not measured on a capture.
 
-**HW, second half (demux realign):** ⏳ build `DVD_dpadbackhold_*` from `2a3a872` onward.
-The stray sync is ~0.6 % of PES, too rare for a rig run to hit on purpose, so its proof is
-the bench (`+NORLGN`). The rig run checks that seeks still land with prompt audio and that
-the hold stays fixed (see `docs/status_log.md`).
+**HW, second half (demux realign), 2026-09-30, rig B, build
+`DVD_dpadbackhold_MARGINAL_20260930_1640.rbf` (`2a3a872`; timing-marginal at the pinned
+seed, which is fine for a functional test; see below):**
+- Left Left **0 of 12** bad, Previous Chapter **0 of 12** bad.
+- **Audio resumed within 0.35 s of every one of the 24 landings.**
+- The stray sync itself is ~0.6 % of PES, too rare for a rig run to hit on purpose, so its
+  proof is the bench (`+NORLGN`).
+- Track switches (the Audio key, 10 per arm) are not touched by this change. Both the
+  realign build and the unfixed candidate go silent **~1.3 s** on 7 of 10 switches
+  (~0.6 s on the rest), identically. That gap is pre-existing, is not this defect, and is
+  not investigated here.
 
 ### 2a. Hold-to-seek — SEEK-ON-RELEASE with acceleration (`dvd/scrub_ctrl.sv`)
 

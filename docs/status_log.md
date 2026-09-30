@@ -23,8 +23,7 @@ predate later confirmations; the `CLAUDE.md` index carries the reconciled status
 ## Hardware status (THIS fork, verified 2026-06-21)
 
 - ✅ **A SEEK FLUSH RESETS THE AUDIO REFRAMERS: NO STALE PTS AFTER A BACKWARD JUMP
-  (2026-09-30, branch `fix/dpad-back-hold`, not merged; reframer reset HW-CONFIRMED,
-  demux realign sim-proven ⏳ HW).**
+  (2026-09-30, branch `fix/dpad-back-hold`, not merged; both halves HW-CONFIRMED).**
   Full record: `docs/dvd_nav.md` §2h "The stale audio PTS".
   - **Report (release-candidate smoke test):** on Men in Black, about one −20 s D-pad
     gesture in three showed lates +116–124 and ~33 frames not shown (≈1.3 s held). It was
@@ -74,10 +73,14 @@ predate later confirmations; the `CLAUDE.md` index carries the reconciled status
     unfixed candidate reproduced on rig A with the maintainer's script (1 of 8). There the
     capture card recorded a **2.51 s audio silence** at the bad landing and none at the
     good ones; the fix arms have none.
-  - **HW, second half:** ⏳ the realign build (`2a3a872` onward) on a rig: seeks, chapter
-    back, a track switch and a mount still start audio promptly, and the hold stays fixed.
-    The stray sync itself is too rare to hit on purpose; the bench is its proof.
-  - **Next step:** that HW run, then merge (PR not opened yet).
+  - **HW, second half (rig B, `2a3a872`, timing-marginal build):** Left Left 0 of 12,
+    Previous Chapter 0 of 12. Audio resumed within 0.35 s of all 24 landings. The stray
+    sync is too rare to hit on purpose; the bench is its proof.
+  - **Seen, not caused here:** a track switch goes silent ~1.3 s on 7 of 10 switches, on
+    the unfixed candidate and on this branch alike. It is pre-existing and untouched by
+    this change.
+  - **Next step:** a timing-clean build of `2a3a872` (seed sweep), then merge (PR not
+    opened yet).
 
 - 🔧 **CHROMA ROWS: THE DISPLAY INTERPOLATES FROM THE ROWS THE BILINEAR WEIGHTS EXPECT
   (2026-09-29, ✅ MERGED PR #142, sim-proven, HW-measured 2026-09-30; one ROGER Prog late ACCEPTED).**
