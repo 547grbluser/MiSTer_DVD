@@ -3226,6 +3226,25 @@ always @(posedge clk_sys or negedge reset_n)
     if (!reset_n) rf_flush_q <= 1'b0;
     else          rf_flush_q <= aud_flush;
 wire rf_rst_n = reset_n & ~aud_realign_q & ~rf_flush_q;
+// ...and the landing's audio must START ON A REAL FRAME. With the reframers reset,
+// ac3_reframer is unlocked and takes the first 0B77 it sees; the landing's first audio
+// PES begins with the TAIL of a frame that started before it, and a stray in-payload
+// 0B77 there (5 of 817 AC-3 PES in a MiB slice, docs/fabric_audio.md) became a garbage
+// first frame -- a click after the seek. ps_demux already knows how to start on a real
+// frame (aud_realign -> rlgn_pend -> skip to the PES's first_access_unit_pointer, the
+// track-switch path), but a flush holds it in reset (pipe_rst_n) and rlgn_pend resets
+// to 0. So: latch that a HARD audio flush happened, and hand the demux ONE aud_realign
+// cycle on the first clock it runs after pipe_rst_n releases. aud_flush always lies
+// inside load_flush (same triggers, same 64 cycles; a keep_vbuf hop can only extend
+// load_flush), so the latch is set before the release and the pulse cannot be eaten by
+// the reset. A keep_vbuf hop raises no aud_flush: that path is unchanged.
+// docs/dvd_nav.md §2h "The stale audio PTS"; gate bench/dvd/run_seek_rf_pts.sh.
+reg dmx_rlgn_arm;
+always @(posedge clk_sys or negedge reset_n)
+    if (!reset_n)        dmx_rlgn_arm <= 1'b0;
+    else if (aud_flush)  dmx_rlgn_arm <= 1'b1;
+    else if (pipe_rst_n) dmx_rlgn_arm <= 1'b0;
+wire dmx_rlgn_go = dmx_rlgn_arm & pipe_rst_n;   // one cycle: the demux's first after the flush
 
 // MENU VBUF CAP (docs/dvd_menu_refinements.md §5d): the "leaving a video menu lags"
 // symptom is the display trailing the parse by the KEPT video-buffer depth (keep_vbuf).
@@ -3550,7 +3569,7 @@ ps_demux ps_demux_inst (
 
     // O[8:6]: which audio substream/track to forward (default 0 = substream 0x80).
     .aud_track    (aud_track_eff),   // Phase 4: SetSTN (SPRM1) wins when set
-    .aud_realign  (aud_switch),      // new track starts on a real frame (see aud_realign_q)
+    .aud_realign  (aud_switch | dmx_rlgn_go),   // new track, or the landing after a hard flush, starts on a real frame (see dmx_rlgn_go)
 
     // Subpicture (subtitle) substream select: O[15] enable, O[26:24] track (0x20+trk).
     // Routes the selected 0x20-0x3F substream out to spu_decode (dvd/subpicture.md).

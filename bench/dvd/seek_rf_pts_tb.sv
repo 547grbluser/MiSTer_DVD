@@ -33,11 +33,21 @@
 //    [3] the first PTS-tagged one carries B's first PTS exactly
 //    [4] non-vacuous: >= 2 frames and a PTS-tagged one arrived after the flush
 //
-//  Arms (plusargs):  default = the fix (a registered copy of aud_flush on rf_rst_n)
-//    +PRE     emu's wiring before the fix (rf_rst_n = core reset & ~track switch)
-//    +RESYNC  the clear keyed to aud_resync instead of aud_flush (a seek pulses
-//             aud_flush only, so this must fail exactly like +PRE)
-//    +NOB     stream B is never sent (proves [4] can fail)
+//  Second half of the fix: with the reframers reset, ac3_reframer is UNLOCKED and
+//  takes the first 0B77 it sees. The landing's first audio PES starts with the tail
+//  of a frame begun before it; a stray in-payload 0B77 there becomes a garbage first
+//  frame (a click). So emu also hands ps_demux one aud_realign cycle when it leaves
+//  the flush's reset (dmx_rlgn_go), and the demux skips that PES to its
+//  first_access_unit_pointer -- the track-switch path. Stream B's tail carries such
+//  a stray sync here, so [1] checks it.
+//
+//  Arms (plusargs):  default = the fix (a registered aud_flush on rf_rst_n, and the
+//                    demux realign armed by a hard flush)
+//    +PRE     emu's wiring before the fix (neither)             -> [1] [2] [3]
+//    +NORLGN  reframers reset, demux realign NOT armed          -> [1] only
+//    +RESYNC  the reframer clear keyed to aud_resync, not aud_flush (a seek pulses
+//             aud_flush only)                                   -> [2] [3]
+//    +NOB     stream B is never sent (proves [4] can fail)      -> [4] only
 //
 //  iverilog -g2012 -o .sim/seek_rf_pts/sim dvd/ps_demux.sv dvd/ac3_reframer.sv \
 //      dvd/dts_reframer.sv dvd/mp2_reframer.sv dvd/flush_ctl.sv dvd/audio_ring.sv \
@@ -53,9 +63,10 @@ logic clk = 0;
 always #5 clk = ~clk;
 logic rst_n = 0;
 
-bit pre_fix = 0, on_resync = 0, no_b = 0;
+bit pre_fix = 0, on_resync = 0, no_b = 0, no_rlgn = 0;
 initial begin
     if ($test$plusargs("PRE"))    pre_fix   = 1;
+    if ($test$plusargs("NORLGN")) no_rlgn   = 1;
     if ($test$plusargs("RESYNC")) on_resync = 1;
     if ($test$plusargs("NOB"))    no_b      = 1;
 end
@@ -85,6 +96,14 @@ logic rf_flush_q = 1'b0;                        // the fix: a REGISTERED hard fl
 always @(posedge clk) rf_flush_q <= on_resync ? aud_resync : aud_flush;
 wire  rf_rst_n = pre_fix ? (rst_n & ~aud_realign_q)
                          : (rst_n & ~aud_realign_q & ~rf_flush_q);
+// the demux realign on the first clock after the flush's reset (emu's dmx_rlgn_go)
+logic dmx_rlgn_arm = 1'b0;
+always @(posedge clk)
+    if (!rst_n)          dmx_rlgn_arm <= 1'b0;
+    else if (aud_flush)  dmx_rlgn_arm <= 1'b1;
+    else if (pipe_rst_n) dmx_rlgn_arm <= 1'b0;
+wire  dmx_rlgn_go = dmx_rlgn_arm & pipe_rst_n;
+wire  dmx_realign = (pre_fix || no_rlgn) ? 1'b0 : dmx_rlgn_go;
 
 flush_ctl fc (
     .clk(clk), .rst_n(rst_n),
@@ -105,7 +124,7 @@ wire        pd_xfer  = pd_v && pd_ready;
 ps_demux dmx (
     .clk(clk), .rst_n(dmx_rst_n),
     .in_byte(in_byte), .in_valid(in_valid), .in_ready(in_ready),
-    .aud_track(3'd0), .aud_realign(1'b0), .sp_track(5'd0), .sp_enable(1'b0),
+    .aud_track(3'd0), .aud_realign(dmx_realign), .sp_track(5'd0), .sp_enable(1'b0),
     .vid_byte(), .vid_valid(), .vid_mark(), .vid_ready(1'b1),
     .aud_byte(pd_b), .aud_valid(pd_v), .aud_type(pd_t), .aud_frame_start(pd_fs),
     .aud_ready(pd_ready),
@@ -157,7 +176,8 @@ localparam int FTICK = 2880;                // 32 ms of 90 kHz
 localparam int CHUNK = 2000;                // PES payload bytes per pack (DVD: ~2 KB)
 localparam [32:0] PTS_A0 = 33'd54000000;    // 10:00
 localparam int KA    = 9;                   // whole frames of A before the partial one
-localparam int TAILB = 300;                 // landing PES starts with a frame tail
+localparam int TAILB = 300;                 // landing PES starts with a frame tail...
+localparam int STRAY = 120;                 // ...carrying a stray in-payload 0B77 here
 localparam int KB    = 6;                   // frames of B
 localparam [32:0] PTS_B0 = PTS_A0 + KA*FTICK - 33'd1800000;   // 20 s earlier than A's last
 localparam [7:0] TAG_A = 8'hA5, TAG_B = 8'hB5;
@@ -309,6 +329,7 @@ initial begin
         if (!no_b) begin
             es.delete();
             for (a = 0; a < TAILB; a = a + 1) es.push_back(8'hEE);
+            es[STRAY] = 8'h0B; es[STRAY+1] = 8'h77; es[STRAY+4] = 8'h14;   // looks like a 768-byte frame
             for (a = 0; a < KB; a = a + 1) push_frame(TAG_B, a);
             src.delete(); sp = 0;
             packetize(TAILB, PTS_B0);

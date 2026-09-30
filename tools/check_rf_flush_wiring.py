@@ -19,6 +19,12 @@ The fix is one term in emu.sv's reset expression:
     wire rf_rst_n = reset_n & ~aud_realign_q & ~rf_flush_q;       // fixed
     (rf_flush_q <= aud_flush, registered)
 
+The second half: with the reframers reset, ac3_reframer is unlocked and would take a
+stray 0B77 in the landing's leading partial frame as the first frame (a click). emu
+therefore also hands ps_demux ONE aud_realign cycle as it leaves the flush's reset
+(dmx_rlgn_go: a latch set by aud_flush, cleared once pipe_rst_n releases), so the demux
+starts the landing at its first_access_unit_pointer -- the track-switch path.
+
 bench/dvd/seek_rf_pts_tb.sv proves the chain behaves with that wiring REBUILT in the
 bench; it cannot see emu.sv, which has no bench at all. This reads the connection out
 of dvd/emu.sv (the check_spdif_bs_hold_wiring.py pattern).
@@ -154,6 +160,40 @@ def main():
             fails.append(f'{mod}.rst_n is `{m.group(1) if m else "?"}`, not rf_rst_n -- '
                          f'its pipeline would carry a frame start across a seek')
 
+    # 6. the demux starts the landing's audio on a real frame: ps_demux.aud_realign
+    #    carries, beside aud_switch, a pulse G = <latch> [& pipe_rst_n], where the
+    #    latch is SET by aud_flush and CLEARED once pipe_rst_n releases -- so the demux
+    #    sees one realign cycle as it leaves the flush's reset (docs/dvd_nav.md §2h).
+    dm = re.findall(r'\bps_demux\s+\w+\s*\((.*?)\);', src, re.S)
+    if len(dm) != 1:
+        fails.append(f'ps_demux: expected exactly one instance, found {len(dm)}')
+    else:
+        m = re.search(r'\.aud_realign\s*\(([^)]*)\)', dm[0])
+        rl = re.sub(r'\s+', ' ', m.group(1)).strip() if m else ''
+        rt = terms(rl)
+        if 'aud_switch' not in rt:
+            fails.append(f'ps_demux.aud_realign lost the track switch: `{rl}`')
+        armed = False
+        for g in sorted(rt - {'aud_switch'}):
+            gd = re.findall(r'\bwire\s+' + re.escape(g) + r'\s*=\s*([^;]*);', src)
+            if len(gd) != 1:
+                continue
+            for a in sorted(terms(gd[0]) - {'pipe_rst_n'}):
+                sets = re.search(r'\bif\s*\(\s*aud_flush\s*\)\s*' + re.escape(a) +
+                                 r"\s*<=\s*1'b1\s*;", src)
+                clrs = re.search(r'\bif\s*\(\s*pipe_rst_n\s*\)\s*' + re.escape(a) +
+                                 r"\s*<=\s*1'b0\s*;", src)
+                if sets and clrs:
+                    armed = True
+                    gpos = src.find('wire ' + g)
+                    if decl and gpos < decl.start():
+                        fails.append(f'{g} is defined above the declaration of aud_flush')
+        if not armed:
+            fails.append('ps_demux.aud_realign is not armed by a hard flush (a latch set '
+                         'by aud_flush and cleared when pipe_rst_n releases) -- the '
+                         'unlocked reframer takes a stray 0B77 in the landing\'s partial '
+                         f'frame as the first frame: `{rl}`')
+
     return report(fails, expr)
 
 
@@ -162,7 +202,8 @@ def report(fails, expr):
         for f in fails:
             print(f'FAIL: {f}')
         return 1
-    print(f'OK: the reframers reset on a hard audio flush (rf_rst_n = {expr})')
+    print(f'OK: the reframers reset, and the demux realigns, on a hard audio flush '
+          f'(rf_rst_n = {expr})')
     return 0
 
 

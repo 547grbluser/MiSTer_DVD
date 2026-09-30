@@ -7,11 +7,14 @@
 #   (every PTS 20 s earlier) lands. Plus tools/check_rf_flush_wiring.py on dvd/emu.sv.
 #
 #   --red   every claim's mutation must fail ITS arm:
-#           PRE     emu's pre-fix wiring (reframers on core reset + track switch)
-#                   -> [2]/[3] stale PTS for N = 2..6 (MiB authors N = 3)
+#           PRE     emu's pre-fix wiring (reframers on core reset + track switch,
+#                   no demux realign) -> [1]/[2]/[3]; stale PTS for N = 2..6
+#                   (MiB authors N = 3)
+#           NORLGN  demux realign not armed by the flush     -> [1] only (the stray
+#                   0B77 in the landing's partial frame becomes the first frame)
 #           RESYNC  the clear keyed to aud_resync           -> [2]/[3]
 #           NOB     no landing stream                        -> [4] vacuity only
-#           W1..W5  emu.sv mutations the wiring check must refuse
+#           W1..W8  emu.sv mutations the wiring check must refuse
 set -u
 cd "$(dirname "$0")/../.."
 RED=0; [ "${1:-}" = "--red" ] && RED=1
@@ -49,7 +52,8 @@ if [ "$RED" -eq 1 ]; then
         done
         echo "  PASS RED $name fails exactly: $want"
     }
-    red PRE    +PRE    "[2] [3]" "[4]"
+    red PRE    +PRE    "[1] [2] [3]" "[4]"
+    red NORLGN +NORLGN "[1]"     "[2] [3] [4]"
     red RESYNC +RESYNC "[2] [3]" "[4]"
     red NOB    +NOB    "[4]"     "[1] [2] [3]"
     # PRE must hit the authored MiB case specifically
@@ -85,6 +89,12 @@ PY
                      '    .rst_n              (reset_n),'
     wmut W5-pipe     'wire rf_rst_n = reset_n & ~aud_realign_q & ~rf_flush_q;' \
                      'wire rf_rst_n = pipe_rst_n & ~aud_realign_q & ~rf_flush_q;'
+    wmut W6-norlgn   '.aud_realign  (aud_switch | dmx_rlgn_go),' \
+                     '.aud_realign  (aud_switch),'
+    wmut W7-rlgnsrc  "else if (aud_flush)  dmx_rlgn_arm <= 1'b1;" \
+                     "else if (aud_resync) dmx_rlgn_arm <= 1'b1;"
+    wmut W8-noclear  "else if (pipe_rst_n) dmx_rlgn_arm <= 1'b0;" \
+                     "else if (1'b0)       dmx_rlgn_arm <= 1'b0;"
 fi
 
 [ $fail -eq 0 ] && echo "== SEEK RF PTS: ALL GREEN ==" || echo "== SEEK RF PTS: FAILURES =="
