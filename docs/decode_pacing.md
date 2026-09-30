@@ -501,9 +501,9 @@ The other discs' "before" is F1's own table.
   its existing block). `clk_dec` **90.6 MHz @100 °C, 91.5 MHz @−40 °C** (F1: 92.3 / 90.5),
   `releases/DVD_chromareuse_20260929_1223.rbf`.
 
-**F2 follow-up: the right chroma rows.** 🔧 **Built on `feature/chroma-rows`, sim-proven
-2026-09-29; HW-measured: ⚠ one repeatable late on ROGER Progressive, decision open.** This
-fixes the upstream finding above that F2 preserved.
+**F2 follow-up: the right chroma rows.** ✅ **Built on `feature/chroma-rows`, sim-proven
+2026-09-29, HW-measured 2026-09-30; one repeatable late on ROGER Progressive, ACCEPTED by
+maintainer decision** (below). This fixes the upstream finding above that F2 preserved.
 - **What changes in the picture.** Every line now interpolates its chroma between the two
   rows `resample_bilinear`'s 0.75 / 0.25 weights are written for:
   - Progressive upsampling: the nearest row and the next one (+1 on odd lines, −1 on
@@ -599,6 +599,13 @@ fixes the upstream finding above that F2 preserved.
   phases (`.sim/chromarows/pf/`). So the display buffer rides the new fetch pattern
   exactly as well as F2's. If the pattern matters, it is on the decoder's side of the
   arbiter, which that bench does not model.
+
+  **Decision (maintainer, 2026-09-30): accept.** A correct picture on every disc is worth
+  one late per ROGER playthrough at one marginal spot. Both the gain (mean |Δchroma| about
+  0.5 of 255) and the loss are below what is visible. F3 (display reads on `ram2`) stays
+  the structural fix and would remove the late with the contention. Smoothing the fetch
+  pattern (prefetch the next same-field row one line early) was considered and not built,
+  because the sim probe found no display-side effect to smooth.
 
   Unproven explanation: the weave word count is unchanged, but the timing moved. F2
   fetched a new chroma row on alternate lines (2, 4, 2, 4 words per macroblock); the

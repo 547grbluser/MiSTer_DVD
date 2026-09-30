@@ -422,7 +422,7 @@ otherwise; `--red` runs its mutation arms).
 | F1: no OSD display reads (8 → 6 words per MB-line, bit-exact; Prog lates ROGER 9.2→3.8, Office 8.2→1.0, Thayer 7.3→0.1; PR #138) | ✅ HW-measured | `decode_pacing.md` §7 | `run_osd_read.sh`, `check_osd_read_wiring.py` |
 | Per-picture decode-time instrument: telemetry words 21–24 (`pic_max`, `pic_n`, `pic_over`); settled §6c, F4 not justified; PR #140 | ✅ HW data | `decode_pacing.md` §7 "Instrument" | `run_telem.sh` (M5–M8), `check_decode_duty_wiring.py` |
 | F2: chroma row reuse (6 → 3 words per MB-line on Progressive, bit-exact; Prog lates ROGER 3.6→0, Office 1.0→0; PR #139) | ✅ HW-measured | `decode_pacing.md` §7 F2 | `run_chroma_reuse.sh`, `check_chroma_reuse_wiring.py` |
-| Chroma rows: the upstream lower-row offset fix (±1 row / same-field ±1), reuse cache banked by row parity (Interlaced 4 → 3 words) | 🔧 sim-proven; ⚠ HW: 1 repeatable late at ROGER's heaviest picture on Prog (`feature/chroma-rows`) | `decode_pacing.md` §7 "F2 follow-up" | `run_chroma_reuse.sh` [4] (`+rowref`), `check_chroma_reuse_wiring.py` |
+| Chroma rows: the upstream lower-row offset fix (±1 row / same-field ±1), reuse cache banked by row parity (Interlaced 4 → 3 words) | ✅ HW-measured, accepted: 1 late per ROGER playthrough at one spot on Prog; Office/Thayer 0 (`feature/chroma-rows`, unmerged) | `decode_pacing.md` §7 "F2 follow-up" | `run_chroma_reuse.sh` [4] (`+rowref`), `check_chroma_reuse_wiring.py` |
 
 ### Audio and A/V sync
 
@@ -464,7 +464,9 @@ otherwise; `--red` runs its mutation arms).
 - ⚠ `lates` counts one per refresh while a PGC still is held (`flags.still`), so boot and
   menu windows over-report (`docs/decode_pacing.md` §2c). The Progressive lates and the
   Thayer boot-FMV Interlaced lates are fixed by F1 + F2: 0 on the whole census set, and no
-  picture over its frame budget. F3/F4 stay recorded, not needed.
+  picture over its frame budget. F3/F4 stay recorded, not needed. The chroma-row fix
+  (`feature/chroma-rows`) adds one late per ROGER playthrough at one marginal spot on
+  Progressive, accepted by maintainer decision; F3 is its structural fix.
 
 `docs/roadmap.md` is the canonical "what's next".
 
