@@ -17,6 +17,8 @@ written from an emulator that disagrees. Then this writes what the benches score
 
     tools/dts_golden.py STREAM.dts --out STEM [--skip N] [--frames N] [--refuse K]
                         [--truncate K:N]
+    tools/dts_golden.py --codebooks DIR     # the bench's codebook rows (cb_adpcm.mem,
+                                            # cb_vq.mem: the engine's 64-bit row format)
 
 --refuse K corrupts frame K's last DSYNC word (one bit), so the engine refuses it after
 part of its PCM has already gone out: the refusal must drain the frame's remaining
@@ -57,15 +59,38 @@ def dsync_bitpos(fr, words, labels):
     return pos[-1]
 
 
+def write_codebooks(d):
+    """The rows dts_vec's codebook port returns: an ADPCM vector, 4 x int16 (coefficient
+    i at bits 16i), at row pvq; a VQ vector's slice for subsubframe ssf, 8 x int8 (value
+    k at bits 8k), at row {index, ssf}."""
+    import dts_tables as T
+    os.makedirs(d, exist_ok=True)
+    with open(os.path.join(d, 'cb_adpcm.mem'), 'w') as f:
+        for vec in T.ADPCM_VB:
+            f.write(f'{sum((c & 0xFFFF) << (16 * i) for i, c in enumerate(vec)):016x}\n')
+    with open(os.path.join(d, 'cb_vq.mem'), 'w') as f:
+        for vec in T.HIGH_FREQ_VQ:
+            for ssf in range(4):
+                sl = vec[8 * ssf:8 * ssf + 8]
+                f.write(f'{sum((v & 0xFF) << (8 * k) for k, v in enumerate(sl)):016x}\n')
+    print(f'dts_golden: codebook rows in {d}')
+    return 0
+
+
 def main(argv=None):
     ap = argparse.ArgumentParser(description=__doc__.split('\n')[0])
-    ap.add_argument('stream')
-    ap.add_argument('--out', required=True)
+    ap.add_argument('stream', nargs='?')
+    ap.add_argument('--codebooks')
+    ap.add_argument('--out')
     ap.add_argument('--skip', type=int, default=0)
     ap.add_argument('--frames', type=int, default=4)
     ap.add_argument('--refuse', type=int, action='append', default=[])
     ap.add_argument('--truncate', action='append', default=[])
     a = ap.parse_args(argv)
+    if a.codebooks:
+        return write_codebooks(a.codebooks)
+    if not a.stream or not a.out:
+        ap.error('a stream and --out are required')
     R.OPT.add('lenient_block')                         # D5: the hardware's behaviour
     words, labels = I.load_program()
     sel = [fr for _, fr in R.frames(open(a.stream, 'rb').read())][a.skip:a.skip + a.frames]

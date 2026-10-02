@@ -65,6 +65,7 @@ CMEM = os.path.join(REPO, 'dvd', 'dts', 'dts_const.mem')
 HMEM = os.path.join(REPO, 'dvd', 'dts', 'dts_huff.mem')
 RMEM = os.path.join(REPO, 'dvd', 'dts', 'dts_hroot.mem')
 USVH = os.path.join(REPO, 'dvd', 'dts', 'dts_ucode.svh')
+VDIR = os.path.join(REPO, 'dvd', 'dts')
 
 OPS = ['nop', 'alu', 'alui', 'ld', 'st', 'get', 'getr', 'vlc', 'br', 'bri', 'jmp', 'call',
        'ret', 'err', 'vop', 'frame', 'fend', 'bpos']
@@ -661,6 +662,13 @@ def write_mems(check=False):
              HMEM: [f'{w:07x}' for w in huff_mem_words()],
              RMEM: [f'{r:03x}' for r in HUFF_ROOTS],
              USVH: ucode_svh(words, labels)}
+    import dts_vecrom as V                       # the vector engine's ROMs
+    files.update({
+        os.path.join(VDIR, 'dts_vconst.mem'): [f'{w:06x}' for w in V.vconst_words()],
+        os.path.join(VDIR, 'dts_win.mem'): [f'{w:06x}' for w in V.window_words()],
+        os.path.join(VDIR, 'dts_iprog.mem'): [f'{w:05x}' for w in V.prog_words()],
+        os.path.join(VDIR, 'dts_icoef.mem'): [f'{c & 0x7FFFFFF:07x}' for c in V.ICOEF],
+        os.path.join(VDIR, 'dts_vec.svh'): V.vec_svh()})
     bad = []
     for path, lines in files.items():
         text = '\n'.join(lines) + '\n'

@@ -776,6 +776,60 @@ RAM's "Inferred altsyncram" line.
 - **Not yet wired** into `DVD.qsf` or `emu.sv` (P3). P1b's fit builds the engine on its
   own.
 
-**Next:** `dvd/dts/dts_vec.sv`, op by op under the per-op checksums (`Machine.checksums`:
-X at 25 bits, a butterflied band being a sum of two 24-bit values; `buf2` at 29, its
-arithmetic bound), then `dts_top.sv`, the whole-engine bench, and the standalone fit.
+**The whole engine is bit-exact too: `dvd/dts/dts_vec.sv` + `dts_top.sv`, gate
+`bench/dvd/run_dts.sh` (`--red`).** After every vector op the bench reads X, the history,
+the IMDCT rings and the window's carried sums out of the RTL. It checks their checksums
+against `Machine.checksums` (same address order), and every PCM pair bit-exact.
+- **Arms.** All 34 streams (2 frames each), the refusal, the truncation, *Shadoan*
+  with stalls and back-pressure, and a codebook-latency sweep. **All 41 arms pass and
+  all 18 RED mutations are caught**, each naming the op and the buffer that went wrong.
+  One real bug was found this way: a lost address line made JOINT read the band's
+  scale instead of the joint scale (`written_joint`, op 242).
+- **Widths, sized to the arithmetic bound, not the gate's measured range:** X is 25 bits
+  (a butterflied band is the sum of two clipped 24-bit values; the gate reaches 22) and
+  `buf2` is 29 (eight 24×24 products shifted 21; the gate reaches 24).
+- ✅ **The half IMDCT is a ROM program, not hardwired addressing (decided 2026-10-02).**
+  `tools/dts_vecrom.py` writes FFmpeg's factorised transform as **597
+  multiply-accumulate terms** (113 coefficients), in seven stages over a 64-word
+  scratch. Each term is `{shl, neg, rsh, add, last, coef, src}`, 20 bits. The RTL runs one
+  term a cycle through a fetch / read / issue pipeline. A stage's first term waits two
+  cycles for the previous stage's last write. `run_prog`, the Python executor, equals
+  `imdct_half_32` on 7,140 columns, 2,040 of them pre-shifted and the real gate columns
+  among them; field mutations (neg, addend, shl, rsh 22, pre-shift) each make it differ.
+  Two exactness traps decided the encoding:
+  - `x − norm(c·y, 23)` is **not** `norm(2^23·x − c·y, 23)`, because half-up rounding is
+    not odd-symmetric. So `mod_b`'s second half needs an addend term and a negate.
+  - `mod_a`'s −85,479,984 is stored halved, with shift 22.
+
+  *Rejected:* hardwiring seven stages of addressing. ALMs are the scarce resource;
+  the program costs about 2 M10K.
+- ✅ **The mix is not bounded by `nmix` (decided 2026-10-02).** X above a channel's
+  mixed count is zero by construction:
+  - XCLR clears X every subsubframe;
+  - every op writes only below the channel's active count;
+  - the butterfly's sums stay below the pair's larger count, which is what `nmix` is.
+
+  So the bound only saved the model's cycles. Without it, D3's pair-bound bug cannot
+  happen in hardware. The microcode still computes `nmix` (the emulator's
+  `mix_own_bound` arm needs it), and the RTL ignores `a2`–`a6`. A RED arm that dropped
+  the bound survived, which is how this was found; it was replaced by a gain-side swap.
+- **Codebooks: fetched on demand (P1b decision; §3 and §10 planned prefetch).**
+  ADPCM fetches a row when a predicted band's op starts, XVQ at each subsubframe's slice.
+  The latency sweep on T2 gives the worst frame as **32.0 / 32.5 / 33.5 / 35.8 % of
+  real time at latency 1 / 20 / 60 / 150 cycles**. Prefetch is not needed unless `ram2`'s
+  latency turns out far above 150 cycles; P2 measures it. On-demand fetch also drops the
+  2–4 M10K of local vector buffers §10's table carried.
+- **Measured cycles (RTL, latency 20, worst frame of each 2-frame window):** disc
+  streams 30–37 % of real time (*Shadoan* 36.8 %, T2 32.5 %), the spec-maximum frame
+  shapes 33.6 % (`written_max_subframes`) and 29.3 %; the worst arm overall is 36.8 %,
+  under the 60 % budget the runner enforces. The emulator's `CYC` model said 31 % worst
+  and 24 % typical. The RTL's synthesis is costlier than modelled: the IMDCT program
+  is about 620 cycles, against `CYC`'s 300.
+- **Telemetry** (`dts_top`): frames, refused + last code + a sticky mask of codes,
+  overrun bits, lenient codes (D5), ignored downmixes (D3). The bench scores each against
+  the golden.
+- ⏳ **Option, if M10K is short at the fit:** each window prototype mirrors itself,
+  `w[511−i] = ±w[i]`, negated where bit 4 ≠ bit 5. That allows half a ROM (−1 M10K) for an
+  add/subtract in the accumulator.
+
+**Next:** the standalone fit (ALM, M10K, DSP, fmax at both slow corners).
