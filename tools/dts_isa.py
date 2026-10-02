@@ -315,12 +315,29 @@ class EngineError(Exception):
     pass
 
 
-# Cycle model (P1a's estimate; P1b's RTL replaces it with measured cycles).
+# Cycle model, CALIBRATED ON THE RTL (bench/dvd/run_dts.sh, dts_top_tb +opstats,
+# 2026-10-02): the sequencer's instructions as dvd/dts/dts_seq.sv takes them, and
+# each vector op's start-to-done time as dvd/dts/dts_vec.sv takes it. It replaces
+# P1a's estimate (which charged the IMDCT 300 cycles; the RTL's program takes ~620).
+#   get n      n + 2          vlc        code bits + 3     ld 2, others 1
+#   frame      2              fend/err   + 2 a byte drained (the bench's byte rate)
+#   vop        2 + the op (vop_start is registered: the op begins a cycle later):
+#     XCLR 1,284; HCLR 4 + 4 a band cleared; JOINT 14; BFLY 1,027; CNT 2
+#     XQ    the code reading, held at its first code until the engine's setup is done
+#           (12 cycles for a Huffman band, which adjusts its scale; else 10), + 3:
+#           Huffman 1 + the code bits; block codes 4 x their bits (the first digit
+#           divided as the bits arrive, three more in place); raw codes their bits
+#     XVQ   16 + the codebook latency; ADPCM 12 unpredicted, 47 + max(5, latency + 3)
+#     MIXSYN 64 + 2 x (32 x channels + 1,131): per side the mix, the IMDCT program
+#           (597 terms + its stage barriers), the window (512 MACs); then 32 pairs out
 CYC = {
-    'instr': 1, 'ld': 2, 'get_bit': 1, 'vlc_bit': 2, 'vlc_fixed': 2,
-    'vop_overhead': 3, 'mac': 1, 'block_digit': 6, 'fetch': 8,
-    'imdct': 300, 'window': 520, 'bfly_band': 8,
+    'instr': 1, 'ld': 2, 'get': 2, 'vlc': 3, 'frame': 2, 'drain_byte': 2,
+    'xclr': 1284, 'hclr': 4, 'hclr_band': 4, 'joint': 14, 'bfly': 1027, 'cnt': 2,
+    'vop': 2, 'xq_setup': 10, 'xq_setup_huff': 12, 'xq_tail': 3, 'xvq': 16,
+    'adpcm_plain': 12, 'adpcm_pred': 47,
+    'mixsyn': 64, 'mixsyn_side': 1131,
 }
+CB_LATENCY = 20       # the codebook port's request-to-row latency (cycles), P2 measures it
 
 
 class Machine:
@@ -349,6 +366,7 @@ class Machine:
         self.frame_cycles = []
         self.lenient = 0
         self.by_cat = {}          # cycles by vector op; the rest is the sequencer
+        self.cb_latency = CB_LATENCY
         self.trace = None        # a list to receive (kind, pc, addr, value): module doc
         self.vop_hook = None     # called as vop_hook(machine, op) after every vector op
 
@@ -369,7 +387,7 @@ class Machine:
                 self.overrun += 1
             v = (v << 1) | b
             self.bitpos += 1
-        self.cycles += n * CYC['get_bit']
+        self.cycles += n
         return v
 
     def sbits(self, n):
@@ -381,9 +399,7 @@ class Machine:
         n = HUFF_ROOTS[book]
         while True:
             leaf, val = HUFF_NODES[n][self.bits(1)]
-            self.cycles += CYC['vlc_bit'] - CYC['get_bit']
             if leaf:
-                self.cycles += CYC['vlc_fixed']
                 return val
             n = val
 
@@ -426,13 +442,13 @@ class Machine:
     def vop(self, op):
         a = [self.reg[i] for i in range(8, 16)]
         name = VOPS[op]
-        c0 = self.cycles
-        self.cycles += CYC['vop_overhead']
+        c0, b0 = self.cycles, self.bitpos
+        op_t = 0
         if name == 'xclr':
             for ch in range(NCH_MAX):
                 for b in range(32):
                     self.X[ch][b] = [0] * 8
-            self.cycles += 40
+            op_t = CYC['xclr']
         elif name == 'xq':
             ch, b, ab, qsel, sidx, adj, lossless = a[0], a[1], a[2], a[3], a[4] & 0xFFFF, a[5], a[6]
             q, huff = self.extract(ab, qsel)
@@ -442,47 +458,54 @@ class Machine:
             if huff:
                 scale = F.huff_scale(scale, T.SCALE_FACTOR_ADJ[adj & 3])
             self.X[ch][b] = F.dequant_band(q, ab, bool(lossless), scale)
-            self.cycles += 8 * CYC['mac'] + 2
+            nbits, first = self.bitpos - b0, self.xq_first - b0
+            block = not huff and ab <= 7
+            k = 4 if block else 1                 # block codes: 4 cycles a bit, divisions included
+            t_first = (1 + first) if huff else k * first
+            reading = (1 + nbits) if huff else k * nbits
+            setup = CYC['xq_setup_huff'] if huff else CYC['xq_setup']
+            op_t = max(setup, t_first) + (reading - t_first) + CYC['xq_tail']
         elif name == 'xvq':
             ch, b, vqi, ssf, sidx = a[0], a[1], a[2] & 1023, a[3], a[4] & 0xFFFF
             vec = T.HIGH_FREQ_VQ[vqi][ssf * 8:ssf * 8 + 8]
             self.X[ch][b] = F.vq_band(vec, self.scale_value(sidx))
-            self.cycles += CYC['fetch'] + 8 * CYC['mac']
+            op_t = CYC['xvq'] + self.cb_latency
         elif name == 'adpcm':
             ch, b, pvq, pmode = a[0], a[1], a[2] & 0xFFF, a[3]
             coeff = T.ADPCM_VB[pvq] if pmode else None
             self.X[ch][b], self.hist[ch][b] = F.adpcm_band(self.X[ch][b], self.hist[ch][b], coeff)
-            self.cycles += (32 + 16) * CYC['mac'] if pmode else 4
+            op_t = (CYC['adpcm_pred'] + max(5, self.cb_latency + 3)) if pmode else CYC['adpcm_plain']
         elif name == 'joint':
             ch, b, src, jidx = a[0], a[1], a[2], a[3]
             jsc = T.JOINT_SCALE_FACTORS[jidx]
             self.X[ch][b], self.hist[ch][b] = F.joint_band(self.X[src][b], jsc, self.hist[ch][b])
-            self.cycles += 8 * CYC['mac'] + 4
+            op_t = CYC['joint']
         elif name == 'bfly':
             p, q = a[0], a[1]
             for b in range(32):
                 self.X[p][b], self.X[q][b] = F.butterfly_band(self.X[p][b], self.X[q][b])
-            self.cycles += 32 * CYC['bfly_band']
+            op_t = CYC['bfly']
         elif name == 'mixsyn':
             j, amode, nmix, perfect = a[0], a[1], a[2:7], a[7]
             spk = R.PRM_CH_TO_SPKR[amode]
             gains = F.default_gains(amode)
             win = T.FIR_32BANDS_PERFECT_FIXED if perfect else T.FIR_32BANDS_NONPERFECT_FIXED
             x = self.X[:len(spk)]
+            op_t = CYC['mixsyn'] + 2 * (32 * len(spk) + CYC['mixsyn_side'])
             for side in (0, 1):
                 gs = [gains.get(spk[ch], (0, 0))[side] for ch in range(len(spk))]
                 inp = F.mix_column(x, j, gs, nmix[:len(spk)])
                 pcm = self.synth[side].run(inp, win)
                 self.pcm[side].extend(F.to_s16(v) for v in pcm)
-                self.cycles += sum(min(nmix[c], 32) for c in range(len(spk)) if gs[c]) * CYC['mac']
-                self.cycles += CYC['imdct'] + CYC['window']
         elif name == 'hclr':
             ch, frm = a[0], a[1]
             for b in range(max(frm, 0), 32):
                 self.hist[ch][b] = [0] * 4
-            self.cycles += 32
+            op_t = CYC['hclr'] + CYC['hclr_band'] * (32 - min(max(frm, 0), 32))
         elif name == 'cnt':
             self.counters[a[0]] = self.counters.get(a[0], 0) + 1
+            op_t = CYC['cnt']
+        self.cycles = c0 + CYC['vop'] - CYC['instr'] + op_t
         self.by_cat[name] = self.by_cat.get(name, 0) + self.cycles - c0
         if self.vop_hook is not None:
             self.vop_hook(self, op)
@@ -514,21 +537,39 @@ class Machine:
         """XQ's code reader: R.extract_audio's semantics on the engine's bit reader
         and tree walker (lenient block codes, D5)."""
         if ab <= R.CODE_BOOKS and qsel < T.QUANT_INDEX_GROUP_SIZE[ab - 1]:
-            return [s16(self.vlc(QBOOK[ab - 1] + qsel)) for _ in range(8)], True
+            out = []
+            for i in range(8):
+                out.append(s16(self.vlc(QBOOK[ab - 1] + qsel)))
+                if i == 0:
+                    self.xq_first = self.bitpos           # (the cycle model's first code)
+            return out, True
         if ab <= 7 and not (ab <= R.CODE_BOOKS and qsel < T.QUANT_INDEX_GROUP_SIZE[ab - 1]):
             nb, levels = T.BLOCK_CODE_NBITS[ab - 1], T.QUANT_LEVELS[ab]
             off = (levels - 1) // 2
             out = []
-            for _ in range(2):
+            for h in range(2):
                 code = self.bits(nb)
+                if h == 0:
+                    self.xq_first = self.bitpos
                 for _ in range(4):
                     code, r = divmod(code, levels)
                     out.append(r - off)
-                    self.cycles += CYC['block_digit']
                 if code:
                     self.lenient += 1
             return out, False
-        return [self.sbits(ab - 3) for _ in range(8)], False
+        out = []
+        for i in range(8):
+            out.append(self.sbits(ab - 3))
+            if i == 0:
+                self.xq_first = self.bitpos
+        return out, False
+
+    def drain_cycles(self):
+        """fend / err: the frame's bytes the bit reader never took, drained."""
+        if self.cur is None:
+            return 0
+        taken = (min(self.bitpos, len(self.cur) * 8) + 7) >> 3
+        return 1 + CYC['drain_byte'] * (len(self.cur) - taken)
 
     # -- the sequencer -------------------------------------------------------
     def run(self, max_steps=50_000_000):
@@ -551,13 +592,16 @@ class Machine:
             elif op == 'st':
                 self.store(self.reg[rs] + self.reg[rt] + s16(imm), self.reg[rd])
             elif op == 'get':
+                self.cycles += CYC['get'] - CYC['instr']
                 self.setr(rd, self.bits(imm))
             elif op == 'getr':
                 n = self.reg[rt]
                 if not 0 <= n <= 16:
                     raise EngineError(f'getr {n} bits at pc {self.pc}')
+                self.cycles += CYC['get'] - CYC['instr']
                 self.setr(rd, self.bits(n))
             elif op == 'vlc':
+                self.cycles += CYC['vlc'] - CYC['instr']
                 self.setr(rd, self.vlc(self.reg[rs] + s16(imm)))
             elif op in ('br', 'bri'):
                 a = self.reg[rs]
@@ -576,6 +620,7 @@ class Machine:
             elif op == 'ret':
                 npc = self.stack.pop()
             elif op == 'err':
+                self.cycles += self.drain_cycles()
                 self.errors[imm] = self.errors.get(imm, 0) + 1
                 self.cur = None
                 self.stack = []
@@ -591,8 +636,10 @@ class Machine:
                 self.cur = self.frames.pop(0)
                 self.bitpos = 0
                 self.frame_start = self.cycles
+                self.cycles += CYC['frame'] - CYC['instr']
                 self.setr(rd, len(self.cur))
             elif op == 'fend':
+                self.cycles += self.drain_cycles()
                 self.bitpos = len(self.cur) * 8 if self.cur is not None else 0
             elif op == 'bpos':
                 self.setr(rd, self.bitpos & 0xFFFF)

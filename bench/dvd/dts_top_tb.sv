@@ -60,6 +60,11 @@ module dts_top_tb;
     int n_bytes, n_frames, n_ev, n_vops, n_pairs, n_err, n_ovr, n_len, n_dmix;
     int bi, fi, pi, vi, gap, fgap, ogap, busy, idle, last_prog, quiet;
     logic [3:0] cur_op;
+    // +opstats: cycles by vector op (start to done), and the sequencer's own (the rest)
+    longint op_cyc [0:8];
+    int op_n [0:8];
+    int op_t0;
+    logic opstats;
 
     initial begin
         int fd, r;
@@ -69,6 +74,8 @@ module dts_top_tb;
         if (!$value$plusargs("stall=%d", stall)) stall = 0;
         if (!$value$plusargs("ostall=%d", ostall)) ostall = 0;
         if (!$value$plusargs("cblat=%d", cblat)) cblat = 20;
+        opstats = $test$plusargs("opstats");
+        for (int i = 0; i < 9; i++) begin op_cyc[i] = 0; op_n[i] = 0; end
         fd = $fopen({stem, ".meta"}, "r");
         if (fd == 0) $fatal(1, "FAIL [setup] no %s.meta", stem);
         r = $fscanf(fd, "%d %d %d %d %d %d %d %d %d", n_bytes, n_frames, n_ev, n_vops,
@@ -211,7 +218,8 @@ module dts_top_tb;
     always @(posedge clk) begin
         if (!rst_n) vi <= 0;
         else begin
-            if (vop_start) cur_op <= vop_op;
+            if (vop_start) begin cur_op <= vop_op; op_t0 = busy; end
+            if (vop_done) begin op_cyc[cur_op] += busy - op_t0; op_n[cur_op]++; end
             if (vop_done) begin
                 logic [131:0] e;
                 logic [31:0] cx, ch, cr, cb;
@@ -251,6 +259,15 @@ module dts_top_tb;
                 $display("dts_top_tb: %0d bytes, %0d vector ops, %0d pairs, %0d frames, %0d refused, %0d codebook rows (latency %0d), %0d cycles; real time: worst frame %0.1f %%, mean %0.1f %%",
                          n_bytes, vi, pi, frames, refused, n_cb, cblat, busy - idle,
                          100.0 * worst, nfr_t ? 100.0 * sumfrac / nfr_t : 0.0);
+                if (opstats) begin
+                    longint vt; vt = 0;
+                    for (int i = 0; i < 9; i++) begin
+                        vt += op_cyc[i];
+                        if (op_n[i]) $display("opstats: op %0d  n %0d  cycles %0d  mean %0.1f",
+                                              i, op_n[i], op_cyc[i], 1.0 * op_cyc[i] / op_n[i]);
+                    end
+                    $display("opstats: sequencer %0d cycles (%0d total)", busy - idle - vt, busy - idle);
+                end
                 $display("PASS: dts_top_tb");
                 $finish;
             end

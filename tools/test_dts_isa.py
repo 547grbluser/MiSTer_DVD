@@ -8,8 +8,9 @@ Claims:
       tools/dts_fixed.py on every gate stream (spec maxima included), with no
       engine error;
   [2] every frame fits the real-time budget with margin: cycles <= BUDGET_FRAC
-      x 27 MHz x the frame's duration (the cycle model is P1a's estimate; P1b's
-      RTL measures);
+      x 27 MHz x the frame's duration. The cycle model (dts_isa.CYC) is calibrated
+      on the RTL: within 0.3 % of bench/dvd/run_dts.sh's measured cycles on every
+      gate arm (2026-10-02), at the codebook latency dts_isa.CB_LATENCY;
   [3] the committed .mem images match the assembled source (dts_isa.py --asm
       --check).
 RED arms: microcode mutations (`;MUT name:` lines in dts.uasm). Each must make
