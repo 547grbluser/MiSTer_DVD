@@ -392,7 +392,7 @@ otherwise; `--red` runs its mutation arms).
 | HUD authored for the DE window, not the raster | ✅ | `transport_hud.md` | `run_ov_geom.sh`, `check_ov_geom_wiring.py` |
 | Keyboard / CEC / IR-receiver transport (`kbd_map`) | ✅ ⏳ CEC unsupported on the rig | `dvd_nav.md` | `run_kbd.sh` |
 | IR / media-remote keys work unmapped (Main-side remap, `DVD_IR_REMAP`; PR #124) | ✅ | `ir_remote.md` | `main/tests/run_tests.sh`, `test_ir_integration.py`, `check_ir_remap.py` |
-| Show-first Audio/Subtitle: first press shows, a press while shown steps; popup shows the effective (menu-chosen) track | ⏳ HW-confirm pending | `track_selection.md` "Show-first" | `run_track_show.sh --red`, `check_track_step_wiring.py` |
+| Show-first Audio/Subtitle: first press shows, a press while shown steps; popup shows the effective (menu-chosen) track (PR #145) | 🔧 MERGED ⏳ HW-confirm pending | `track_selection.md` "Show-first" | `run_track_show.sh --red`, `check_track_step_wiring.py` |
 | Remote buttons: Stop, Aspect, Chapter Menu, A-B, Frame Step, Eject, Volume | ✅ | `dvd_nav.md`, `screensaver.md` | `run_frame_step.sh`, `check_frame_step_wiring.py` |
 | Frame step as a pause route; unbounded steps; clock follows the step | ✅ | `dvd_nav.md` | `run_frame_step.sh` |
 | Screensaver, and overlays blanked with the picture | ✅ | `screensaver.md` | `run_screensaver.sh`, `check_saver_overlay_wiring.py` |

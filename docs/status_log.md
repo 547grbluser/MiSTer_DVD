@@ -22,8 +22,8 @@ predate later confirmations; the `CLAUDE.md` index carries the reconciled status
 
 ## Hardware status (THIS fork, verified 2026-06-21)
 
-- ⏳ **SHOW-FIRST AUDIO/SUBTITLE BUTTONS (2026-10-01, branch
-  `feature/track-button-show-first`; sim-proven, HW-confirm pending).**
+- ⏳ **SHOW-FIRST AUDIO/SUBTITLE BUTTONS (2026-10-01, ✅ MERGED PR #145;
+  sim-proven, ⏳ HW-confirm pending).**
   Full record: `docs/track_selection.md` "Show-first Audio/Subtitle".
   - **Report (maintainer):** a set-top player's Audio/Subtitle button shows the current
     setting first and changes it only when pressed again while it is on screen. This core
