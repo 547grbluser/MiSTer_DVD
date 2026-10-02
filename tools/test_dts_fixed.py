@@ -48,6 +48,9 @@ def main():
               f'rms {v["rms"]:.4f}')
         fails += (not ok1) + (not ok2)
         for mut, arm in (('stale_history', 1), ('mix_trunc', 2)):
+            if mut == 'stale_history' and not v['ops']['pred_bands']:
+                print(f'    RED {mut:14} gap   -- no ADPCM prediction in this stream')
+                continue
             dts_fixed.MUT.clear()
             dts_fixed.MUT.add(mut)
             m = dts_fixed.run_verify(path, args.frames)

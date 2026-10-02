@@ -78,7 +78,7 @@ class StreamDecoder:
         # per channel, per band: the last 4 reconstructed subband samples
         self.hist = [[[0] * R.ADPCM_COEFFS for _ in range(R.SUBBANDS)] for _ in range(7)]
         self.synth = [R.SynthFixed(), R.SynthFixed()]
-        self.ops = {'mac': 0, 'bits': 0, 'frames': 0, 'synth_blocks': 0}
+        self.ops = {'mac': 0, 'bits': 0, 'frames': 0, 'synth_blocks': 0, 'pred_bands': 0}
 
     def decode(self, data, trace=None):
         """`trace`, if a list, receives (ch, band, sample index, value) of every
@@ -148,6 +148,7 @@ class StreamDecoder:
                                 x[ch][b][j] = v
                                 hb = hb[1:] + [v]
                             self.ops['mac'] += 4 * R.SUBBAND_SAMPLES
+                            self.ops['pred_bands'] += 1
                         elif 'stale_history' not in MUT:
                             hb = (hb + x[ch][b])[-R.ADPCM_COEFFS:]
                         self.hist[ch][b] = hb
