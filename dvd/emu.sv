@@ -1560,6 +1560,7 @@ wire [6:0]  res_ttn_w;
 wire [15:0] rd_next_pgcn, rd_prev_pgcn, rd_goup_pgcn;
 wire [7:0]  cur_cell_cmdnr_w;
 wire        menu_ar_wide_w;      // 1 = loaded menu is 16:9 (IFO V_ATR, not seq hdr)
+wire [1:0]  menu_ar_df_w;        // loaded menu's permitted_df: bit0 no-letterbox, bit1 no-pan&scan
 wire        title_ar_wide_w;     // 1 = loaded TITLE's VTS is 16:9 (IFO VTS_V_ATTR@0x200)
 wire        vm_cmd_we;
 wire [11:0] vm_cmd_waddr;
@@ -3492,6 +3493,7 @@ dvd_iso_reader dvd_iso_reader_inst (
     .title_start_rbn (title_start_rbn_w),
     .title_end_rbn   (title_end_rbn_w),
     .menu_ar_wide   (menu_ar_wide_w),
+    .menu_ar_df     (menu_ar_df_w),
     .title_ar_wide  (title_ar_wide_w),
 
     .sd_lba         (sd_lba),
@@ -5560,9 +5562,31 @@ wire [1:0] analog_aspect_sel = aa_osd_sel;   // 0 Auto, 1 Fit, 2 Letterbox, 3 Cr
 // resolve 16:9 — docs/vcd_svcd.md §2d); what this gates is a MANUAL Letterbox/Crop
 // selection while a VCD plays. Same shape as filmp_eff being suppressed by
 // interlaced_eff: a raster that cannot carry a feature says so, in RTL.
-assign analog_letterbox = interlaced_eff & ~p240_eff & ((analog_aspect_sel == 2'd2) |
-                                ((analog_aspect_sel == 2'd0) & ar_wide_auto_eff)); // Letterbox or Auto-16:9
-assign analog_crop      = interlaced_eff & ~p240_eff & (analog_aspect_sel == 2'd3); // Crop (manual)
+// DVD-FORK (menu pan&scan, 2026-10-01): a 16:9 MENU's permitted display mode overrides the
+// user's Letterbox/Crop choice, the way a 4:3 set-top player treats the IFO V_ATR
+// permitted_df field (libdvdread video_attr_t; dvdnav.h "bit0 set = deny letterboxing,
+// bit1 set = deny pan&scan"). A menu that denies letterbox is CROPPED even under
+// Letterbox/Auto -- its art and buttons are authored inside the centre 4:3 (the menu
+// stream declares a 540-px pan window, centre offset 0) -- and a menu that denies
+// pan&scan is LETTERBOXED even under Crop, so edge buttons are not cut off. Fit is the
+// wide display, always permitted, and is never touched; df 0 (both) and df 3 (neither,
+// unspecified) leave the user's choice alone. MENUS ONLY, by user decision: 935 of 940
+// main features deny pan&scan, so honouring the title flag would just turn a deliberate
+// Crop into Letterbox on nearly every film. The menu gate is ar_wide_auto_eff's own
+// (menus_on && menu_active), and the flag is captured with menu_ar_wide_w during the
+// menu load. Both modes drive ARX/ARY 4:3, so a title<->menu flip between them never
+// re-inits the scaler; crt_ov_map follows analog_letterbox/analog_crop, so the menu
+// highlight tracks the swapped geometry. docs/crt_anamorphic.md §11.
+wire analog_menu169  = menus_on & menu_active & menu_ar_wide_w;
+wire analog_want_lb  = (analog_aspect_sel == 2'd2) |
+                       ((analog_aspect_sel == 2'd0) & ar_wide_auto_eff);   // Letterbox or Auto-16:9
+wire analog_want_crop = (analog_aspect_sel == 2'd3);                       // Crop (manual)
+wire menu_lb_to_crop = analog_menu169 & (menu_ar_df_w == 2'd1);            // menu: pan&scan only
+wire menu_crop_to_lb = analog_menu169 & (menu_ar_df_w == 2'd2);            // menu: letterbox only
+assign analog_letterbox = interlaced_eff & ~p240_eff &
+                          ((analog_want_lb   & ~menu_lb_to_crop) | (analog_want_crop & menu_crop_to_lb));
+assign analog_crop      = interlaced_eff & ~p240_eff &
+                          ((analog_want_crop & ~menu_crop_to_lb) | (analog_want_lb   & menu_lb_to_crop));
 wire       disp_vscale_en   = analog_letterbox;                             // downstream 2-tap letterbox
 // DVD-FORK FIX (SIF analog fill): mode 2 = the re-armed addrgen 2x line repeat (v_step
 // 128) for sub-D1 heights on the analog output; bit 0 stays tied (mode 1 letterbox-NN
