@@ -392,6 +392,11 @@ module iso_reader_menu_tb;
             be32(19*2048+132, 32'd400);
             be32(19*2048+196, 32'd0);          // tt_srpt unused (Auto = largest)
             be32(19*2048+200, 32'd1);          // VMGM PGCI_UT -> sector 20
+            // VMGM_V_ATR @0x100 = 0x4E00: 16:9 with permitted_df=2 (letterbox only),
+            // the OPPOSITE pair to the VTSM's 0x4D, so T4 proves the VMGM arm of
+            // S_MENU_VATR captures its own byte and overwrites the VTSM's value.
+            img[19*2048+16'h100] = 8'h4E;
+            img[19*2048+16'h101] = 8'h00;
             // FP PGC: 0 cells, cmd tbl @236: pre = {g0=0, JumpTT 1}
             put_pgc(19*2048+400, 8'd0, 16'd0, 8'd0, 8'h00, 16'd236, 16'd0);
             put_cmdtbl2(19*2048+400, 16'd236,
@@ -560,6 +565,11 @@ module iso_reader_menu_tb;
         expect_range(cap_mark+2048, 2048, 8'hD1);
         chk(dut.cur_pgcn == 8'd2, "T2 followed LinkPGCN to PGCN 2");
         chk(dut.menu_ar_wide === 1'b1, "T2 menu aspect 16:9 from VTSM_V_ATR@0x100");
+        // 0x4D's low bits are 01 = permitted_df "pan&scan only" (letterbox denied),
+        // the common 16:9-menu shape. Asymmetric on purpose: a capture of the wrong
+        // bit pair, or the pair reversed (10 = letterbox only), reads back != 1, and
+        // the reset value (0) proves the capture actually fired.
+        chk(dut.menu_ar_df === 2'd1, "T2 menu_ar_df=1 (P&S only)");
         // the STRADDLING menu PGC's palette must have loaded (walker crossing).
         // 32 writes = the root stub's palette (zeros) then the followed PGC's -
         // the last-loaded PGC's palette wins, which is the displayed menu's.
@@ -599,6 +609,8 @@ module iso_reader_menu_tb;
         expect_range(cap_mark, 2048, 8'hC0);
         expect_range(cap_mark+2048, 2048, 8'hC1);
         chk(still_active === 1'b1, "T4 still");
+        chk(dut.menu_ar_wide === 1'b1, "T4 VMGM aspect 16:9");
+        chk(dut.menu_ar_df === 2'd2, "T4 VMGM menu_ar_df=2 (LB only)");
         chk(dut.cur_pgcn == 8'd2, "T4 followed next_pgcn to PGCN 2");
         // Phase-5: the VMGM ENTRY jump is title->menu (keep_vbuf=0) but the
         // authored next_pgcn=2 ADVANCE is menu->menu -> the seek_ack that drives

@@ -22,18 +22,21 @@ tall/thin. Two independent axes fix it — a **vertical downscale** (Letterbox) 
 | **Letterbox** | VERTICAL downscale ×3/4 (480→360 / field 240→180), centred + black bars | correct 16:9 geometry, full width, black bars |
 | **Crop** (pan-scan) | HORIZONTAL: read the centre ¾ of the columns, stretch to full width; vertical stays 1:1 | correct 16:9 geometry, **FULL 480-line vertical resolution**, sides cropped, no bars |
 
-Both corrections are the exact ×¾ (a 16:9 image in a 4:3 frame has scale factor
-(4/3)/(16/9)=¾). Letterbox does it vertically (bars = ⅛ of the height each: 60 lines NTSC /
-72 PAL). Crop does it horizontally (show the centre ¾ of the width, stretched back to full
-width — full vertical resolution, sides ⅛ cropped each).
+Both corrections are nominally ×¾ (a 16:9 image in a 4:3 frame has scale factor
+(4/3)/(16/9)=¾). Letterbox does it vertically and exactly (bars = ⅛ of the height each: 60
+lines NTSC / 72 PAL). Crop does it horizontally but only to the nearest macroblock: it reads
+33 of 45 macroblocks = the centre **528** px (not 540), stretched to 720 — ×0.733, so the
+picture is ~2.3 % over-stretched and 6 px per side narrower than an authored 540-px pan
+window (§2, §12).
 
 **Why Crop is HORIZONTAL, not vertical:** to keep *full vertical resolution* (all 480 source
 lines, no vertical scaling ⇒ no vertical aliasing) while filling the 4:3 screen with 16:9
 content, the only correct operation is a horizontal pan-scan (crop the sides). A vertical
 crop+upscale would throw away vertical resolution and over-stretch the (already tall)
 anamorphic image — the earlier "Zoom" attempt did exactly that and was wrong; it is replaced
-by this horizontal Crop. Auto never selects Crop (it picks Letterbox for 16:9 / Fit for 4:3);
-Crop is a manual choice.
+by this horizontal Crop. Auto never selects Crop on its own (it picks Letterbox for 16:9 /
+Fit for 4:3) — **except on a 16:9 menu that forbids letterbox, which a set-top player also
+pan&scans; see §12** (and a Crop choice is letterboxed on a menu that forbids pan&scan).
 
 ## 2. Where it lives
 
@@ -591,3 +594,98 @@ live the moment `disp_vscale_en` is un-gated from `interlaced_eff` — i.e. the 
 ⚠ Also worth knowing before trusting that bench on edge behaviour: its geometry check is
 `TOL = 6` on the line count, `hole` counts only **fully** black lines, and `hfill_ok` is a
 frame-wide min/max. **A single partially drawn line is invisible to it.**
+
+## 12. Menu permitted display mode — a 16:9 menu overrides Letterbox/Crop (2026-10-01, ✅ HW-CONFIRMED)
+
+**Field request (maintainer):** a 16:9 disc menu shown on a 4:3 TV should be pan&scanned
+even when the player is set to letterbox — the way a set-top box does it — so the menu
+fills the screen instead of sitting small between bars.
+
+**What a set-top player actually does.** Each domain's video attribute word (VMGM_V_ATR /
+VTSM_V_ATR at IFO `0x100`, VTS_V_ATR at `0x200`) carries a *permitted display mode*
+(libdvdread `video_attr_t.permitted_df`, bits 9:8 of the BE u16 = bits 1:0 of the high
+byte). `dvdnav.h`: *"bit0 set = deny letterboxing, bit1 set = deny pan&scan"* — so 0 = both,
+1 = pan&scan only, 2 = letterbox only, 3 = neither (wide only; libdvdread prints "not
+specified"). Wide (a 16:9 TV) is always permitted. A 4:3 player set to Letterbox shows a
+16:9 picture pan&scanned when letterbox is denied, and vice versa. The request was right
+*conditionally*: the flag, not the player setting, decides — and it decides in both
+directions. (libdvdnav itself ignores the field: SPRM14 is a constant `0x100` and its own
+SPU selection always takes the wide byte. VLC's dvdread access does branch on it, for the
+subpicture variant only.) Bit polarity is corroborated two ways: libdvdread's printer, and
+the stream measurement below — df=1 menus carry a 540-px display window, df=2 menus mostly
+do not.
+
+**Measured (2026-10-01, 1,520 ISOs in the local library):**
+
+| Domain, 16:9 | P&S only (df 1) | LB only (df 2) | both (df 0) |
+|---|---|---|---|
+| VMGM | **605** discs | 157 | 65 |
+| VTSM | **952** discs (2,653 menus) | 372 discs (883) | 34 discs (56) |
+| VTS (all) | 504 discs (1,082) | 1,101 discs (4,862) | 10 discs (37) |
+| VTS (largest = main feature) | 1 | **935** | 4 |
+
+So menus are overwhelmingly authored "pan&scan only" — and main features overwhelmingly
+"letterbox only", which is why pan&scan "was not used for video playback": studios forbade
+it and shipped separate 4:3 encodes instead.
+
+**Refuted: dynamic pan vectors.** The request assumed the menus carry per-picture pan&scan
+metadata. A scan of 133 16:9 menu VOBs (120 random discs) found the *static* part of the
+mechanism and not the dynamic one: 100/102 df=1 menus carry `sequence_display_extension`
+with `display_horizontal_size = 540` (the ¾ window), but every `picture_display_extension`
+`frame_centre_horizontal_offset` is 0. The three non-zero hits (13056, −6127, 14723 in
+1/16 px = 380–920 px) are impossible for a 720-wide frame and are false matches of the
+raw-byte scan. **It is a centre crop**; the decoder still skips `picture_display_extension`
+(`rtl/mpeg2/vld.v`, `EXT_PICTURE_DISPLAY`) and nothing here needs it.
+
+**Decision (user, 2026-10-01): MENUS only, BOTH directions.**
+- While a 16:9 menu is up (`menus_on & menu_active & menu_ar_wide_w`): df=1 turns a
+  Letterbox (or Auto-on-16:9) choice into **Crop**; df=2 turns a Crop choice into
+  **Letterbox** (157 VMGMs / 372 discs' VTSMs are letterbox-only, and cropping them can cut
+  off edge buttons).
+- Fit (the user has a 16:9 TV), df 0 and df 3 are never touched.
+- Titles are **not** overridden: 935/940 main features deny pan&scan, so honouring the title
+  flag would only turn a deliberate Crop into Letterbox on almost every film. A title
+  resolves bit-identically to v0.8.0 (the gate checks it).
+
+**Mechanism — one capture, one resolve, everything else follows.**
+- `dvd/dvd_iso_reader.sv` `S_MENU_VATR` captures `menu_ar_df <= rbuf[0][1:0]` beside
+  `menu_ar_wide`, for both the VMGM and VTSM arms, during the menu load (before
+  `menu_active` asserts).
+- `dvd/emu.sv` `analog_letterbox` / `analog_crop` gain the two swap terms
+  (`menu_lb_to_crop`, `menu_crop_to_lb`) inside the existing `interlaced_eff & ~p240_eff`
+  gate.
+- Free from there: `disp_vscale_en` / `disp_hcrop_en` drive the decoder, `VIDEO_ARX/ARY`
+  are 4:3 in **both** modes (so a title↔menu swap between Letterbox and Crop never re-inits
+  the scaler), and `crt_ov_map` (§9) follows the same two enables, so the highlight tracks
+  the cropped buttons.
+- **Subpicture/highlight variant: deliberately unchanged.** Menus keep the WIDE
+  `subp_control` byte and button group 1 and are composited in source space through the §9
+  inverse map — geometrically the same as compositing the disc's pan&scan variant after the
+  crop. Do not "fix" this by selecting the pan&scan byte/group for a cropped menu: that
+  applies the transform twice (the fj#168 hardware lesson, `docs/dvd_nav.md`).
+
+**Known limitations.**
+- **Analog interlaced raster only**, exactly like Crop itself: in Progressive mode or on an
+  HDMI-only rig there is no crop path (ascal letterboxes; "HDMI 4:3 Fit/Letterbox/Crop" was
+  dropped, `docs/roadmap.md`). On the interlaced raster HDMI shows the shared raster, so it
+  shows the crop too.
+- The Crop window is 528 px, not the authored 540 (§1): a button drawn flush to the pan
+  window's edge loses its outer ~6 px. Fixing it needs a non-macroblock column window in
+  `resample_addrgen` — not done.
+- The swap follows `menu_active`, so the picture straddling a title↔menu crossing could in
+  principle show for a frame in the other geometry (as pressing Aspect live can). Watched
+  live on the CRT (maintainer, 2026-10-01): the cropped menu → letterboxed movie switch on
+  *28 Days Later* looked seamless.
+- In-title menus (HLI in the title domain) are titles here and are not overridden.
+- SPRM14 is still the constant `0x0100` ("4:3 TV, pan&scan"); a disc program that branches
+  on it never sees the user's setting. Untouched by this change.
+- The override is silent: no OSD/HUD message says the menu forced Crop or Letterbox.
+
+**Gate:** `bench/dvd/run_menu_panscan.sh [--red]` — `tools/check_menu_panscan_wiring.py`
+evaluates the resolve's whole comb-definition closure out of `emu.sv` over all 1,024 input
+points against a reference model (+ titles identical to v0.8.0, + the port and the
+downstream seams), and `iso_reader_menu_tb` T2/T4 pin the capture (VTSM `0x4D` → 1, then
+VMGM `0x4E` → 2). 8 mutation arms, each caught by its own assertion.
+
+**HW (2026-10-01, rig, Interlaced, control arm = v0.8.0 through the same script):** *28 Days Later* (VTSM df=1) under Letterbox — v0.8.0 letterboxes the menu, the new build shows it full-height cropped, highlight on its button after a down-press (same authored position as the control), and Play Movie (VTS df=2) returns to letterbox. *MythBusters 2008-03* (df=2) under Crop — v0.8.0 crops off the episode list's left edge, the MYTHBUSTERS logo and the PLAY ALL box; the new build letterboxes it with everything visible.
+Not separately exercised on HW: Auto (same `analog_want_lb` term as Letterbox, gated in sim), Fit and Progressive (resolve unchanged there; the gate proves it).

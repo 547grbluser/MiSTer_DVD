@@ -956,6 +956,12 @@ half-line, weave workaround, 1440-wide pixel repetition) is the
     `bench/dvd/crt_ov_map_tb.sv`); `spu_decode` row-base adder generalized for the skipping
     line walks; CRT Auto aspect now menu-aware (`ar_wide_auto_eff`, matches HDMI). Detail +
     HW-gate checklist: `docs/crt_anamorphic.md` §9.
+  - **Menu permitted display mode overrides Letterbox/Crop (2026-10-01, branch
+    `feature/menu-panscan`) — ✅ HW-CONFIRMED 2026-10-01 (control arm v0.8.0).** A 16:9 menu whose IFO V_ATR
+    denies letterbox (`permitted_df`=1, the common case: 605/827 16:9 VMGMs) is cropped under
+    Letterbox/Auto, and one that denies pan&scan is letterboxed under Crop — what a 4:3 set-top
+    player does. Menus only, by user decision (main features deny pan&scan). Gate
+    `run_menu_panscan.sh`. Detail: `docs/crt_anamorphic.md` §12.
 - ⛔ **[dropped — not needed (2026-09-01, user decision) — a want rather than a defect, for the narrow case of 16:9 anamorphic content on a 4:3 HDMI display]** **HDMI 4:3 output follows the same Fit / Letterbox / Crop setting as the analog CRT.**
   Today `O[4:3] CRT Aspect` (Fit/Letterbox/Crop, `docs/crt_anamorphic.md`) is gated on
   `crt_eff` (analog CRT mode only); HDMI instead gets its aspect from ascal via

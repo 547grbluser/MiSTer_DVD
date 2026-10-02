@@ -302,6 +302,15 @@ Set **`Analog Aspect`** to `Letterbox` (or `Crop`). Anamorphic content is stored
 into a 4:3 raster and needs unsqueezing. See
 [Analog Aspect](../video/analog-crt.md#analog-aspect).
 
+### A disc menu is cropped even though Analog Aspect is set to Letterbox
+
+This is intended. Most widescreen menus allow only pan-and-scan on a 4:3 TV, because
+their buttons are all inside the centre of the picture. The core crops them the way a
+set-top player does. The opposite also happens: a menu that allows only letterbox is
+letterboxed even when `Analog Aspect` is set to `Crop`. Playback returns to your setting
+when the movie starts. See
+[Widescreen disc menus](../video/analog-crt.md#widescreen-disc-menus).
+
 ### Motion looks juddery or wobbly on a CRT
 
 Make sure **`Video Output`** is `Interlaced` (or `Auto` with the
