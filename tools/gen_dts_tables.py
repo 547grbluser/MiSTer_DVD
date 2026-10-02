@@ -36,7 +36,7 @@ OUT = os.path.join(REPO, 'tools', 'dts_tables.py')
 # The inputs. Their sha256 pin is tools/dts_tables.sha256; re-pin (--pin) only
 # deliberately, and say why in the commit.
 PINNED = ('libavcodec/dcadata.c', 'libavcodec/dcahuff.c', 'libavcodec/dca_core.c',
-          'libavcodec/dca.c', 'libavcodec/dca_sample_rate_tab.h')
+          'libavcodec/dca.c', 'libavcodec/dca_sample_rate_tab.h', 'libavcodec/dcadct.c')
 PIN_FILE = os.path.join(REPO, 'tools', 'dts_tables.sha256')
 
 # Core codebook layout of ff_dca_vlc_src_tables, in the order ff_dca_init_vlcs()
@@ -82,6 +82,15 @@ def c_array(src, name):
                 break
     body = src[i:k + 1]
     return [parse_num(t) for t in NUM.findall(body)]
+
+
+def c_array_in_func(src, func, name):
+    """A function-local `static const ... name[..] = {..}` inside `func` (dcadct.c
+    reuses the name cos_mod in every function)."""
+    m = re.search(r'\b' + re.escape(func) + r'\s*\(', src)
+    if not m:
+        raise SystemExit(f'gen_dts_tables: function {func} not found')
+    return c_array(src[m.end():], name)
 
 
 def rows(flat, width):
@@ -133,6 +142,7 @@ def generate(root):
     core = strip_comments(rd('libavcodec/dca_core.c').decode())
     dca = strip_comments(rd('libavcodec/dca.c').decode())
     srt = strip_comments(rd('libavcodec/dca_sample_rate_tab.h').decode())
+    dct = strip_comments(rd('libavcodec/dcadct.c').decode())
 
     t = {}
     # --- header / layout ---
@@ -163,6 +173,12 @@ def generate(root):
     t['FIR_32BANDS_PERFECT_FIXED'] = c_array(data, 'ff_dca_fir_32bands_perfect_fixed')
     t['FIR_32BANDS_NONPERFECT_FIXED'] = c_array(data, 'ff_dca_fir_32bands_nonperfect_fixed')
     t['LFE_FIR_64_FIXED'] = c_array(data, 'ff_dca_lfe_fir_64_fixed')
+    # --- the fixed-point half IMDCT of the 32-band synthesis (dcadct.c) ---
+    t['DCT_A_COS'] = rows(c_array_in_func(dct, 'dct_a', 'cos_mod'), 8)
+    t['DCT_B_COS'] = rows(c_array_in_func(dct, 'dct_b', 'cos_mod'), 7)
+    t['MOD_A_COS'] = c_array_in_func(dct, 'mod_a', 'cos_mod')
+    t['MOD_B_COS'] = c_array_in_func(dct, 'mod_b', 'cos_mod')
+    t['MOD_C_COS'] = c_array_in_func(dct, 'mod_c', 'cos_mod')
     # --- embedded downmix coefficients ---
     t['DMIXTABLE'] = c_array(data, 'ff_dca_dmixtable')
     t['INV_DMIXTABLE'] = c_array(data, 'ff_dca_inv_dmixtable')

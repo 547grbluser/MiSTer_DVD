@@ -42,6 +42,12 @@ AMODE_STEREO_SUMDIFF = 3
 AMODE_2F2R = 8
 
 
+# Mutation hooks for tools/test_dts_ref.py's RED arms. Each names one stage;
+# the test proves the bit-exact comparison FAILS when that stage is broken,
+# so a PASS cannot be vacuous. Empty in normal use.
+MUT = set()
+
+
 class DtsError(Exception):
     def __init__(self, code, msg):
         super().__init__(f'{code}: {msg}')
@@ -342,10 +348,12 @@ def extract_audio(br, c, ch, abits):
                 code = br.bits(nb)
                 for _ in range(SUBBAND_SAMPLES // 2):
                     code, r = divmod(code, levels)
-                    out.append(r - off)
+                    out.append(r - off + (1 if 'block_offset' in MUT else 0))
                 if code:
                     raise DtsError('E_BLOCK_CODE', 'block code out of range')
             return out, False
+    if 'raw_unsigned' in MUT:
+        return [br.bits(abits - 3) for _ in range(SUBBAND_SAMPLES)], False
     return [br.sbits(abits - 3) for _ in range(SUBBAND_SAMPLES)], False
 
 
@@ -355,6 +363,8 @@ def dequantize(q, step_size, scale):
     if step_scale > (1 << 23):
         shift = log2i(step_scale >> 23) + 1
         step_scale >>= shift
+    if 'dequant_trunc' in MUT:
+        return [clip23((x * step_scale) >> (22 - shift)) for x in q]
     return [clip23(norm(x * step_scale, 22 - shift)) for x in q]
 
 
@@ -383,7 +393,7 @@ class CoreDecoder:
         sb = [[list(self.hist[ch][b]) + [0] * npb for b in range(SUBBANDS)] for ch in range(nch)]
         lfe = []
         stats = {'pmode_bands': 0, 'vq_bands': 0, 'huff': 0, 'block': 0, 'raw': 0,
-                 'subframes': []}
+                 'transient': 0, 'joint_bands': 0, 'subframes': []}
         sub_pos = 0
         for sf in range(c['nsubframes']):
             s = parse_subframe_header(br, h, c)
@@ -394,7 +404,7 @@ class CoreDecoder:
             # high-frequency VQ subbands
             for ch in range(nch):
                 for b in range(c['vq_start'][ch], c['nsubbands'][ch]):
-                    vec = T.HIGH_FREQ_VQ[br.bits(10)]
+                    vec = T.HIGH_FREQ_VQ[(br.bits(10) + (1 if 'vq_index' in MUT else 0)) & 1023]
                     sc = s['scales'][ch][b][0]
                     for j in range(nsamples):
                         sb[ch][b][ADPCM_COEFFS + sub_pos + j] = clip23((vec[j] * sc + 8) >> 4)
@@ -421,8 +431,10 @@ class CoreDecoder:
                         # bit_rate 3 is the table's 'lossless' marker (br_code 31)
                         step = T.LOSSLESS_QUANT[a] if h['bit_rate'] == 3 else T.LOSSY_QUANT[a]
                         t = s['tmode'][ch][b]
-                        scale = s['scales'][ch][b][0 if (t == 0 or ssf < t) else 1]
-                        if huff:
+                        scale = s['scales'][ch][b][0 if (t == 0 or ssf < t or 'transient' in MUT) else 1]
+                        if t:
+                            stats['transient'] += 1
+                        if huff and 'huff_adj' not in MUT:
                             scale = clip23((c['scale_adj'][ch][a - 1] * scale) >> 22)
                         out = dequantize(q, step, scale)
                         base = ADPCM_COEFFS + ofs
@@ -434,7 +446,7 @@ class CoreDecoder:
             # inverse ADPCM, per subframe, every predicted band
             for ch in range(nch):
                 for b in range(c['nsubbands'][ch]):
-                    if s['pmode'][ch][b]:
+                    if s['pmode'][ch][b] and 'no_adpcm' not in MUT:
                         stats['pmode_bands'] += 1
                         coeff = T.ADPCM_VB[s['pvq'][ch][b]]
                         x = sb[ch][b]
@@ -447,6 +459,9 @@ class CoreDecoder:
                 if src >= 0:
                     for b in range(c['nsubbands'][ch], c['nsubbands'][src]):
                         jsc = s['jscale'][ch][b]
+                        stats['joint_bands'] += 1
+                        if 'no_joint' in MUT:
+                            continue
                         for j in range(ADPCM_COEFFS + sub_pos, ADPCM_COEFFS + sub_pos + nsamples):
                             sb[ch][b][j] = clip23(mul(sb[src][b][j], jsc, 17))
             sub_pos = ofs
@@ -508,6 +523,191 @@ def parse_optional_info(br, h, c):
         o['aux_ok'] = (aux_pos % 8 == 0 and
                        crc16_ccitt(br.data[aux_pos // 8:br.pos // 8]) == 0)
     return o
+
+
+# --------------------------------------------------------------------------
+# Synthesis: FFmpeg's FIXED-point path (what `-flags bitexact` selects), so the
+# reference is bit-exact against the binary and one comparison checks every
+# bit of the front end. The hardware's own fixed point (tools/dts_fixed.py)
+# is then scored against this within an LSB bound (docs/dts_decoder.md D3).
+# C int32 semantics are emulated where FFmpeg relies on them: norm__ casts its
+# 64-bit result to int32, and the L/R butterflies wrap as unsigned.
+# --------------------------------------------------------------------------
+def i32(a):
+    a &= 0xFFFFFFFF
+    return a - (1 << 32) if a >> 31 else a
+
+
+def normc(a, bits):
+    """FFmpeg norm__: round half up, shift, then (int32_t) cast."""
+    return i32((a + (1 << (bits - 1))) >> bits)
+
+
+def mulc(a, b, bits):
+    return normc(a * b, bits)
+
+
+def _dct_a(x):
+    return [normc(sum(T.DCT_A_COS[i][j] * x[j] for j in range(8)), 23) for i in range(8)]
+
+
+def _dct_b(x):
+    return [normc((x[0] << 23) + sum(T.DCT_B_COS[i][j] * x[1 + j] for j in range(7)), 23)
+            for i in range(8)]
+
+
+def _mod_a(x):
+    c = T.MOD_A_COS
+    return ([mulc(c[i], x[i] + x[8 + i], 23) for i in range(8)] +
+            [mulc(c[8 + n], x[7 - n] - x[15 - n], 23) for n in range(8)])
+
+
+def _mod_b(x):
+    c = T.MOD_B_COS
+    hi = [mulc(c[i], x[8 + i], 23) for i in range(8)]
+    return [x[i] + hi[i] for i in range(8)] + [x[7 - n] - hi[7 - n] for n in range(8)]
+
+
+def _mod_c(x):
+    c = T.MOD_C_COS
+    return ([mulc(c[i], x[i] + x[16 + i], 23) for i in range(16)] +
+            [mulc(c[16 + n], x[15 - n] - x[31 - n], 23) for n in range(16)])
+
+
+def _sum_a(x, n):
+    return [x[2 * i] + x[2 * i + 1] for i in range(n)]
+
+
+def _sum_b(x, n):
+    return [x[0]] + [x[2 * i] + x[2 * i - 1] for i in range(1, n)]
+
+
+def _sum_c(x, n):
+    return [x[2 * i] for i in range(n)]
+
+
+def _sum_d(x, n):
+    return [x[1]] + [x[2 * i - 1] + x[2 * i + 1] for i in range(1, n)]
+
+
+def _clp(v):
+    return [clip23(a) for a in v]
+
+
+def imdct_half_32(inp):
+    """FFmpeg dcadct.c imdct_half_32, transcribed: 32 subband samples -> 32."""
+    mag = sum(abs(a) for a in inp)
+    shift = 2 if mag > 0x400000 and 'imdct_noshift' not in MUT else 0
+    rnd = 1 << (shift - 1) if shift else 0
+    a = [(v + rnd) >> shift for v in inp]
+    b = _clp(_sum_a(a, 16) + _sum_b(a, 16))
+    a = _clp(_sum_a(b[0:16], 8) + _sum_b(b[0:16], 8) + _sum_c(b[16:32], 8) + _sum_d(b[16:32], 8))
+    b = _clp(_dct_a(a[0:8]) + _dct_b(a[8:16]) + _dct_b(a[16:24]) + _dct_b(a[24:32]))
+    a = _clp(_mod_a(b[0:16]) + _mod_b(b[16:32]))
+    b = _mod_c(a)
+    b = [clip23(v * (1 << shift)) for v in b]
+    return ([clip23(b[i] - b[31 - i]) for i in range(16)] +
+            [clip23(b[i] + b[31 - i]) for i in range(16)])
+
+
+class SynthFixed:
+    """One channel's 32-band QMF state: the 512-entry IMDCT ring with its
+    offset, and the 32 carried partial sums (FFmpeg synth_filter_fixed)."""
+
+    def __init__(self):
+        self.buf = [0] * 512
+        self.off = 0
+        self.buf2 = [0] * 32
+
+    def run(self, inp, win):
+        o = self.off
+        self.buf[o:o + 32] = imdct_half_32(inp)
+        buf, out = self.buf, [0] * 32
+
+        def at(k):
+            return buf[o + k] if o + k < 512 else buf[o + k - 512]
+        for i in range(16):
+            a = self.buf2[i] << 21
+            b = self.buf2[i + 16] << 21
+            c = d = 0
+            for j in range(0, 512, 64):
+                a += win[i + j] * at(i + j)
+                b += win[i + j + 16] * at(15 - i + j)
+                c += win[i + j + 32] * at(16 + i + j)
+                d += win[i + j + 48] * at(31 - i + j)
+            out[i] = clip23(normc(a, 21))
+            out[i + 16] = clip23(normc(b, 21))
+            self.buf2[i] = normc(c, 21)
+            self.buf2[i + 16] = normc(d, 21)
+        self.off = (o - 32) & 511
+        return out
+
+
+# FFmpeg's DCA speaker indices and the primary-channel map per audio mode.
+SPK_C, SPK_L, SPK_R, SPK_LS, SPK_RS, SPK_LFE, SPK_CS = 0, 1, 2, 3, 4, 5, 6
+PRM_CH_TO_SPKR = [
+    [SPK_C], [SPK_L, SPK_R], [SPK_L, SPK_R], [SPK_L, SPK_R], [SPK_L, SPK_R],
+    [SPK_C, SPK_L, SPK_R], [SPK_L, SPK_R, SPK_CS], [SPK_C, SPK_L, SPK_R, SPK_CS],
+    [SPK_L, SPK_R, SPK_LS, SPK_RS], [SPK_C, SPK_L, SPK_R, SPK_LS, SPK_RS],
+]
+# FFmpeg's native (WAV) output order for these speakers: dca2wav_norm.
+SPK_TO_WAV = {SPK_C: 2, SPK_L: 0, SPK_R: 1, SPK_LS: 9, SPK_RS: 10, SPK_LFE: 3, SPK_CS: 8}
+
+
+class Decoder:
+    """Frame bytes -> {speaker: [24-bit PCM]} through FFmpeg's fixed path."""
+
+    def __init__(self):
+        self.core = CoreDecoder()
+        self.synth = [SynthFixed() for _ in range(7)]
+        self.lfe_hist = [0] * LFE_HISTORY
+
+    def decode(self, data):
+        r = self.core.decode_frame(data)
+        h, c = r['h'], r['c']
+        npb = h['npcmblocks']
+        perfect = h['filter_perfect'] ^ ('window_swap' in MUT)
+        win = T.FIR_32BANDS_PERFECT_FIXED if perfect else T.FIR_32BANDS_NONPERFECT_FIXED
+        out = {}
+        for ch in range(c['nchannels']):
+            spk = PRM_CH_TO_SPKR[h['audio_mode']][ch]
+            pcm, sb, syn = [], r['sb'][ch], self.synth[ch]
+            for j in range(npb):
+                pcm += syn.run([sb[i][j] for i in range(SUBBANDS)], win)
+            out[spk] = pcm
+        if h['lfe_present']:
+            if h['lfe_present'] == 1:
+                raise DtsError('E_LFF128', 'LFE 128x interpolation (FFmpeg fixed path refuses it)')
+            n = npb >> 1
+            lfe = self.lfe_hist + r['lfe'][:n]
+            coef, pcm = T.LFE_FIR_64_FIXED, []
+            for i in range(n):
+                cur = LFE_HISTORY + i
+                blk = [0] * 64
+                for j in range(32):
+                    a = sum(coef[j * 8 + k] * lfe[cur - k] for k in range(8))
+                    b = sum(coef[255 - j * 8 - k] * lfe[cur - k] for k in range(8))
+                    blk[j] = clip23(normc(a, 23))
+                    blk[32 + j] = clip23(normc(b, 23))
+                pcm += blk
+            self.lfe_hist = [0] * LFE_HISTORY if 'lfe_nohist' in MUT else lfe[n:n + LFE_HISTORY]
+            out[SPK_LFE] = pcm
+        # sum/difference decoding (no XCh/XXCH: the core only)
+        def butterfly(p, q):
+            a, b = out[p], out[q]
+            out[p] = [i32(x + y) for x, y in zip(a, b)]
+            out[q] = [i32(x - y) for x, y in zip(a, b)]
+        if ((h['sumdiff_front'] and h['audio_mode'] > 0) or
+                h['audio_mode'] == AMODE_STEREO_SUMDIFF) and 'no_sumdiff' not in MUT:
+            butterfly(SPK_L, SPK_R)
+        if h['sumdiff_surround'] and h['audio_mode'] >= AMODE_2F2R:
+            butterfly(SPK_LS, SPK_RS)
+        r['pcm'] = {spk: [clip23(v) for v in v_] for spk, v_ in out.items()}
+        return r
+
+
+def wav_order(speakers):
+    return sorted(speakers, key=lambda s: SPK_TO_WAV[s])
 
 
 # --------------------------------------------------------------------------
@@ -575,6 +775,89 @@ def cmd_info(args):
     return 1 if errs else 0
 
 
+def ffmpeg_bitexact(path, nframes_samples=None):
+    """-> (channels, [interleaved int32]) from the FFmpeg binary's fixed path."""
+    import json
+    import subprocess
+    probe = json.loads(subprocess.run(
+        ['ffprobe', '-v', 'error', '-select_streams', 'a:0', '-show_entries',
+         'stream=channels', '-of', 'json', path], capture_output=True, check=True).stdout)
+    nch = probe['streams'][0]['channels']
+    cmd = ['ffmpeg', '-v', 'error', '-flags', 'bitexact', '-i', path,
+           '-f', 's32le', '-acodec', 'pcm_s32le']
+    if nframes_samples:
+        cmd += ['-frames:a', str(nframes_samples)]
+    cmd += ['-']
+    raw = subprocess.run(cmd, capture_output=True, check=True).stdout
+    import array
+    a = array.array('i')
+    a.frombytes(raw[:len(raw) // 4 * 4])
+    return nch, a
+
+
+def run_compare(path, nframes=0):
+    """Decode `path` here and with `ffmpeg -flags bitexact`; -> a result dict:
+    mismatches, samples, channels, nonzero, peak, and `features` -- which coded
+    features the stream exercised (so a mutation arm knows if it can bite)."""
+    buf = open(path, 'rb').read()
+    dec = Decoder()
+    ours, spks, nf = [], None, 0
+    feat = {'pmode_bands': 0, 'vq_bands': 0, 'huff': 0, 'block': 0, 'raw': 0,
+            'transient': 0, 'joint_bands': 0, 'lfe': 0, 'sumdiff_front': 0,
+            'sumdiff_surround': 0, 'filter_perfect': 0, 'filter_nonperfect': 0}
+    for _, fr in frames(buf):
+        if nframes and nf >= nframes:
+            break
+        r = dec.decode(fr)
+        nf += 1
+        for k in ('pmode_bands', 'vq_bands', 'huff', 'block', 'raw', 'transient', 'joint_bands'):
+            feat[k] += r['stats'][k]
+        h = r['h']
+        feat['lfe'] += bool(h['lfe_present'])
+        feat['sumdiff_front'] += bool(h['sumdiff_front'] and h['audio_mode'] > 0)
+        feat['sumdiff_surround'] += bool(h['sumdiff_surround'] and h['audio_mode'] >= AMODE_2F2R)
+        feat['filter_perfect' if h['filter_perfect'] else 'filter_nonperfect'] += 1
+        if spks is None:
+            spks = wav_order(r['pcm'])
+        for t in range(len(r['pcm'][spks[0]])):
+            ours.extend(r['pcm'][sp][t] << 8 for sp in spks)
+    nch, theirs = ffmpeg_bitexact(path, nf)
+    n = min(len(ours), len(theirs))
+    bad = sum(1 for i in range(n) if ours[i] != theirs[i])
+    first = next((i for i in range(n) if ours[i] != theirs[i]), None)
+    return {'frames': nf, 'channels': nch, 'ours_ch': len(spks or []),
+            'samples': n, 'len_ok': len(ours) == len(theirs),
+            'mismatches': bad, 'first': first,
+            'nonzero': sum(1 for v in theirs[:n] if v),
+            'peak': max((abs(v) >> 8 for v in theirs[:n]), default=0),
+            'features': feat}
+
+
+def cmd_compare(args):
+    """Bit-exact comparison against `ffmpeg -flags bitexact` (s32, 24-bit << 8)."""
+    r = run_compare(args.file, args.frames)
+    nch, n = r['channels'], r['samples']
+    print(f'compare: {r["frames"]} frames, {n // max(nch, 1)} samples x {nch} ch, '
+          f'{r["mismatches"]} mismatches; {r["nonzero"] * 100 // max(n, 1)} % nonzero, '
+          f'peak {r["peak"]}')
+    print('  features: ' + ', '.join(f'{k} {v}' for k, v in r['features'].items()))
+    if nch != r['ours_ch']:
+        print(f'compare: FAIL -- {nch} channels from FFmpeg, {r["ours_ch"]} here')
+        return 1
+    if r['nonzero'] * 2 < n:
+        print('compare: FAIL -- under half the samples carry signal; pick a louder stretch')
+        return 1
+    if r['mismatches']:
+        i = r['first']
+        print(f'compare: FAIL -- first mismatch at sample {i // nch} ch {i % nch}')
+        return 1
+    if not r['len_ok']:
+        print('compare: FAIL -- lengths differ')
+        return 1
+    print('compare: PASS -- bit-exact')
+    return 0
+
+
 def main():
     ap = argparse.ArgumentParser(description=__doc__,
                                  formatter_class=argparse.RawDescriptionHelpFormatter)
@@ -583,6 +866,10 @@ def main():
     p.add_argument('file')
     p.add_argument('--frames', type=int, default=0)
     p.set_defaults(fn=cmd_info)
+    p = sub.add_parser('compare', help='bit-exact against ffmpeg -flags bitexact')
+    p.add_argument('file')
+    p.add_argument('--frames', type=int, default=0)
+    p.set_defaults(fn=cmd_compare)
     args = ap.parse_args()
     return args.fn(args)
 
