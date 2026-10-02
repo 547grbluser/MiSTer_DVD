@@ -137,8 +137,18 @@ module transport_hud #(
     // The popup row re-renders every formatter pass from LIVE values, so a
     // value that settles a few cycles after its event (e.g. the reader's
     // attr-BRAM language read) self-heals on the next ~1.2 ms refresh.
-    input  wire        aud_evt,             // audio-track cycle (B7)
-    input  wire        sub_evt,             // subtitle cycle (B8)
+    input  wire        aud_evt,             // Audio press (B7): show, or step if shown
+    input  wire        sub_evt,             // Subtitle press (B8): show, or step if shown
+    // SHOW-FIRST (a set-top player's contract): a press of Audio/Subtitle only
+    // SHOWS the current setting; it CHANGES it only when that button's OWN popup
+    // is already on screen. These pulses are the "change" half: the press, gated
+    // on last cycle's popup state (pop_tmr/pop_type are registered, so no loop).
+    // Gated on pop_vis, not pop_tmr: a popup hidden by a menu is not on screen,
+    // so a press there changes nothing. emu steps the track (and releases the
+    // VM's SetSTN ownership) on these, never on the raw press.
+    // docs/track_selection.md "Show-first Audio/Subtitle".
+    output wire        aud_step_o,
+    output wire        sub_step_o,
     input  wire        angle_evt,           // angle cycle (B6)
     input  wire        chap_evt,            // chapter skip (B2/B3)
     // CSS warning: LEVEL input (emu's sticky per-mount latch). While high the
@@ -353,6 +363,8 @@ module transport_hud #(
                    (!menu_active || pop_type == 4'd4 ||
                     pop_type == 4'd5 || pop_type == 4'd6 ||
                     pop_type == 4'd9);   // LINK FAIL fires while a menu is up
+    assign aud_step_o = aud_evt && pop_vis && (pop_type == 4'd0);
+    assign sub_step_o = sub_evt && pop_vis && (pop_type == 4'd1);
 
     // ---- text plane (2 rows x 32 cells x {accent, glyph[5:0]}) -------------
     reg [6:0] plane [0:63];                 // addr = {row, col}
