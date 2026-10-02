@@ -69,15 +69,18 @@
 .equ A_JSEL      0x060
 .equ A_QSEL      0x080          ; [ch*10 + n]
 .equ A_ADJ       0x0C0          ; [ch*10 + n]
-; per channel and band [ch*32 + band]
+; per channel and band [ch*32 + band]: 5 x 32 = 160 words a table, packed at that
+; stride so the whole record ends at 0x600 and fits a 2K x 16 RAM (4 M10K; a
+; 256-word stride ended at 0x8A0 and needed 4K x 16, 8 M10K)
 .equ P_ABITS     0x100
-.equ P_TMODE     0x200
-.equ P_PMODE     0x300
-.equ P_PVQ       0x400
-.equ P_SC0       0x500          ; scale index; bit 8 = the 7-bit table
-.equ P_SC1       0x600
-.equ P_VQI       0x700
-.equ P_JSC       0x800          ; joint scale index (coded value + 64)
+.equ P_TMODE     0x1A0
+.equ P_PMODE     0x240
+.equ P_PVQ       0x2E0
+.equ P_SC0       0x380          ; scale index; bit 8 = the 7-bit table
+.equ P_SC1       0x420
+.equ P_VQI       0x4C0
+.equ P_JSC       0x560          ; joint scale index (coded value + 64)
+.equ REC_END     0x600
 
 ; ================================================================ the frame
 RESET:

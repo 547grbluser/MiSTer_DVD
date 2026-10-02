@@ -31,8 +31,17 @@ vector ops' arguments.
     fend                    discard the rest of the frame
     bpos  rd                rd = bits consumed in this frame (low 16 bits)
 
-Memory, 16-bit words: 0x0000-0x0FFF the record RAM; 0x1000-0x1FFF the constant
-ROM (read-only). Everything else belongs to the vector ops.
+Memory, 16-bit words: 0x0000-0x07FF the record RAM (2K x 16; the map ends at
+REC_END); 0x1000-0x1FFF the constant ROM (read-only). Everything else belongs to
+the vector ops.
+
+The trace the RTL is scored against (Machine.trace, a list): one tuple
+(kind, pc, addr, value) per event, in program order --
+    kind 0  a register write      addr = the register, value 16 bits
+    kind 1  a store               addr = the record address, value 16 bits
+    kind 2  an XQ code extracted  addr = its index 0..7, value 24 bits (two's
+                                  complement): the sequencer's code reader is
+                                  scored here, before any dequantisation
 
 Usage:
     tools/dts_isa.py --asm [--check]           # assemble dvd/dts/dts.uasm -> .mem files
@@ -54,6 +63,8 @@ UASM = os.path.join(REPO, 'dvd', 'dts', 'dts.uasm')
 UMEM = os.path.join(REPO, 'dvd', 'dts', 'dts_ucode.mem')
 CMEM = os.path.join(REPO, 'dvd', 'dts', 'dts_const.mem')
 HMEM = os.path.join(REPO, 'dvd', 'dts', 'dts_huff.mem')
+RMEM = os.path.join(REPO, 'dvd', 'dts', 'dts_hroot.mem')
+USVH = os.path.join(REPO, 'dvd', 'dts', 'dts_ucode.svh')
 
 OPS = ['nop', 'alu', 'alui', 'ld', 'st', 'get', 'getr', 'vlc', 'br', 'bri', 'jmp', 'call',
        'ret', 'err', 'vop', 'frame', 'fend', 'bpos']
@@ -65,7 +76,7 @@ CONDS = ['eq', 'ne', 'lt', 'ge']
 VOPS = ['xclr', 'xq', 'xvq', 'adpcm', 'joint', 'bfly', 'mixsyn', 'hclr', 'cnt']
 VOP = {n: i for i, n in enumerate(VOPS)}
 MEM_REC, MEM_CONST = 0x0000, 0x1000
-REC_WORDS = 0x1000
+REC_WORDS = 0x0800
 STACK_DEPTH = 8
 NCH_MAX = 5                       # primary channels (AMODE < 10)
 
@@ -337,7 +348,8 @@ class Machine:
         self.frame_cycles = []
         self.lenient = 0
         self.by_cat = {}          # cycles by vector op; the rest is the sequencer
-        self.trace = None        # a list to receive (pc, rd, value) / ('st', addr, value)
+        self.trace = None        # a list to receive (kind, pc, addr, value): module doc
+        self.vop_hook = None     # called as vop_hook(machine, op) after every vector op
 
     # -- input ------------------------------------------------------------
     def feed(self, data):
@@ -389,7 +401,7 @@ class Machine:
             raise EngineError(f'store to 0x{a:04x} at pc {self.pc}')
         self.rec[a] = v & 0xFFFF
         if self.trace is not None:
-            self.trace.append(('st', a, v & 0xFFFF))
+            self.trace.append((1, self.pc, a, v & 0xFFFF))
 
     @staticmethod
     def alu(fn, a, b):
@@ -407,7 +419,7 @@ class Machine:
         if rd:
             self.reg[rd] = s16(v)
             if self.trace is not None:
-                self.trace.append((self.pc, rd, self.reg[rd] & 0xFFFF))
+                self.trace.append((0, self.pc, rd, self.reg[rd] & 0xFFFF))
 
     # -- vector ops ----------------------------------------------------------
     def vop(self, op):
@@ -423,6 +435,8 @@ class Machine:
         elif name == 'xq':
             ch, b, ab, qsel, sidx, adj, lossless = a[0], a[1], a[2], a[3], a[4] & 0xFFFF, a[5], a[6]
             q, huff = self.extract(ab, qsel)
+            if self.trace is not None:
+                self.trace.extend((2, self.pc, i, v & 0xFFFFFF) for i, v in enumerate(q))
             scale = self.scale_value(sidx)
             if huff:
                 scale = F.huff_scale(scale, T.SCALE_FACTOR_ADJ[adj & 3])
@@ -469,6 +483,25 @@ class Machine:
         elif name == 'cnt':
             self.counters[a[0]] = self.counters.get(a[0], 0) + 1
         self.by_cat[name] = self.by_cat.get(name, 0) + self.cycles - c0
+        if self.vop_hook is not None:
+            self.vop_hook(self, op)
+
+    def checksums(self):
+        """The engine buffers, each as sum((i + 1) * (v mod 2^w)) mod 2^32 over the
+        RTL's own address order, so the bench can read the RAMs hierarchically:
+          X     {ch, band, j}  (5 x 32 x 8)    w 25 (a butterflied band is 25 bits)
+          hist  {ch, band, k}  (5 x 32 x 4)    w 24 (k = 0 the oldest)
+          ring  {side, i}      (2 x 512)       w 24 (the IMDCT output ring, physical)
+          buf2  {side, i}      (2 x 32)        w 29 (the window's carried partial sums)
+        -> (x, hist, ring, buf2)"""
+        def ck(vals, w):
+            m = (1 << w) - 1
+            return sum((i + 1) * (v & m) for i, v in enumerate(vals)) & 0xFFFFFFFF
+        x = [self.X[ch][b][j] for ch in range(NCH_MAX) for b in range(32) for j in range(8)]
+        h = [self.hist[ch][b][k] for ch in range(NCH_MAX) for b in range(32) for k in range(4)]
+        ring = self.synth[0].buf + self.synth[1].buf
+        b2 = self.synth[0].buf2 + self.synth[1].buf2
+        return ck(x, 25), ck(h, 24), ck(ring, 24), ck(b2, 29)
 
     def scale_value(self, sidx):
         """sidx: bit 8 selects the 7-bit table (selector 6), else the 6-bit one."""
@@ -585,11 +618,49 @@ def emulate(path, nframes=0, mutate=None, budget=False):
     return m.pcm[0], m.pcm[1], m
 
 
+def _packed(vals, w):
+    """A packed localparam: element i at [w*i +: w] (no unpacked localparam arrays:
+    the RTL keeps to what Quartus 17 is known to elaborate)."""
+    v = 0
+    for i, x in enumerate(vals):
+        assert 0 <= x < (1 << w), (x, w)
+        v |= x << (w * i)
+    return f"{w * len(vals)}'h{v:0{(w * len(vals) + 3) // 4}x}"
+
+
+def ucode_svh(words, labels):
+    """dvd/dts/dts_ucode.svh: the sizes, entry points and XQ code-reader tables
+    the sequencer RTL needs, all derived here so --check covers them."""
+    ab = range(1, R.CODE_BOOKS + 1)
+    blk = range(1, 8)
+    lines = [
+        '// dvd/dts/dts_ucode.svh -- GENERATED by tools/dts_isa.py --asm; never edit.',
+        '// The sequencer\'s sizes and entry points, and XQ\'s code-reader tables',
+        '// (packed: element i at [w*i +: w]; index abits - 1).',
+        f'localparam int UC_WORDS    = {len(words)};',
+        f'localparam int CONST_WORDS = {len(CONST)};',
+        f'localparam int HUFF_NODES  = {len(HUFF_NODES)};',
+        f'localparam int HUFF_BOOKS  = {len(HUFF_ROOTS)};',
+        f"localparam [9:0] UC_RESET  = 10'd{labels.get('RESET', 0)};",
+        f"localparam [9:0] UC_FRAME  = 10'd{labels['FRAME']};",
+        '// the first quantiser-index book of abits (book = QBOOK + selector)',
+        f'localparam [{6 * R.CODE_BOOKS - 1}:0] XQ_QBOOK  = {_packed([QBOOK[a - 1] for a in ab], 6)};',
+        '// selectors below this are Huffman books',
+        f'localparam [{4 * R.CODE_BOOKS - 1}:0] XQ_GSIZE  = {_packed([T.QUANT_INDEX_GROUP_SIZE[a - 1] for a in ab], 4)};',
+        '// block codes (abits 1..7): bits a code, and the levels (the divisor)',
+        f'localparam [34:0] XQ_BNBITS = {_packed([T.BLOCK_CODE_NBITS[a - 1] for a in blk], 5)};',
+        f'localparam [34:0] XQ_LEVELS = {_packed([T.QUANT_LEVELS[a] for a in blk], 5)};',
+    ]
+    return lines
+
+
 def write_mems(check=False):
     words, labels, _ = assemble(open(UASM).read())
     files = {UMEM: [f'{w:010x}' for w in words],
              CMEM: [f'{w:04x}' for w in CONST],
-             HMEM: [f'{w:07x}' for w in huff_mem_words()]}
+             HMEM: [f'{w:07x}' for w in huff_mem_words()],
+             RMEM: [f'{r:03x}' for r in HUFF_ROOTS],
+             USVH: ucode_svh(words, labels)}
     bad = []
     for path, lines in files.items():
         text = '\n'.join(lines) + '\n'
@@ -600,9 +671,9 @@ def write_mems(check=False):
             os.makedirs(os.path.dirname(path), exist_ok=True)
             open(path, 'w').write(text)
     print(f'dts_isa: {len(words)} microcode words, {len(CONST)} constant words, '
-          f'{len(HUFF_NODES)} Huffman nodes')
+          f'{len(HUFF_NODES)} Huffman nodes, {len(HUFF_ROOTS)} book roots')
     if check:
-        print('dts_isa: ' + ('FAIL -- stale: ' + ', '.join(bad) if bad else 'PASS -- .mem files match'))
+        print('dts_isa: ' + ('FAIL -- stale: ' + ', '.join(bad) if bad else 'PASS -- generated files match'))
         return 1 if bad else 0
     return 0
 

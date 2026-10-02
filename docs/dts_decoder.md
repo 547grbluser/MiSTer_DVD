@@ -722,3 +722,60 @@ in P1b.
 and no recently added `function`s in the synthesised RTL; every new `dvd/*.sv` named in
 `DVD.qsf`; benches score with `!==` and tie every input off; grep `DVD.map.rpt` for each
 RAM's "Inferred altsyncram" line.
+
+### P1b progress (2026-10-02)
+
+**The sequencer RTL is bit-exact against the emulator: `dvd/dts/dts_seq.sv`, gate
+`bench/dvd/run_dts_seq.sh` (`--red`).**
+
+- **What it is.** The sequencer, the bit-serial reader, the tree walker (one code bit a
+  cycle) and **XQ's code reader**. XQ's reader sits here because it shares the bit
+  reader, and that keeps the sequencer's trace independent of the vector engine.
+  On `vop XQ` the sequencer starts the engine and streams it the band's 8 codes
+  (`xq_code` / `xq_valid` / `xq_ready`).
+- **Input contract.** A frame is a descriptor (`fr_len`, taken by `frame`) followed by
+  exactly that many bytes. Bits past the end read 0 and pulse `overrun_bit`; they never
+  come from the next frame. `fend` and `err` drain the untaken bytes. `err` then restarts
+  at `FRAME`; its path in `dts.uasm` has no `fend`, so the RTL drains.
+- ✅ **Decided: block-code division is restoring, one quotient bit a cycle.** The first
+  digit's division runs while the code's bits arrive, because restoring division takes
+  the dividend MSB first, which is the bitstream's order. Each later digit divides the
+  quotient in place. A code costs 4 × nb cycles (nb = 7–19). The emulator's model
+  charged 24, but the whole-engine bench measures the real cost (below). It costs no
+  multiplier and no reciprocal table.
+- **Record map compacted (decided 2026-10-02).** The `P_*` tables use 160 of their 256
+  words (5 channels × 32 bands). Packed at a stride of 160 (`.equ` values only, the
+  microcode unchanged), the record ends at `REC_END` = 0x600 and fits **2K × 16, 4 M10K**.
+  The old map ended at 0x8A0 and needed 4K × 16, 8 M10K. §10's "~1K × 16 → 2" was low
+  either way. `REC_WORDS` in the emulator is now 0x800, so a store past the RAM raises.
+- **Trace format** (`Machine.trace`): `(kind, pc, addr, value)`. Kind 0 is a register
+  write, 1 a store (it now carries its pc), and 2 one of XQ's extracted codes (24 bits).
+  Kind 2 puts a code-reader bug in the sequencer's bench, before any dequantisation:
+  a wrong digit with the right bit count would otherwise show up only in the
+  whole-engine bench.
+- **Goldens:** `tools/dts_golden.py` runs the emulator on a stream window. It first
+  checks the emulator frame by frame against `tools/dts_fixed.py`, and writes nothing if
+  they disagree. Two constructed arms: `--refuse K` corrupts frame K's **last** DSYNC, so
+  the refusal lands after half the frame's PCM is out (T2 sets `sync_ssf`, so its first
+  DSYNC precedes all output). `--truncate K:N` delivers frame K short: the engine
+  zero-fills and refuses, the model refuses it as an over-read, and the next frame proves
+  no byte leaked across. The goldens also record overrun bits, lenient codes and `CNT`
+  ops, and the bench scores all three.
+- **Gate result.** All 34 streams (4 frames each) pass, plus R1 (mid-frame refusal with
+  input and XQ stalls), R2 (truncation: 2,319 zero-filled bits) and R3 (*Shadoan* with
+  stalls, 8 lenient codes). **All 17 RED mutations are caught, each by its own arm.**
+  - ⚠ **Not observable: signed versus unsigned `lt`/`ge`.** The microcode's only
+    negative comparands are error checks that refuse either way (a scale index below 0
+    is also ≥ 64 unsigned). Q2 tests the 10-bit branch constant's sign extension
+    instead. A microcode change that depends on a signed compare of a negative value
+    needs its own arm.
+  - Only `tools/dts_writer.py`'s streams code a **negative** VLC symbol (a scale
+    delta). No disc and no FFmpeg-encoded stream does, so Q17 runs on `written_amode9`.
+- **Sequencer cycles with a stub engine** (this bench): T2 43K a frame (512 samples,
+  15 % of 288K); `written_max_subframes` 333K (4,096 samples, 14 % of 2.3M).
+- **Not yet wired** into `DVD.qsf` or `emu.sv` (P3). P1b's fit builds the engine on its
+  own.
+
+**Next:** `dvd/dts/dts_vec.sv`, op by op under the per-op checksums (`Machine.checksums`:
+X at 25 bits, a butterflied band being a sum of two 24-bit values; `buf2` at 29, its
+arithmetic bound), then `dts_top.sv`, the whole-engine bench, and the standalone fit.
