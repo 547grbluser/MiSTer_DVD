@@ -672,8 +672,10 @@ raw-byte scan. **It is a centre crop**; the decoder still skips `picture_display
 - The Crop window is 528 px, not the authored 540 (§1): a button drawn flush to the pan
   window's edge loses its outer ~6 px. Fixing it needs a non-macroblock column window in
   `resample_addrgen` — not done.
-- The swap follows `menu_active`, so the picture straddling a title↔menu crossing can show
-  for a frame in the other geometry — the same as pressing Aspect live.
+- The swap follows `menu_active`, so the picture straddling a title↔menu crossing could in
+  principle show for a frame in the other geometry (as pressing Aspect live can). Watched
+  live on the CRT (maintainer, 2026-10-01): the cropped menu → letterboxed movie switch on
+  *28 Days Later* looked seamless.
 - In-title menus (HLI in the title domain) are titles here and are not overridden.
 - SPRM14 is still the constant `0x0100` ("4:3 TV, pan&scan"); a disc program that branches
   on it never sees the user's setting. Untouched by this change.
