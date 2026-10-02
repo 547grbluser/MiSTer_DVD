@@ -55,11 +55,17 @@ be debugged in Python before any RTL runs. The cost is interpretive cycles (§4)
 **Rejected: an FSM per stage**, the house style of `dvd/ac3/` and `dvd/mp2/`. The reason is
 area (§4).
 
-**Huffman unit.** Canonical decoding, one code bit at a time: `code = code<<1 | bit`, a
-match when `code - first < count[len]`, else `first = (first + count) << 1`. It costs a
-few dozen ALM. The tables are what cost memory: the DTS core has **2,709 symbols** (counted
-from FFmpeg `dcahuff.c`, excluding the LBR tables), about 4 M10K, and the longest code is
-16 bits, so the code and first registers are 16-bit. A code that matches no codebook can
+**Huffman unit: a binary-tree walk, not canonical decoding (measured 2026-10-02).** The
+DTS core has **2,709 symbols** in 62 codebooks (FFmpeg `dcahuff.c`, excluding the LBR
+tables), and the longest code is 16 bits. `tools/gen_dts_tables.py` assigns the codes
+exactly as FFmpeg does and tests each book. **53 of the 62 are not canonical**: 50 have no
+canonical structure in either bit sense and do not keep each length's codes contiguous
+(`quant_index_9_0` alone has 49 runs of equal length in code order). So the cheap walk
+(`code - first < count[len]`) cannot decode them. Instead, one node table serves every
+book. Each internal node holds two entries {leaf, symbol or child index}, so there are
+2,709 − 62 = 2,647 nodes of about 26 bits, about 7–9 M10K (it was estimated at 4). The
+walk takes one code bit per step, two cycles with a synchronous M10K read, still
+consuming bits as it goes. A code that matches no codebook can
 only occur in a corrupt stream. It refuses the frame (silence, counted) rather than
 un-reading bits.
 
@@ -90,7 +96,9 @@ code it; a band above a channel's count is zero for that channel.
 
 ### D4 — Codebooks: shipped in the bitstream as the starting contents of write-first RAMs, copied once to DDR3 (2026-10-02, maintainer)
 
-Two trained codebooks, measured from FFmpeg `dcadata.c`:
+Two trained codebooks, measured from FFmpeg `dcadata.c`. Real discs use both: the
+Terminator 2 DTS sample predicts 36,377 bands with ADPCM and codes 168,750 bands with
+high-frequency VQ over 5,625 frames (`tools/dts_ref.py info`).
 
 | Table | Shape | Range | Bits | Size |
 |---|---|---|---|---|
@@ -197,8 +205,8 @@ worth) holds them.
 | `audio_ring` | 229 | 34 | 0 |
 | `lpcm_unpack` | 107 | 16 | 0 |
 
-**DTS estimate:** about **1,500–2,500 ALM**, about **15–20 M10K** without the codebooks
-(microcode 5–10, Huffman 4, QMF prototypes 2–3, persistent state), and 1 DSP. It is an
+**DTS estimate:** about **1,500–2,500 ALM**, about **18–25 M10K** without the codebooks
+(microcode 5–10, Huffman tree 7–9, QMF prototypes 2–3, persistent state), and 1 DSP. It is an
 estimate until P1's standalone fit replaces it. It exceeds the ALM spare, so **a reclaim
 must land before or with the wiring** (P4 lists them; the net-by-scenario table below
 shows which).
