@@ -68,7 +68,11 @@ un-reading bits.
 The 32-band synthesis filter is linear and identical for every channel within a frame
 (`FILTS` is a per-frame flag). So `Σ g_c · QMF(x_c) = QMF(Σ g_c · x_c)`: downmix the
 dequantised subband samples to L/R first, then run **two** synthesis filters, not up to
-five. That turns the synthesis cost into the cost of MP2 stereo.
+five. That turns the synthesis cost into the cost of MP2 stereo. Verified in FFmpeg:
+`filter_perfect` is a frame-header field (`ff_dca_parse_core_frame_header`), and
+`filter_frame_fixed` picks one prototype for every channel. The subband count is **per
+channel** (`nsubbands[ch]`), so the downmix sums each band only over the channels that
+code it; a band above a channel's count is zero for that channel.
 
 **Caveats, accepted and recorded:**
 - **Gain changes leave a transient.** The identity holds only while the gains are
