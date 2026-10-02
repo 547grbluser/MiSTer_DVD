@@ -1,8 +1,10 @@
 # In-fabric DTS core decoder (`dvd/dts/`, planned)
 
-**Status: 🔧 P0 IN PROGRESS — the reference is bit-exact against FFmpeg; no RTL yet
+**Status: ✅ P0 BUILT, ⏳ awaiting the D3/D5 decisions. The reference is bit-exact against
+FFmpeg on 32 streams, spec maxima and joint intensity included; no RTL yet
 (2026-10-02).** Branch
-`feature/dts-decode` (`CORE_VERSION dev-dtsdecode`). Next concrete step: **P0** (§7).
+`feature/dts-decode` (`CORE_VERSION dev-dtsdecode`). Next concrete step: **P1** (§7), once
+D3 (LFE, the default downmix) and D5 (lenient block codes) are decided.
 
 Today a DTS track is silent in `Decode PCM` mode: `dvd_audio_decode.sv` routes
 `frame_type == 1` to a discard (`// DTS: discard`), and DTS is audible only through IEC 61937
@@ -94,6 +96,13 @@ code it; a band above a channel's count is zero for that channel.
   gains. Terminator 2 (300 frames): RMS 0.11 LSB, 98.8 % of samples identical. A 1536 kbit/s
   5.1 window from *A.I.*: RMS 0.11. The seven synthetic fixtures: RMS ≤ 0.19. Stereo and
   mono are exact, because their gain is 1. The gate's bound is 1 LSB.
+- ⚠ **RTL rule: after the sum/difference butterfly, both channels of the pair are mixed up
+  to the LARGER of their two active band counts.** The downmix loop is bounded per
+  channel to save cycles. But `L+R` carries R's content in bands above L's own count, so
+  bounding L by its own count drops them. `tools/dts_fixed.py` did this at first and
+  lost 3,459 LSB on `written_amode3`. FFmpeg's encoder always codes 32 bands on every
+  channel, so the encoder-made sum/difference fixtures could not show it. The
+  writer's uneven counts did. RED arm: `mix_own_bound`.
 - ⏳ **LFE: proposed to be left out of the stereo downmix** (the usual stereo-downmix
   practice). LFE is not subband-coded but decimated samples with their own interpolation
   FIR, so dropping it also removes that path. **Not yet decided by the maintainer.**
@@ -342,10 +351,13 @@ in telemetry, never wrong audio.
 
 ## 7. Phases
 
-- **P0 — tools and measurement (🔧 in progress).** Done: the pinned table generator, the
-  reference (bit-exact against FFmpeg), the hardware-order model (front end bit-exact,
-  downmix within 1 LSB), the fixtures, the gates, and the census (§9). Left: the
-  joint-intensity fixture, and the maintainer's D3/D5 decisions.
+- **P0 — tools and measurement (✅ built; ⏳ the maintainer's D3/D5 decisions).**
+  - The pinned table generator.
+  - The reference, bit-exact against FFmpeg.
+  - The hardware-order model: front end bit-exact, downmix within 1 LSB.
+  - The fixtures: encoded, derived and written. The bitstream writer
+    (`tools/dts_writer.py`) also supplies P1's spec-maximum test streams.
+  - The two gates, and the census (§9).
   - `gen_dts_tables.py`.
   - **A library sweep, `tools/dts_scan.py`**, modelled on `tools/acmod_scan.py` (PES
     first-access-unit pointer, not a sync-word search). For every DTS track in
@@ -389,7 +401,7 @@ in telemetry, never wrong audio.
 - ⏳ The default downmix rule (D3): the AC-3 path's liba52 Lo/Ro is proposed. *Cinderella
   III* is the one library stream with embedded coefficients, so it is the test case for
   honouring them.
-- ⏳ A joint-intensity test stream (§9): no disc or encoder produces one.
+- ✅ A joint-intensity test stream: `tools/dts_writer.py` (§9).
 
 ## 9. Library census (2026-10-02, `tools/dts_scan.py`)
 
@@ -431,7 +443,7 @@ sweep says what is common, not what is possible.
 
 ### Test coverage of the reference (`tools/test_dts_ref.py`)
 
-The gate set (`~/dts-streams/gate`, local, never committed), 19 streams:
+The gate set (`~/dts-streams/gate`, local, never committed), 33 streams:
 - **Twelve from `tools/gen_dts_fixtures.py`**, made from generated signals only:
   - Eight encoded by FFmpeg's DTS encoder: mono to 5.1, 192k–1536k. These supply the
     **Huffman sample codes**, and one near-full-scale stream drives the half IMDCT's
@@ -445,12 +457,30 @@ The gate set (`~/dts-streams/gate`, local, never committed), 19 streams:
     scale, FFmpeg clipped each speaker, and the downmix model (which scales before it
     could clip) differed by 3,583 LSB. That was an artefact of the fixture, not a decoder
     fault.
+- **Fourteen from `tools/dts_writer.py`**, our own syntax-level DTS core encoder. It writes
+  frames field by field from a description, fills that description with a seeded
+  generator of legal, moderate-level values, and parses every frame back to compare.
+  It makes what nothing else does:
+  - **joint intensity** (three shapes at once);
+  - the **frame-shape spec maxima**: `npcmblocks` 128 (4,096 PCM samples a frame), as
+    16 subframes of 1 and as 4 subframes of 4 subsubframes with `sync_ssf`, in frames up
+    to 14 KB;
+  - **all ten channel arrangements** (AMODE 0–9; FFmpeg's encoder covers four);
+  - every bit-allocation, scale-factor, transient and quantiser-index codebook
+    selector, and bit allocations up to 26;
+  - header CRC words, DRC, time code, aux data with downmix coefficients and a valid
+    CRC, predictor history off, and the lossless step table.
+
+  ⚠ The comparison passes `-f dts`: FFmpeg's raw-DTS probe rejects some legal streams,
+  such as a small mono frame whose bit-rate field disagreed with it. The writer now also
+  sets the bit-rate field from the real frame size.
 - **Seven disc windows:** Terminator 2, plus windows for XCh, embedded downmix, 1536k
   with transients, 768k with VQ and transients, ES, and the *Shadoan* overflow.
   ⚠ The comparison runs FFmpeg with `-core_only 1`. Without it FFmpeg decodes XCh, and a
   DTS-ES disc returns 7 channels to our 6.
 
-Every stage now has a stream that exercises it **except joint intensity**. No disc, and
-not FFmpeg's encoder, produces it, and it cannot be made by flipping a header bit,
-because it changes the bitstream layout. ⏳ It needs a stream written by our own bit-level
-encoder: a P0 follow-up, or P1's emulator tests by construction.
+**Every stage now has a stream that exercises it** and a RED arm that bites on it,
+joint intensity included: `tools/test_dts_ref.py` reports no coverage gaps. The writer's
+streams are bit-exact through `tools/dts_ref.py` against FFmpeg, spec-maximum frames
+included. Every stream passes `tools/test_dts_fixed.py`: the streaming front end is
+bit-exact and the downmix is within 1 LSB.

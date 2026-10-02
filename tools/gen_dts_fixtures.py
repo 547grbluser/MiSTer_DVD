@@ -22,7 +22,12 @@ Two kinds:
              A sum/difference stream is derived from content ENCODED in
              sum/difference form ((a+b)/2, (a-b)/2), so the decoder's
              butterflies reconstruct in-range a and b, as a real one would.
-Joint intensity changes the layout and cannot be derived; it stays a gap.
+  written -- tools/dts_writer.py, our own syntax-level encoder, for what neither
+             of the above can make: joint intensity (it changes the layout), the
+             frame-shape spec maxima (npcmblocks 128 as 16 subframes and as 4x4
+             subsubframes, frames near 16 KB), all ten channel arrangements, and
+             header CRC words, DRC, time code, aux downmix + CRC, predictor
+             history off and the lossless step table. Seeded, so reproducible.
 
 Usage: tools/gen_dts_fixtures.py [OUT_DIR]   (default: $DTS_TEST_DIR or ~/dts-streams/gate)
 """
@@ -32,6 +37,7 @@ import sys
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import dts_ref  # noqa: E402
+import dts_writer  # noqa: E402
 
 SECONDS = 4
 CHANNELS = {'mono': 1, 'stereo': 2, 'quad(side)': 4, '5.0(side)': 5, '5.1(side)': 6}
@@ -60,6 +66,14 @@ DERIVED = [
     ('synth_51side_1536k_perfect', 'synth_51side_1536k', (88,), None),
     ('synth_stereo_320k_adj', 'synth_stereo_320k', (), 3),
 ]
+
+
+# (fixture name, dts_writer profile, frames)
+WRITTEN = [('written_joint', 'joint', 40),
+           ('written_max_subframes', 'max_subframes', 10),
+           ('written_max_subsubframes', 'max_subsubframes', 10),
+           ('written_misc', 'misc', 30)] + \
+          [(f'written_amode{a}', f'amode{a}', 16) for a in range(10)]
 
 
 def channel_exprs(layout, content):
@@ -127,6 +141,10 @@ def main():
         with open(path, 'wb') as f:
             f.write(data)
         print(f'gen_dts_fixtures: {path} ({n} frames; header bits {bits}, adjustment {adj})')
+    for name, profile, frames in WRITTEN:
+        path = os.path.join(out, name + '.dts')
+        n = dts_writer.write_stream(profile, path, frames, seed=1)
+        print(f'gen_dts_fixtures: {path} ({frames} frames, {n} bytes, written)')
     for name, *_ in ENCODED:                      # bases are not fixtures themselves
         if name.startswith('_'):
             os.remove(os.path.join(out, name + '.dts'))

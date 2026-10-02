@@ -55,8 +55,16 @@ predate later confirmations; the `CLAUDE.md` index carries the reconciled status
     - D5 proposed: decode *Shadoan*'s overflowed block codes leniently.
     - Gates: `tools/test_dts_ref.py`, `tools/test_dts_fixed.py`; streams are local,
       made by `tools/gen_dts_fixtures.py` and `tools/dts_scan.py --extract`.
-  - **Next:** a joint-intensity fixture (needs our own bitstream writer), the maintainer's
-    D3 (LFE, default downmix) and D5 decisions, then P1 (the engine, standalone fit).
+  - **P0 close-out (2026-10-02):**
+    - `tools/dts_writer.py`, a syntax-level DTS core encoder, writes joint intensity, the
+      frame-shape spec maxima (`npcmblocks` 128 as 16×1 and 4×4), all ten AMODEs and
+      every selector and header option.
+    - All of its streams are bit-exact against FFmpeg; the gates have no coverage gaps.
+    - It found a real downmix bug: after the sum/difference butterfly the pair must be
+      mixed to the larger band count (`docs/dts_decoder.md` D3; RED arm
+      `mix_own_bound`).
+  - **Next:** the maintainer's D3 (LFE, default downmix) and D5 (lenient block codes)
+    decisions, then P1 (the engine, standalone fit).
 
 - ⏳ **SHOW-FIRST AUDIO/SUBTITLE BUTTONS (2026-10-01, ✅ MERGED PR #145;
   sim-proven, ⏳ HW-confirm pending).**

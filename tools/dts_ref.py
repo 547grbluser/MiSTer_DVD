@@ -797,12 +797,16 @@ def ffmpeg_bitexact(path, nframes_samples=None):
     import json
     import subprocess
     probe = json.loads(subprocess.run(
-        ['ffprobe', '-v', 'error', '-core_only', '1', '-select_streams', 'a:0', '-show_entries',
+        ['ffprobe', '-v', 'error', '-core_only', '1', '-f', 'dts', '-select_streams', 'a:0',
+         '-show_entries',
          'stream=channels', '-of', 'json', path], capture_output=True, check=True).stdout)
     nch = probe['streams'][0]['channels']
     # core_only: this decoder (and the hardware) decodes the core alone; without
     # it FFmpeg adds XCh's sixth channel on a DTS-ES disc
-    cmd = ['ffmpeg', '-v', 'error', '-flags', 'bitexact', '-core_only', '1', '-i', path,
+    # -f dts: the input IS raw DTS; FFmpeg's probe heuristics reject some legal
+    # synthetic streams (a small frame whose bit-rate field disagrees with it)
+    cmd = ['ffmpeg', '-v', 'error', '-flags', 'bitexact', '-core_only', '1', '-f', 'dts',
+           '-i', path,
            '-f', 's32le', '-acodec', 'pcm_s32le']
     if nframes_samples:
         cmd += ['-frames:a', str(nframes_samples)]

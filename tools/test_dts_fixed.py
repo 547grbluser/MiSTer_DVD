@@ -11,6 +11,9 @@ RED arms (dts_fixed.MUT) must fail exactly their own claim:
   stale_history -> [1]   (the ADPCM history skips unpredicted bands)
   mix_trunc     -> [2]   (the downmix truncates instead of rounding, at a
                           coarse scale, so the error must exceed the bound)
+  mix_own_bound -> [2]   (after the sum/difference butterfly, each channel's
+                          downmix loop stops at its OWN band count, dropping its
+                          partner's upper bands; needs a pair with uneven counts)
 
 Streams: as tools/test_dts_ref.py (DTS_TEST_STREAMS / DTS_TEST_DIR); none = FAIL.
 Usage: python3 tools/test_dts_fixed.py [--frames N]     (exit 0 = PASS)
@@ -47,9 +50,13 @@ def main():
         print(f'[2] {"PASS" if ok2 else "FAIL"} {name}: worst {v["worst"]} LSB, '
               f'rms {v["rms"]:.4f}')
         fails += (not ok1) + (not ok2)
-        for mut, arm in (('stale_history', 1), ('mix_trunc', 2)):
-            if mut == 'stale_history' and not v['ops']['pred_bands']:
-                print(f'    RED {mut:14} gap   -- no ADPCM prediction in this stream')
+        for mut, arm in (('stale_history', 1), ('mix_trunc', 2), ('mix_own_bound', 2)):
+            if mut == 'mix_own_bound' and not v['ops']['bfly_uneven']:
+                print(f'    RED {mut:14} gap   -- no butterflied pair with uneven band counts')
+                continue
+            if mut == 'stale_history' and not v['ops']['hist_from_plain']:
+                print(f'    RED {mut:14} gap   -- no predicted band starts from history '
+                      f'laid down unpredicted')
                 continue
             dts_fixed.MUT.clear()
             dts_fixed.MUT.add(mut)

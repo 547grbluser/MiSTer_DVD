@@ -47,6 +47,12 @@ import dts_ref as R                                              # noqa: E402
 import dts_tables as T                                           # noqa: E402
 
 Q = 15                                         # downmix coefficient fraction bits
+# One guard bit through synthesis: the mix is formed at half scale and the PCM
+# doubled after. A subband-domain sum (the sum/difference butterfly, a downmix)
+# can pass 23 bits where the separately synthesised channels FFmpeg adds would
+# not -- written_amode3 lost 3,459 LSB to that clip without it. Costs 1/128 of
+# an s16 LSB.
+GUARD = 0
 # Mutation hooks for tools/test_dts_fixed.py's RED arms (empty in normal use).
 MUT = set()
 SQRT1_2 = 0.70710678118654752
@@ -84,7 +90,9 @@ class StreamDecoder:
         # per channel, per band: the last 4 reconstructed subband samples
         self.hist = [[[0] * R.ADPCM_COEFFS for _ in range(R.SUBBANDS)] for _ in range(7)]
         self.synth = [R.SynthFixed(), R.SynthFixed()]
-        self.ops = {'mac': 0, 'bits': 0, 'frames': 0, 'synth_blocks': 0, 'pred_bands': 0}
+        self.ops = {'mac': 0, 'bits': 0, 'frames': 0, 'synth_blocks': 0, 'pred_bands': 0,
+                    'hist_from_plain': 0, 'bfly_uneven': 0}
+        self.plain = [[False] * R.SUBBANDS for _ in range(7)]
 
     def decode(self, data, trace=None):
         """`trace`, if a list, receives (ch, band, sample index, value) of every
@@ -99,6 +107,7 @@ class StreamDecoder:
             for ch in range(7):
                 for b in range(R.SUBBANDS):
                     self.hist[ch][b] = [0] * R.ADPCM_COEFFS
+                    self.plain[ch][b] = False
         win = T.FIR_32BANDS_PERFECT_FIXED if h['filter_perfect'] else T.FIR_32BANDS_NONPERFECT_FIXED
         gains = default_gains(amode)
         L, Rr = [], []
@@ -146,6 +155,9 @@ class StreamDecoder:
                 for ch in range(nch):
                     for b in range(c['nsubbands'][ch]):
                         hb = self.hist[ch][b]
+                        if s['pmode'][ch][b] and self.plain[ch][b] and any(hb):
+                            self.ops['hist_from_plain'] += 1   # stale_history can bite here
+                        self.plain[ch][b] = not s['pmode'][ch][b]
                         if s['pmode'][ch][b]:
                             coeff = T.ADPCM_VB[s['pvq'][ch][b]]
                             for j in range(R.SUBBAND_SAMPLES):
@@ -173,7 +185,13 @@ class StreamDecoder:
                             for j in range(R.SUBBAND_SAMPLES):
                                 trace.append((ch, b, t0 + j, x[ch][b][j] if b < nact[ch] else 0))
                 # sum/difference in the subband domain (linear, so it commutes
-                # with synthesis; FFmpeg applies it to the PCM)
+                # with synthesis; FFmpeg applies it to the PCM). ⚠ After it, BOTH
+                # channels of the pair carry bands up to the larger of their two
+                # active counts: the downmix loop below is bounded by `nmix`, and
+                # bounding it by each channel's own count dropped R's upper bands
+                # from L+R (written_amode3: 3,459 LSB).
+                nmix = list(nact)
+
                 def bfly(p, q):
                     if p in spk and q in spk:
                         ip, iq = spk.index(p), spk.index(q)
@@ -181,6 +199,10 @@ class StreamDecoder:
                             a_, b_ = x[ip][b], x[iq][b]
                             x[ip][b] = [u + v for u, v in zip(a_, b_)]
                             x[iq][b] = [u - v for u, v in zip(a_, b_)]
+                        if nact[ip] != nact[iq]:
+                            self.ops['bfly_uneven'] += 1   # the pair bound matters here
+                        if 'mix_own_bound' not in MUT:
+                            nmix[ip] = nmix[iq] = max(nact[ip], nact[iq])
                 if (h['sumdiff_front'] and amode > 0) or amode == R.AMODE_STEREO_SUMDIFF:
                     bfly(R.SPK_L, R.SPK_R)
                 if h['sumdiff_surround'] and amode >= R.AMODE_2F2R:
@@ -193,14 +215,14 @@ class StreamDecoder:
                             acc = 0
                             for ch in range(nch):
                                 g = gains.get(spk[ch], (0, 0))[side]
-                                if g and b < nact[ch]:
+                                if g and b < nmix[ch]:
                                     acc += x[ch][b][j] * g
                                     self.ops['mac'] += 1
-                            inp.append(R.clip23(R.norm(acc, Q) if 'mix_trunc' not in MUT
+                            inp.append(R.clip23(R.norm(acc, Q + GUARD) if 'mix_trunc' not in MUT
                                                 else acc >> (Q - 2)))
                         pcm = self.synth[side].run(inp, win)
                         self.ops['synth_blocks'] += 1
-                        out.extend(to_s16(v) for v in pcm)
+                        out.extend(to_s16(R.clip23(v << GUARD)) for v in pcm)
                 t0 += R.SUBBAND_SAMPLES
         # bands past each channel's active count are cleared, history included
         for ch in range(nch):
