@@ -29,7 +29,13 @@ Two kinds:
              header CRC words, DRC, time code, aux downmix + CRC, predictor
              history off and the lossless step table. Seeded, so reproducible.
 
-Usage: tools/gen_dts_fixtures.py [OUT_DIR]   (default: $DTS_TEST_DIR or ~/dts-streams/gate)
+Usage: tools/gen_dts_fixtures.py [OUT_DIR] [--discs]
+       (default OUT_DIR: $DTS_TEST_DIR or ~/dts-streams/gate)
+
+--discs also rebuilds the gate set's disc windows from the local library
+($DVD_ISO_DIR), each chosen by tools/dts_scan.py for what it covers (sec 9 of
+docs/dts_decoder.md), plus the Terminator 2 sample from $DTS_T2_SAMPLE. They
+are rips of commercial discs: local only, never committed.
 """
 import os
 import subprocess
@@ -130,8 +136,75 @@ def derive(data, header_bits, adj_index):
     return bytes(out), n
 
 
+# The gate set's disc windows: (fixture, image, VTS, substream, the dts_scan
+# feature whose best window is taken). One window of 500 sectors among 8 spread
+# across the title VOBS, exactly as dts_scan.py --windows 8 --extract picks it.
+DISC_WINDOWS = [
+    ('disc_xch_beastmaster', 'BEAST_MASTER_20260814_034145.iso', 1, 0x89, 'transient'),
+    ('disc_dmix_cinderella3', 'CINDERELLA_III_20260820_183206.iso', 1, 0x8b, 'vq_bands'),
+    ('disc_es_castaway', 'CASTAWAY_DTS_20260923_140809.iso', 3, 0x88, 'vq_bands'),
+    ('disc_1536k_transient_ai', 'AI_20260807_154822.iso', 3, 0x89, 'transient'),
+    ('disc_768k_vq_transient_museum', 'A_NIGHT_AT_THE_MUSEUM_D1_FF_20260921_124311.iso', 5,
+     0x89, 'transient'),
+]
+# Shadoan (the D5 overflowed block codes): the first 3,000 sectors of VTS 8's title
+# VOBS, substream 0x89 -- a longer window than dts_scan's, for the statistics.
+SHADOAN = ('disc_blockoverflow_shadoan', 'SHADOAN_1_2.iso', 8, 0x89, 3000)
+
+
+def find_image(name):
+    import glob
+    root = os.environ.get('DVD_ISO_DIR', os.path.expanduser('~/dvd-isos'))
+    hits = glob.glob(os.path.join(root, '**', name), recursive=True)
+    return hits[0] if hits else None
+
+
+def disc_windows(out):
+    import shutil
+    import struct
+    import tempfile
+    import types
+    import dts_scan
+    from dvd_vm_ref import IsoNav
+    for fixture, image, vts, ssid, feat in DISC_WINDOWS:
+        path = find_image(image)
+        if not path:
+            print(f'gen_dts_fixtures: SKIP {fixture}: {image} not under $DVD_ISO_DIR')
+            continue
+        with tempfile.TemporaryDirectory() as tmp:
+            args = types.SimpleNamespace(windows=8, window=500, extract=tmp, want={feat})
+            dts_scan.scan_iso(path, args)
+            src = os.path.join(tmp, f'{os.path.splitext(image)[0]}_vts{vts:02d}_{ssid:02x}_{feat}.dts')
+            if not os.path.exists(src):
+                print(f'gen_dts_fixtures: SKIP {fixture}: no {feat} window in VTS {vts}')
+                continue
+            shutil.copy(src, os.path.join(out, fixture + '.dts'))
+            print(f'gen_dts_fixtures: {fixture} <- {image} VTS {vts} 0x{ssid:02x} ({feat})')
+    fixture, image, vts, ssid, nsec = SHADOAN
+    path = find_image(image)
+    if path:
+        nav = IsoNav(path)
+        lba = nav.vts_ifo[vts]
+        mat = nav.sec(lba)
+        tt = struct.unpack('>I', mat[0xC4:0xC8])[0]
+        last = struct.unpack('>I', mat[0x0C:0x10])[0]
+        data = dts_scan.dts_payloads(nav.f, lba + tt, min(nsec, last - tt - 100)).get(ssid, b'')
+        with open(os.path.join(out, fixture + '.dts'), 'wb') as f:
+            f.write(bytes(data))
+        print(f'gen_dts_fixtures: {fixture} <- {image} VTS {vts} 0x{ssid:02x} ({nsec} sectors)')
+    else:
+        print(f'gen_dts_fixtures: SKIP {fixture}: {image} not under $DVD_ISO_DIR')
+    t2 = os.environ.get('DTS_T2_SAMPLE')
+    if t2 and os.path.exists(t2):
+        shutil.copy(t2, os.path.join(out, 'disc_t2_sample.dts'))
+        print('gen_dts_fixtures: disc_t2_sample <- $DTS_T2_SAMPLE')
+    else:
+        print('gen_dts_fixtures: SKIP disc_t2_sample: set DTS_T2_SAMPLE to a raw .dts')
+
+
 def main():
-    out = sys.argv[1] if len(sys.argv) > 1 else os.environ.get(
+    pos = [a for a in sys.argv[1:] if not a.startswith('--')]
+    out = pos[0] if pos else os.environ.get(
         'DTS_TEST_DIR', os.path.expanduser('~/dts-streams/gate'))
     os.makedirs(out, exist_ok=True)
     for name, layout, rate, adpcm, content in ENCODED:
@@ -149,6 +222,8 @@ def main():
     for name, *_ in ENCODED:                      # bases are not fixtures themselves
         if name.startswith('_'):
             os.remove(os.path.join(out, name + '.dts'))
+    if '--discs' in sys.argv:
+        disc_windows(out)
     return 0
 
 

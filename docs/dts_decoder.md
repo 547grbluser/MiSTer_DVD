@@ -638,3 +638,87 @@ Then trace-scored benches against `Machine.trace`, and a standalone fit with eve
 a virtual pin: **the go/no-go on ALM, M10K and fmax**. Port the template's verification
 method, not its files: new names, nothing referencing outside this repository.
 
+
+### P1b handoff (written 2026-10-02 for a cold start)
+
+**Rebuild the working set and confirm it is green before writing any RTL:**
+
+```bash
+FFMPEG_SRC_DIR=<ffmpeg n9.0.x source> python3 tools/gen_dts_tables.py --check   # tables pinned
+python3 tools/dts_isa.py --asm --check                                           # .mem current
+DVD_ISO_DIR=<library> DTS_T2_SAMPLE=<raw t2 .dts> \
+    python3 tools/gen_dts_fixtures.py --discs      # all 34 gate streams -> ~/dts-streams/gate
+python3 tools/test_dts_ref.py     # reference vs the FFmpeg binary (slow: ~5 min)
+python3 tools/test_dts_fixed.py   # the hardware-order model vs the reference
+python3 tools/test_dts_isa.py     # the emulator vs the model: the RTL's golden
+```
+
+`gen_dts_fixtures.py --discs` reproduces the disc windows byte for byte (checked
+2026-10-02). It needs only the library images it names and the Terminator 2 sample.
+
+**The engine's contract, which the RTL must keep:**
+- **Input:** one DTS frame at a time, as `ps_demux` → `dts_reframer` → `audio_ring` deliver
+  them, with the frame's byte length. The microcode's `frame` instruction waits for the
+  next one, and bits past the frame read as 0 (counted as overrun).
+- **Output:** s16 stereo pairs, 32 per `MIXSYN`, into the PCM FIFO the codec arms share
+  (`mp2_decode`'s contract: full backpressure, `aud_ce` pops a pair). `MIXSYN` stalls when
+  the FIFO lacks room for 32 pairs. That is the pacing, as `mp2_decode` stalls before each
+  synthesis slot.
+- **Codebook port:** a request/response read of one 64-bit row (an ADPCM vector, or a VQ
+  vector's 8-byte slice for subsubframe `ssf`), with latency as a parameter. In P1b's
+  standalone build it is a top-level port answered by the bench. The fit must measure the
+  engine **without** the codebooks, which are off-chip per D4.
+- **Telemetry counters:** frames decoded; errors by code (the `E_*` list in
+  `dts.uasm`); overflowed block codes (D5); `dmix_ignored` (D3); bit overrun.
+
+**Vector-op arguments** (`dts_isa.Machine.vop`; the microcode sets them):
+
+| op | r8 | r9 | r10 | r11 | r12 | r13 | r14 | r15 |
+|---|---|---|---|---|---|---|---|---|
+| `XQ` | ch | band | abits | quantiser selector | scale index (bit 8: the 7-bit table) | adjustment index | lossless | — |
+| `XVQ` | ch | band | VQ index | ssf | scale index | — | — | — |
+| `ADPCM` | ch | band | pvq index | predicted? | — | — | — | — |
+| `JOINT` | ch | band | source ch | joint scale index (coded + 64) | — | — | — | — |
+| `BFLY` | ch p | ch q | — | — | — | — | — | — |
+| `MIXSYN` | j (0–7) | AMODE | nmix[0] | nmix[1] | nmix[2] | nmix[3] | nmix[4] | filter perfect |
+| `HCLR` | ch | from band | — | — | — | — | — | — |
+| `CNT` | counter id | — | — | — | — | — | — | — |
+
+`XCLR` takes no arguments.
+
+**ROM formats:**
+- `dts_ucode.mem`: 40-bit words, `op[39:34] rd rs rt imm[21:6] aux[5:0]`; `vop` carries
+  its op in `aux`.
+- `dts_const.mem`: 16-bit words.
+- `dts_huff.mem`: 26-bit nodes `{right[25:13], left[12:0]}`, where an entry is
+  `{leaf, value[11:0]}`. A leaf's value is the signed symbol; otherwise it is the child's
+  node index. Each book's root comes from `dts_isa.HUFF_ROOTS`, a 62-entry table the RTL
+  needs as a small ROM.
+
+**The bench's trace:** `Machine.trace` (set it to a list) receives `(pc, rd, value)` for
+every register write and `('st', addr, value)` for every store, in program order. Score
+the sequencer RTL against it. Then score the whole engine by checksums of the subband
+buffer and the history after every vector op, plus every PCM pair, so the first
+divergence names its engine. The emulator does not emit per-op checksums yet: add them
+in P1b.
+
+**Decisions P1b still has to make, with what is known:**
+- **Block-code division:** reciprocal multiply (the emulator charges ~6 cycles a digit)
+  or restoring division (~19). Measure on the RTL: `XQ` is 25–30 % of cycles at the
+  first figure.
+- **`mod_a`'s −85,479,984:** store it halved with the rounding shift cut from 23 to 22
+  (exact; §10 item 4).
+- **A refused frame's output:** emit `npcmblocks × 32` silent pairs, to keep A/V timing,
+  or nothing. Some `MIXSYN` output may already be in the FIFO when an error is found
+  mid-frame. Decide this with P3's wiring into `dvd_audio_decode`'s PTS gate.
+- **The cycle model** (`dts_isa.CYC`) is an estimate. Replace it with the RTL's measured
+  per-op cycles, and re-check the 60 % bound in `test_dts_isa.py` [2].
+- **A standalone-fit script:** this repo has none. Build a Quartus 17 project for the
+  engine alone, every port a virtual pin, `clk_sys` 27 MHz. Report ALM, M10K and DSP
+  against §10's table, and fmax at both slow corners (CLAUDE.md: the cold corner often
+  binds).
+
+**Quartus 17 rules that apply** (CLAUDE.md cross-cutting lessons): no `N'(expr)` size casts
+and no recently added `function`s in the synthesised RTL; every new `dvd/*.sv` named in
+`DVD.qsf`; benches score with `!==` and tie every input off; grep `DVD.map.rpt` for each
+RAM's "Inferred altsyncram" line.
