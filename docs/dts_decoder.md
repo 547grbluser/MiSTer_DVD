@@ -519,3 +519,81 @@ joint intensity included: `tools/test_dts_ref.py` reports no coverage gaps. The 
 streams are bit-exact through `tools/dts_ref.py` against FFmpeg, spec-maximum frames
 included. Every stream passes `tools/test_dts_fixed.py`: the streaming front end is
 bit-exact and the downmix is within 1 LSB.
+
+## 10. The engine: ISA, memory map and datapath (P1a, 2026-10-02)
+
+**Machine.** A microcoded sequencer with 40-bit instruction words and sixteen 16-bit
+registers (`r0` reads 0; `r8`–`r15` carry vector-op arguments). Its instructions: ALU
+operations (with immediate forms), loads and stores, `get n` (up to 16 bits, MSB first),
+`vlc` (a Huffman symbol), compare-and-branch, call and return, `err`, and `vop` (run a
+hardwired loop, with the sequencer stalled until it finishes). `tools/dts_isa.py` is
+the executable definition: the assembler, plus an instruction-level emulator that the
+RTL must match instruction by instruction. The program is `dvd/dts/dts.uasm`.
+
+**ISA decisions, each with the alternative rejected:**
+1. **Sample codes wider than 16 bits** (raw fields of up to 23 bits) **are never read
+   by the sequencer.** One vector op, `XQ`, reads a band's 8 codes itself (Huffman,
+   block or raw), dequantises them, and writes the subband buffer. The sequencer
+   passes `XQ` only indices and selectors (abits, quantiser selector, scale index,
+   adjustment index), which all fit 16 bits. `XQ` and the sequencer share one bit
+   reader; that is safe because a vector op runs with the sequencer stalled.
+   *Rejected:* 24-bit registers. That widens every ALU path, the register file and the
+   record RAM for a few fields, and leaves the per-sample loop interpreted, which is the
+   §4 cycle risk.
+2. **Block-code division** happens inside `XQ`: dividing a code of up to 19 bits into
+   four digits by one of seven levels (3–25). The emulator charges ~6 cycles a digit
+   (multiply by a reciprocal, one correction); restoring division would be ~19. P1b
+   picks the method against the measured cycle budget, below.
+3. **The codebook port** is a request/response memory with a latency parameter. In P1
+   the emulator reads the tables directly and charges the latency; `ram2` arrives in P2.
+   **Both codebooks have 64-bit rows:** an ADPCM vector is 4 × int16, and one
+   subsubframe's slice of a VQ vector is 8 × int8. So one DDR3 beat serves one band,
+   and the local buffers hold one slice per band. An ADPCM vector is fetched when its
+   index is parsed (subframe side info); a VQ slice at the start of each subsubframe,
+   while `XQ` is still reading that subsubframe's sample codes.
+   *Rejected:* buffering whole 32-byte VQ vectors per subframe: 4–5 M10K instead of 1–2.
+4. **Datapath: one 27×27 multiplier and a 56-bit accumulator.** Measured operand
+   widths, all signed:
+   - subband samples, scale factors, steps and window coefficients: 24 bits;
+   - IMDCT constants: 24–27 bits. The single exception, `mod_a`'s −85,479,984, needs
+     28 bits; it is even, so it is stored halved with the rounding shift cut from 23
+     to 22, which is exact.
+
+   Largest sums: the window's eight taps plus the carried partial sum, 2^48.8; `dct_a`,
+   2^49.0; `step × scale`, 2^45.7. So 50 bits plus sign suffice, and 56 leaves margin.
+
+**Vector ops**, one hardwired loop each. Each calls the matching `tools/dts_fixed.py`
+function, so the emulator is anchored to the model and not to itself:
+
+| op | what | model function |
+|---|---|---|
+| `XCLR` | zero the subsubframe's subband buffer | — |
+| `XQ` | read 8 codes (Huffman / block / raw, lenient per D5), dequantise one band | `R.extract_audio`, `dequant_band`, `huff_scale` |
+| `XVQ` | 8 VQ values × scale, one band | `vq_band` |
+| `ADPCM` | 4-tap prediction over 8 samples, or the plain history update | `adpcm_band` |
+| `JOINT` | a joint-intensity band from its source | `joint_band` |
+| `BFLY` | sum/difference of a channel pair, every band | `butterfly_band` |
+| `MIXSYN` | sample j: mix both sides (AC-3 gains by AMODE, pair-bounded), half IMDCT, window, 32 PCM pairs out | `mix_column`, `SynthFixed.run`, `to_s16` |
+| `HCLR` | clear one channel's ADPCM history from a band up | — |
+| `CNT` | count an event in telemetry (`dmix_ignored`) | — |
+
+**Memory map and M10K estimate** (spec maximum: 5 primary channels, 32 bands; codebooks
+off-chip per D4):
+
+| Memory | Size | M10K |
+|---|---|---|
+| Subband buffer, one subsubframe | 5 × 32 × 8 × 24 bit | 5 |
+| ADPCM history | 5 × 32 × 4 × 24 bit | 3 |
+| Record RAM (side info: abits/tmode/pmode, two scale indices, VQ index, joint scale; coding header) | ~1K × 16 | 2 |
+| Codebook buffers: an ADPCM vector per band, a VQ slice per band | 2 × 160 × 64 bit | 2–4 |
+| Synthesis rings and carried partial sums, ×2 sides | 2 × (512 + 32) × 24 bit | 3 |
+| Window prototypes, perfect and non-perfect | 2 × 512 × 24 bit | 3 |
+| IMDCT constants, scale / step / joint / adjustment tables, AC-3 gains | ~600 words | 1–2 |
+| Huffman tree, every core book | 2,647 nodes × ~26 bit | 9 |
+| Microcode | ~1K × 40 bit (estimate) | 4–6 |
+| **Total** | | **~32–37** |
+
+⚠ **This is above §4's 18–25 estimate.** The Huffman tree (9, not 4) and the
+per-subsubframe buffers were under-counted there. It still fits the 41 free M10K with
+the codebooks off-chip, but not with much to spare. The planned PCM-FIFO merge (~20,
+P4) is what restores margin, and P1b's standalone fit replaces these numbers.

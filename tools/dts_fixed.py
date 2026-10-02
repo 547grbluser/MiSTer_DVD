@@ -90,6 +90,72 @@ def to_s16(v):
     return -32768 if v < -32768 else 32767 if v > 32767 else v
 
 
+# --------------------------------------------------------------------------
+# The hardwired loops, one function each. tools/dts_isa.py's vector ops call
+# these SAME functions, so the instruction-level emulator (the RTL's golden) is
+# anchored to this model rather than to itself (docs/dts_decoder.md sec 6).
+# --------------------------------------------------------------------------
+def step_size(abits, lossless):
+    return T.LOSSLESS_QUANT[abits] if lossless else T.LOSSY_QUANT[abits]
+
+
+def huff_scale(scale, adj):
+    """A Huffman-coded band's scale, adjusted (adj: the Q22 SCALE_FACTOR_ADJ value)."""
+    return R.clip23((adj * scale) >> 22)
+
+
+def dequant_band(q, abits, lossless, scale):
+    """8 quantised codes -> 8 subband samples."""
+    return R.dequantize(q, step_size(abits, lossless), scale)
+
+
+def vq_band(vec8, scale):
+    """One subsubframe's 8 high-frequency VQ values (int8) x scale -> 8 samples."""
+    return [R.clip23((v * scale + 8) >> 4) for v in vec8]
+
+
+def adpcm_band(x8, hist, coeff):
+    """coeff = the 4 ADPCM_VB coefficients, or None for an unpredicted band.
+    -> (8 samples, the new 4-sample history)."""
+    if coeff is None:
+        if 'stale_history' in MUT:
+            return list(x8), list(hist)
+        return list(x8), (list(hist) + list(x8))[-R.ADPCM_COEFFS:]
+    hb, out = list(hist), []
+    for j in range(R.SUBBAND_SAMPLES):
+        pred = sum(hb[-1 - i] * coeff[i] for i in range(R.ADPCM_COEFFS))
+        v = R.clip23(x8[j] + R.clip23(R.norm(pred, 13)))
+        out.append(v)
+        hb = hb[1:] + [v]
+    return out, hb
+
+
+def joint_band(src8, jsc, hist):
+    """A band past a channel's own count: its source's samples x the joint scale.
+    -> (8 samples, the new history)."""
+    x8 = [R.clip23(R.mul(v, jsc, 17)) for v in src8]
+    return x8, (list(hist) + x8)[-R.ADPCM_COEFFS:]
+
+
+def butterfly_band(a8, b8):
+    """Sum/difference of one band of a channel pair -> (a + b, a - b)."""
+    return [u + v for u, v in zip(a8, b8)], [u - v for u, v in zip(a8, b8)]
+
+
+def mix_column(x, j, gains_side, nmix):
+    """One output side's 32 synthesis inputs for sample j of the subsubframe:
+    x[ch][band][j] mixed with Q15 gains, one rounding. gains_side[ch] is that
+    channel's gain on this side; nmix[ch] bounds its bands (sec D3)."""
+    inp = []
+    for b in range(R.SUBBANDS):
+        acc = 0
+        for ch, g in enumerate(gains_side):
+            if g and b < nmix[ch]:
+                acc += x[ch][b][j] * g
+        inp.append(R.clip23(R.norm(acc, Q) if 'mix_trunc' not in MUT else acc >> (Q - 2)))
+    return inp
+
+
 class StreamDecoder:
     """Frame bytes -> (L, R) s16, in the hardware's order."""
 
@@ -142,18 +208,16 @@ class StreamDecoder:
                     for b in range(c['vq_start'][ch]):
                         a = s['abits'][ch][b]
                         q, huff = R.extract_audio(br, c, ch, a)
-                        step = T.LOSSLESS_QUANT[a] if h['bit_rate'] == 3 else T.LOSSY_QUANT[a]
                         t = s['tmode'][ch][b]
                         scale = s['scales'][ch][b][0 if (t == 0 or ssf < t) else 1]
                         if huff:
-                            scale = R.clip23((c['scale_adj'][ch][a - 1] * scale) >> 22)
-                        x[ch][b] = R.dequantize(q, step, scale)
+                            scale = huff_scale(scale, c['scale_adj'][ch][a - 1])
+                        x[ch][b] = dequant_band(q, a, h['bit_rate'] == 3, scale)
                         self.ops['mac'] += R.SUBBAND_SAMPLES
                     for b, vec in vq[ch].items():
                         sc = s['scales'][ch][b][0]
                         base = ssf * R.SUBBAND_SAMPLES
-                        x[ch][b] = [R.clip23((vec[base + j] * sc + 8) >> 4)
-                                    for j in range(R.SUBBAND_SAMPLES)]
+                        x[ch][b] = vq_band(vec[base:base + R.SUBBAND_SAMPLES], sc)
                         self.ops['mac'] += R.SUBBAND_SAMPLES
                 if ssf == s['nssf'] - 1 or h['sync_ssf']:
                     if br.bits(16) != 0xFFFF:
@@ -165,26 +229,18 @@ class StreamDecoder:
                         if s['pmode'][ch][b] and self.plain[ch][b] and any(hb):
                             self.ops['hist_from_plain'] += 1   # stale_history can bite here
                         self.plain[ch][b] = not s['pmode'][ch][b]
-                        if s['pmode'][ch][b]:
-                            coeff = T.ADPCM_VB[s['pvq'][ch][b]]
-                            for j in range(R.SUBBAND_SAMPLES):
-                                pred = sum(hb[-1 - i] * coeff[i] for i in range(R.ADPCM_COEFFS))
-                                v = R.clip23(x[ch][b][j] + R.clip23(R.norm(pred, 13)))
-                                x[ch][b][j] = v
-                                hb = hb[1:] + [v]
+                        coeff = T.ADPCM_VB[s['pvq'][ch][b]] if s['pmode'][ch][b] else None
+                        x[ch][b], self.hist[ch][b] = adpcm_band(x[ch][b], hb, coeff)
+                        if coeff is not None:
                             self.ops['mac'] += 4 * R.SUBBAND_SAMPLES
                             self.ops['pred_bands'] += 1
-                        elif 'stale_history' not in MUT:
-                            hb = (hb + x[ch][b])[-R.ADPCM_COEFFS:]
-                        self.hist[ch][b] = hb
                 # joint intensity: bands past a channel's own count copy its source
                 for ch in range(nch):
                     src = c['joint_index'][ch] - 1
                     if src >= 0:
                         for b in range(c['nsubbands'][ch], c['nsubbands'][src]):
-                            jsc = s['jscale'][ch][b]
-                            x[ch][b] = [R.clip23(R.mul(v, jsc, 17)) for v in x[src][b]]
-                            self.hist[ch][b] = (self.hist[ch][b] + x[ch][b])[-R.ADPCM_COEFFS:]
+                            x[ch][b], self.hist[ch][b] = joint_band(x[src][b], s['jscale'][ch][b],
+                                                                    self.hist[ch][b])
                             self.ops['mac'] += R.SUBBAND_SAMPLES
                 if trace is not None:
                     for ch in range(nch):
@@ -203,9 +259,7 @@ class StreamDecoder:
                     if p in spk and q in spk:
                         ip, iq = spk.index(p), spk.index(q)
                         for b in range(R.SUBBANDS):
-                            a_, b_ = x[ip][b], x[iq][b]
-                            x[ip][b] = [u + v for u, v in zip(a_, b_)]
-                            x[iq][b] = [u - v for u, v in zip(a_, b_)]
+                            x[ip][b], x[iq][b] = butterfly_band(x[ip][b], x[iq][b])
                         if nact[ip] != nact[iq]:
                             self.ops['bfly_uneven'] += 1   # the pair bound matters here
                         if 'mix_own_bound' not in MUT:
@@ -217,16 +271,9 @@ class StreamDecoder:
                 # downmix to L/R in the subband domain, one rounding per output
                 for j in range(R.SUBBAND_SAMPLES):
                     for side, out in ((0, L), (1, Rr)):
-                        inp = []
-                        for b in range(R.SUBBANDS):
-                            acc = 0
-                            for ch in range(nch):
-                                g = gains.get(spk[ch], (0, 0))[side]
-                                if g and b < nmix[ch]:
-                                    acc += x[ch][b][j] * g
-                                    self.ops['mac'] += 1
-                            inp.append(R.clip23(R.norm(acc, Q) if 'mix_trunc' not in MUT
-                                                else acc >> (Q - 2)))
+                        gs = [gains.get(spk[ch], (0, 0))[side] for ch in range(nch)]
+                        inp = mix_column(x, j, gs, nmix)
+                        self.ops['mac'] += sum(min(nmix[ch], R.SUBBANDS) for ch in range(nch) if gs[ch])
                         pcm = self.synth[side].run(inp, win)
                         self.ops['synth_blocks'] += 1
                         out.extend(to_s16(v) for v in pcm)
