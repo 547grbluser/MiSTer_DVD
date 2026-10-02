@@ -1,10 +1,11 @@
 # In-fabric DTS core decoder (`dvd/dts/`, planned)
 
-**Status: ✅ P0 BUILT; D5 and D3's LFE question decided, ⏳ D3's default mix rule open. The reference is bit-exact against
+**Status: ✅ P0 BUILT; D3 and D5 decided. The reference is bit-exact against
 FFmpeg on 32 streams, spec maxima and joint intensity included; no RTL yet
 (2026-10-02).** Branch
-`feature/dts-decode` (`CORE_VERSION dev-dtsdecode`). Next concrete step: **P1** (§7), once
-D3's default mix rule and the handling of embedded coefficients are decided.
+`feature/dts-decode` (`CORE_VERSION dev-dtsdecode`). Next concrete step: **P1** (§7), the
+engine standalone, with `tools/dts_fixed.py` as its golden and `tools/dts_writer.py`'s
+spec-maximum streams among its tests.
 
 Today a DTS track is silent in `Decode PCM` mode: `dvd_audio_decode.sv` routes
 `frame_type == 1` to a discard (`// DTS: discard`), and DTS is audible only through IEC 61937
@@ -108,17 +109,24 @@ code it; a band above a channel's count is zero for that channel.
   not subband-coded but decimated samples with their own interpolation FIR. The decoder
   still parses the LFE samples to advance through the frame, but never interpolates
   them, so the LFE FIR and its 256-tap table are not built.
-- ⏳ **Downmix coefficients (a parameter in the models; the default is proposed, not
-  decided).** Embedded coefficients sit in the core frame's auxiliary data (`AUX` sync
-  `0x9A1105A0`, a dynamic-downmix flag, then 9-bit codes into `DMIXTABLE`). FFmpeg uses
-  them only when they are LoRo or LtRt *and* a stereo layout is requested; otherwise it
-  outputs every channel and never downmixes. So the default rule is ours to choose. The
-  proposal: the rule this core's AC-3 decoder already uses (liba52 `A52_STEREO |
-  A52_ADJUST_LEVEL`): `Lo = k(L + c·C + s·Ls)`, `Ro = k(R + c·C + s·Rs)`,
-  `k = 1/(1+c+s)`, `c = s = 0.7071`. It cannot clip, and DTS and AC-3 come out at the same
-  level. Embedded coefficients that include an LFE term cannot be honoured in the subband
-  domain, because LFE is not subband-coded. The library census (§9) counts how often
-  that arises.
+- ✅ **The mix rule follows the AC-3 path exactly (decided by the maintainer, 2026-10-02).**
+  These are `dvd/ac3/imdct_512.sv`'s effective levels at the A/52 defaults, because DTS has
+  no mix-level fields:
+  - clev = slev = 0.7071, zeroed for a role the layout does not carry.
+  - A **mono** surround (2/1, 3/1) goes to both outputs, pre-scaled by another 0.7071.
+    That pre-scaled value is also the one the normalisation uses.
+  - `Lo = k(L + clev·C + slev·Ls)` with `k = 1/(1 + clev_eff + slev_eff)` (liba52
+    `A52_ADJUST_LEVEL`). It cannot clip, and DTS and AC-3 play at the same level:
+    3/2 gives 0.414, 3/1 gives 0.453, 2/1 gives 0.667, and 3/0 and 2/2 give 0.586.
+  - Mono, stereo, sum/difference stereo and Lt/Rt pass through at unity. Dual mono
+    (AMODE 1) maps A to L and B to R, as FFmpeg does (AC-3 rejects its dual mono).
+  - ⚠ The first model got the mono surround wrong: it normalised by the full slev, so
+    2/1 and 3/1 came out quieter than AC-3. Fixed in `default_gains()`.
+  - **A stream's embedded coefficients are ignored and counted.** They sit in the core
+    frame's aux data (`AUX` sync `0x9A1105A0`, 9-bit codes into `DMIXTABLE`), and FFmpeg
+    itself uses them only when a stereo layout is requested. *Cinderella III* is the one
+    library stream that carries them, in every frame; `tools/dts_fixed.py` counts them
+    (`dmix_ignored`), and the RTL needs the same counter in telemetry.
 
 ### D4 — Codebooks: shipped in the bitstream as the starting contents of write-first RAMs, copied once to DDR3 (2026-10-02, maintainer)
 
@@ -375,7 +383,7 @@ in telemetry, never wrong audio.
 
 ## 7. Phases
 
-- **P0 — tools and measurement (✅ built; D5 and LFE decided; ⏳ D3's default mix rule).**
+- **P0 — tools and measurement (✅ done; D3 and D5 decided 2026-10-02).**
   - The pinned table generator.
   - The reference, bit-exact against FFmpeg.
   - The hardware-order model: front end bit-exact, downmix within 1 LSB.
@@ -414,8 +422,8 @@ in telemetry, never wrong audio.
 
 ## 8. Open questions
 
-- ✅ LFE is out of the downmix (D3, decided). ⏳ The default mix rule, and whether to
-  honour embedded coefficients (D3).
+- ✅ D3, decided: LFE is out, the mix follows the AC-3 path, and embedded coefficients
+  are ignored but counted.
 - ⏳ The DDR3 address for the codebooks, and `ram2` on `clk_sys` (D4).
 - ⏳ AMODE 10–15 (user-defined, 6–8 channels): refuse or map (§5).
 - ⏳ Dynamic range compression (`DYNF`): ignore, or apply under an OSD option (an option

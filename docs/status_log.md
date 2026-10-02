@@ -68,8 +68,10 @@ predate later confirmations; the `CLAUDE.md` index carries the reconciled status
     - D5: overflowed block codes are decoded leniently and counted. *Shadoan* measured
       viable: −58 dB against zeroing those samples; FFmpeg's refusal silences half its
       frames.
-  - **Next:** D3's default mix rule and embedded-coefficient handling, then P1 (the
-    engine, standalone fit).
+  - **Decided (maintainer, 2026-10-02):** D3's mix follows the AC-3 path exactly,
+    including its mono-surround −3 dB inside the normalisation (the model had that wrong
+    at first). Embedded coefficients are ignored and counted (`dmix_ignored`).
+  - **Next:** P1 (the engine, standalone fit).
 
 - ⏳ **SHOW-FIRST AUDIO/SUBTITLE BUTTONS (2026-10-01, ✅ MERGED PR #145;
   sim-proven, ⏳ HW-confirm pending).**

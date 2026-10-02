@@ -19,11 +19,10 @@ exactly the two ways the design note decides, and each is measured here:
     difference against dts_ref's per-channel PCM mixed afterwards with the same
     coefficients.
 
-The downmix rule (D3, ⏳ the maintainer's decision; a parameter here): the
-stream's embedded LoRo/LtRt coefficients when it carries them, else the rule
-this core's AC-3 decoder uses (liba52 A52_STEREO | A52_ADJUST_LEVEL):
-Lo = k (L + c C + s Ls), Ro = k (R + c C + s Rs), k = 1 / (1 + c + s),
-c = s = 0.7071 -- normalised so it cannot clip. LFE is left out (D3 ⏳).
+The downmix rule (D3, decided by the maintainer 2026-10-02): the one this
+core's AC-3 decoder uses (liba52 A52_STEREO | A52_ADJUST_LEVEL), at its default
+levels -- see default_gains(). A stream's embedded coefficients are ignored
+(and counted). LFE is left out.
 
 Output: s16 stereo, rounded half up from the 24-bit synthesis domain and
 saturated.
@@ -53,22 +52,36 @@ SQRT1_2 = 0.70710678118654752
 
 
 def default_gains(amode):
-    """-> {speaker: (gL, gR)} as Q15 ints: the AC-3 path's Lo/Ro rule."""
-    c = s = SQRT1_2
+    """-> {speaker: (gL, gR)} as Q15 ints: the AC-3 path's Lo/Ro rule (D3, decided).
+
+    dvd/ac3/imdct_512.sv's effective levels, at the A/52 defaults (DTS has no
+    mix-level fields): clev = slev = 0.7071, zeroed for a role the layout does
+    not carry; a MONO surround is split to both outputs and pre-scaled by
+    another 0.7071 (liba52 slev*LEVEL_3DB) -- and that pre-scaled value is the
+    one the normalisation uses. Then k = 1 / (1 + clev_eff + slev_eff)
+    (liba52 A52_ADJUST_LEVEL). Mono, stereo, sum/difference stereo and Lt/Rt
+    pass through at unity; dual mono (AMODE 1) maps A to L and B to R, as FFmpeg
+    does (AC-3 rejects its dual mono). LFE is not mixed.
+    """
     spk = R.PRM_CH_TO_SPKR[amode]
-    has_c = R.SPK_C in spk
-    has_s = R.SPK_LS in spk or R.SPK_CS in spk
-    if amode == 0:                              # mono: C to both
+    if amode == 0:                              # mono: C to both, unity
         return {R.SPK_C: (1 << Q, 1 << Q)}
-    k = 1.0 / (1.0 + (c if has_c else 0.0) + (s if has_s else 0.0))
+    clev = SQRT1_2 if R.SPK_C in spk else 0.0
+    if R.SPK_LS in spk:                         # a surround pair: slev as is
+        slev = SQRT1_2
+    elif R.SPK_CS in spk:                       # a mono surround: -3 dB more
+        slev = SQRT1_2 * SQRT1_2
+    else:
+        slev = 0.0
+    k = 1.0 / (1.0 + clev + slev)
     g = {R.SPK_L: (k, 0.0), R.SPK_R: (0.0, k)}
-    if has_c:
-        g[R.SPK_C] = (k * c, k * c)
+    if clev:
+        g[R.SPK_C] = (k * clev, k * clev)
     if R.SPK_LS in spk:
-        g[R.SPK_LS] = (k * s, 0.0)
-        g[R.SPK_RS] = (0.0, k * s)
-    if R.SPK_CS in spk:                         # one surround: -3 dB into both
-        g[R.SPK_CS] = (k * s * SQRT1_2, k * s * SQRT1_2)
+        g[R.SPK_LS] = (k * slev, 0.0)
+        g[R.SPK_RS] = (0.0, k * slev)
+    if R.SPK_CS in spk:
+        g[R.SPK_CS] = (k * slev, k * slev)
     return {sp: (round(a * (1 << Q)), round(b * (1 << Q))) for sp, (a, b) in g.items()}
 
 
@@ -85,7 +98,7 @@ class StreamDecoder:
         self.hist = [[[0] * R.ADPCM_COEFFS for _ in range(R.SUBBANDS)] for _ in range(7)]
         self.synth = [R.SynthFixed(), R.SynthFixed()]
         self.ops = {'mac': 0, 'bits': 0, 'frames': 0, 'synth_blocks': 0, 'pred_bands': 0,
-                    'hist_from_plain': 0, 'bfly_uneven': 0}
+                    'hist_from_plain': 0, 'bfly_uneven': 0, 'dmix_ignored': 0}
         self.plain = [[False] * R.SUBBANDS for _ in range(7)]
 
     def decode(self, data, trace=None):
@@ -222,7 +235,11 @@ class StreamDecoder:
         for ch in range(nch):
             for b in range(nact[ch], R.SUBBANDS):
                 self.hist[ch][b] = [0] * R.ADPCM_COEFFS
-        R.parse_optional_info(br, h, c)
+        o = R.parse_optional_info(br, h, c)
+        if o['dmix_coeff'] is not None:
+            # D3: the AC-3 rule is used; a stream's own coefficients are ignored,
+            # and counted so it is never silent that they were
+            self.ops['dmix_ignored'] += 1
         self.ops['bits'] += h['frame_size'] * 8
         self.ops['frames'] += 1
         return L, Rr, h, c
