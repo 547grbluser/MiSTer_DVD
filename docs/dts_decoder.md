@@ -200,7 +200,33 @@ worth) holds them.
 **DTS estimate:** about **1,500–2,500 ALM**, about **15–20 M10K** without the codebooks
 (microcode 5–10, Huffman 4, QMF prototypes 2–3, persistent state), and 1 DSP. It is an
 estimate until P1's standalone fit replaces it. It exceeds the ALM spare, so **a reclaim
-must land before or with the wiring** (P4 lists them).
+must land before or with the wiring** (P4 lists them; the net-by-scenario table below
+shows which).
+
+**Net ALM by scenario (2026-10-02; estimates except where the fit report measured a
+module).** Each scenario builds on the one above it. Module figures move ±5–10 % with
+packing.
+
+| Change | ALM | Basis |
+|---|---|---|
+| DTS engine: sequencer ~800 + vector ops ~700–1,000 + codebook fetch and vector buffer ~100–150 | +1,600 … +2,000 | estimate |
+| Codebook copier | +50 … +100 | estimate |
+| `ram2` live: our master + the port's terminator (17 → ~52, as `ram1`'s) | +100 … +200 | estimate; terminators measured |
+| `T_DTS` arm, telemetry words | +50 … +150 | estimate |
+| **A. DTS alone** | **+1,800 … +2,450** | |
+| One bit reader (MP2's `bit_reader` + `bit_fifo` = 189, measured) | −150 | net of the source mux |
+| One PCM FIFO (`pcm_out` 117, `lpcm_unpack` 107, MP2's FIFO control) | −100 … −200 | the DTS output shares it too |
+| **B. DTS + the cheap merges** | **+1,450 … +2,200** (central ~+1,800) | |
+| MP2 onto the engine (`mp2_decode` 878, measured, minus its bit reader already counted, plus a microcode program and a grouping op) | −550 … −650 | estimate |
+| **C. B + MP2 on the engine** | **+800 … +1,650** (central ~+1,200) | |
+| AC-3 parse onto the engine (`ac3_parse` 4,483 − `imdct_512` 2,062 = ~2,420 measured; keeps the IMDCT; adds bit-allocation vector ops ~300–600 for the cycle budget) | −1,300 … −2,000 | estimate, the least certain row |
+| **D. C + the AC-3 parse on the engine** | **−1,200 … +350** (central ~−450) | |
+
+Against ~1,125 spare at 97 %, only **D** fits with margin. **C** lands at about 100 % and
+would not be expected to fit or close timing. **A** and **B** do not fit. So the AC-3 parse
+migration is on the critical path, not optional, unless P1's standalone fit comes in near
+the bottom of its range. P1's fit replaces the engine rows. A migration is counted only
+when its own fit measures it.
 
 **Cycles (27 MHz, about 27M a second):**
 - **Synthesis (stereo after the downmix):** about 80 multiply-accumulates per output
@@ -282,7 +308,8 @@ in telemetry, never wrong audio.
   no fallback), `reference/compatibility.md`, possibly a README headline limitation.
   A minor version bump.
 - **P4 — reclaim.** One bit reader, one PCM FIFO (moving the `adpcm_vb` half per D4), and
-  optionally moving MP2 and then the AC-3 parse onto the engine. AC-3's IMDCT stays
+  moving MP2 and then the AC-3 parse onto the engine. §4's scenario table shows the AC-3
+  parse move is needed for DTS to fit, so it is not optional. AC-3's IMDCT stays
   hardwired: a direct-form transform for 5.1 needs 61–74M multiply-accumulates a second,
   2.3–2.7× one multiplier at 27 MHz. Each move is gated trace-identical
   (`logic_reclaim.md` method) and the AC-3 path bit-exact against `bench/ac3`.
