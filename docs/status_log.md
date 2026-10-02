@@ -63,8 +63,13 @@ predate later confirmations; the `CLAUDE.md` index carries the reconciled status
     - It found a real downmix bug: after the sum/difference butterfly the pair must be
       mixed to the larger band count (`docs/dts_decoder.md` D3; RED arm
       `mix_own_bound`).
-  - **Next:** the maintainer's D3 (LFE, default downmix) and D5 (lenient block codes)
-    decisions, then P1 (the engine, standalone fit).
+  - **Decided (maintainer, 2026-10-02):**
+    - D3: LFE stays out of the stereo mix.
+    - D5: overflowed block codes are decoded leniently and counted. *Shadoan* measured
+      viable: −58 dB against zeroing those samples; FFmpeg's refusal silences half its
+      frames.
+  - **Next:** D3's default mix rule and embedded-coefficient handling, then P1 (the
+    engine, standalone fit).
 
 - ⏳ **SHOW-FIRST AUDIO/SUBTITLE BUTTONS (2026-10-01, ✅ MERGED PR #145;
   sim-proven, ⏳ HW-confirm pending).**

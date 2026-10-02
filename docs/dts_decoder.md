@@ -1,10 +1,10 @@
 # In-fabric DTS core decoder (`dvd/dts/`, planned)
 
-**Status: ✅ P0 BUILT, ⏳ awaiting the D3/D5 decisions. The reference is bit-exact against
+**Status: ✅ P0 BUILT; D5 and D3's LFE question decided, ⏳ D3's default mix rule open. The reference is bit-exact against
 FFmpeg on 32 streams, spec maxima and joint intensity included; no RTL yet
 (2026-10-02).** Branch
 `feature/dts-decode` (`CORE_VERSION dev-dtsdecode`). Next concrete step: **P1** (§7), once
-D3 (LFE, the default downmix) and D5 (lenient block codes) are decided.
+D3's default mix rule and the handling of embedded coefficients are decided.
 
 Today a DTS track is silent in `Decode PCM` mode: `dvd_audio_decode.sv` routes
 `frame_type == 1` to a discard (`// DTS: discard`), and DTS is audible only through IEC 61937
@@ -187,7 +187,7 @@ there was for a line pump. ⏳ Confirm that `sysmem_lite` accepts a `clk_sys` `r
 `ram1` is the decoder's port and is not used: occupancy, not bandwidth, is what hurt it
 before.
 
-### D5 — Overflowed block codes are decoded leniently and counted (⏳ proposed 2026-10-02)
+### D5 — Overflowed block codes are decoded leniently and counted (✅ decided by the maintainer, 2026-10-02)
 
 A block code packs four samples as base-`levels` digits. A code of `levels⁴` or more is out
 of range. **FFmpeg refuses the whole frame**; **libdca keeps the four low digits** and
@@ -217,8 +217,8 @@ silence that disc about half the time.
 - **FFmpeg's refusal is the audible option.** It silences 240 of the 482 frames: 10.7 ms
   dropouts about every other frame, level jumps of about 60 dB, a stutter.
 
-**Proposal:** decode leniently, as libdca does: keep the four low digits and count every
-overflowed code in telemetry (never silent, CLAUDE.md). A hardware decoder that derives
+**Decision (maintainer, 2026-10-02): decode leniently**, as libdca does: keep the four low
+digits and count every overflowed code in telemetry (never silent, CLAUDE.md). A hardware decoder that derives
 the digits by divide-and-remainder without a range check behaves identically; the
 counter is the only addition. `tools/dts_fixed.py`, the
 hardware's model, does this. `tools/dts_ref.py` matches FFmpeg by default and takes
@@ -375,7 +375,7 @@ in telemetry, never wrong audio.
 
 ## 7. Phases
 
-- **P0 — tools and measurement (✅ built; ⏳ the maintainer's D3/D5 decisions).**
+- **P0 — tools and measurement (✅ built; D5 and LFE decided; ⏳ D3's default mix rule).**
   - The pinned table generator.
   - The reference, bit-exact against FFmpeg.
   - The hardware-order model: front end bit-exact, downmix within 1 LSB.
@@ -422,7 +422,7 @@ in telemetry, never wrong audio.
   would need `playback/settings.md`, which the docs parity check enforces).
 - ⏳ The core's CRC (`CPF`): check and refuse, or ignore as `mp2_decode` does. No library
   stream sets it (§9).
-- ⏳ D5: lenient decoding of overflowed block codes, counted (recommended; *Shadoan*).
+- ✅ D5: overflowed block codes are decoded leniently and counted (decided).
 - ⏳ The default downmix rule (D3): the AC-3 path's liba52 Lo/Ro is proposed. *Cinderella
   III* is the one library stream with embedded coefficients, so it is the test case for
   honouring them.
