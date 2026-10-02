@@ -103,9 +103,11 @@ code it; a band above a channel's count is zero for that channel.
   lost 3,459 LSB on `written_amode3`. FFmpeg's encoder always codes 32 bands on every
   channel, so the encoder-made sum/difference fixtures could not show it. The
   writer's uneven counts did. RED arm: `mix_own_bound`.
-- ⏳ **LFE: proposed to be left out of the stereo downmix** (the usual stereo-downmix
-  practice). LFE is not subband-coded but decimated samples with their own interpolation
-  FIR, so dropping it also removes that path. **Not yet decided by the maintainer.**
+- ✅ **LFE is left out of the stereo downmix (decided by the maintainer, 2026-10-02).**
+  This is the usual stereo-downmix practice, and the AC-3 path does the same. LFE is
+  not subband-coded but decimated samples with their own interpolation FIR. The decoder
+  still parses the LFE samples to advance through the frame, but never interpolates
+  them, so the LFE FIR and its 256-tap table are not built.
 - ⏳ **Downmix coefficients (a parameter in the models; the default is proposed, not
   decided).** Embedded coefficients sit in the core frame's auxiliary data (`AUX` sync
   `0x9A1105A0`, a dynamic-downmix flag, then 9-bit codes into `DMIXTABLE`). FFmpeg uses
@@ -195,8 +197,30 @@ in 240 of 482 frames of one window, across six title sets. FFmpeg refuses exactl
 frames are valid and only those codes overflow (an encoder quirk). Refusing them would
 silence that disc about half the time.
 
+**Is the audio viable? Measured 2026-10-02 on the *Shadoan* window (482 frames):**
+- **The frames are real audio, and the bad codes are rare encoder slips.** Overflow
+  rates per allocation level are 0.02–0.79 %. If those fields were garbage, the rate
+  would be (2ⁿ − L⁴)/2ⁿ, 13–41 %. The valid codes' samples have the small-value statistics
+  of the Terminator 2 control (mean |sample| 1.93 at L = 17, against 1.71 on T2 and 4.24
+  if uniform).
+- **The intended value cannot be recovered.** A one-step carry past the quantiser's edge
+  would leave the top digit at 0. The top digits are spread across the range instead,
+  and the overflow digit is always 1. So no decoder can know what the encoder meant;
+  what matters is that the error is bounded.
+- **It is bounded, and inaudible by these measures.** A lenient decode keeps all four
+  samples inside the quantiser's legal range, so the error is confined to four subband
+  samples of one band per bad code. Decoding leniently and zeroing those four samples
+  differ by **1.0 LSB RMS against a 750 LSB RMS signal (−58 dB)**. Frames with a bad
+  code are indistinguishable from clean ones in click measure (second-difference p95: 894
+  against 1,925 on clean frames) and in level continuity against their neighbours (p95:
+  2.26 dB against 2.03 dB).
+- **FFmpeg's refusal is the audible option.** It silences 240 of the 482 frames: 10.7 ms
+  dropouts about every other frame, level jumps of about 60 dB, a stutter.
+
 **Proposal:** decode leniently, as libdca does: keep the four low digits and count every
-overflowed code in telemetry (never silent, CLAUDE.md). `tools/dts_fixed.py`, the
+overflowed code in telemetry (never silent, CLAUDE.md). A hardware decoder that derives
+the digits by divide-and-remainder without a range check behaves identically; the
+counter is the only addition. `tools/dts_fixed.py`, the
 hardware's model, does this. `tools/dts_ref.py` matches FFmpeg by default and takes
 `OPT={'lenient_block'}`. Bit-exact comparison against FFmpeg is impossible on such frames
 (FFmpeg outputs none), so `tools/test_dts_ref.py` reports the stream as REFUSED, and
@@ -390,7 +414,8 @@ in telemetry, never wrong audio.
 
 ## 8. Open questions
 
-- ⏳ LFE in the downmix, and embedded downmix coefficients (D3).
+- ✅ LFE is out of the downmix (D3, decided). ⏳ The default mix rule, and whether to
+  honour embedded coefficients (D3).
 - ⏳ The DDR3 address for the codebooks, and `ram2` on `clk_sys` (D4).
 - ⏳ AMODE 10–15 (user-defined, 6–8 channels): refuse or map (§5).
 - ⏳ Dynamic range compression (`DYNF`): ignore, or apply under an OSD option (an option
