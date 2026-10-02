@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Gate for "a 16:9 menu's permitted display mode overrides Letterbox/Crop"
-# (2026-10-01; docs/crt_anamorphic.md §11).
+# (2026-10-01; docs/crt_anamorphic.md §12).
 #
 # A 4:3 set-top player follows the IFO V_ATR permitted_df field: a 16:9 menu that
 # denies letterbox is pan&scanned even when the player is set to Letterbox, and one

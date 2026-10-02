@@ -100,10 +100,12 @@ thin. `Analog Aspect` picks the correction.
 | **Letterbox** | Scales the picture down vertically by ¾, centred, with black bars | Correct geometry, full width, bars top and bottom |
 | **Crop** | Shows the centre ¾ of the width, stretched back to full width | Correct geometry, **full vertical resolution**, sides cut off, no bars |
 
-Both corrections are the same exact ×¾ factor — a 16:9 image inside a 4:3 frame has scale
+Both corrections use the same ×¾ factor — a 16:9 image inside a 4:3 frame has scale
 factor (4∕3)∕(16∕9) = ¾. Letterbox applies it vertically, costing resolution but keeping
 the whole frame. Crop applies it horizontally, keeping every one of the 480 source lines
-but losing ⅛ of the picture from each side. This is the pan-and-scan trade-off, and which
+but losing about ⅛ of the picture from each side. (Crop works in 16-pixel blocks, so it
+keeps the centre 528 pixels rather than an exact 540, and the picture comes out about 2 %
+wider than true.) This is the pan-and-scan trade-off, and which
 you prefer is a matter of taste.
 
 Letterbox uses a true two-tap vertical blend rather than dropping lines, so the scaled
@@ -115,8 +117,28 @@ overscan would hide it. On the few discs that carry a
 that can make it visible. It is on the disc, and a set-top player letterboxing the same
 disc puts it in the same place.
 
-**Auto never selects Crop** — it chooses between Letterbox and Fit. Crop is a deliberate
-manual choice.
+For movies, **Auto never selects Crop** — it chooses between Letterbox and Fit, and Crop
+is a deliberate manual choice. Disc menus can override that choice, as described next.
+
+### Widescreen disc menus
+
+A 16:9 disc menu says which 4:3 treatment it allows, and the core follows it the way a
+set-top player connected to a 4:3 TV does:
+
+- **Most widescreen menus allow pan-and-scan only.** They are drawn so that everything
+  that matters, including every button, sits inside the centre 4:3 of the picture. With
+  `Analog Aspect` on **Letterbox** or **Auto**, these menus are shown **cropped** to fill
+  the screen instead of being shrunk between black bars.
+- **Some menus allow letterbox only**, usually because their buttons reach the edges of the
+  frame. With `Analog Aspect` on **Crop**, these menus are shown **letterboxed** so no
+  button is cut off.
+- Menus that allow both follow your setting, as do **Fit** and all movie playback. When
+  you leave the menu, the picture goes back to your setting.
+
+Menu highlights follow the cropped or letterboxed picture, so they stay on their buttons.
+This only happens on the 15 kHz analog output (the interlaced raster), which is the only
+place Crop exists. With `Video Output` set to `Progressive`, or on an HDMI-only setup, a
+widescreen menu is shown the same way as before.
 
 !!! note "Changed in v0.4.0"
     **Subtitles are no longer scaled by Letterbox or Crop.** Dialogue subtitles now draw

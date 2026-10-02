@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """check_menu_panscan_wiring.py -- a 16:9 menu's permitted display mode overrides
-the Analog Aspect Letterbox/Crop choice (docs/crt_anamorphic.md §11).
+the Analog Aspect Letterbox/Crop choice (docs/crt_anamorphic.md §12).
 
 WHY THIS IS A SCRIPT AND NOT A BENCH (2026-10-01)
 -------------------------------------------------
