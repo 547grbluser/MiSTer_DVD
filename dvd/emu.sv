@@ -673,7 +673,7 @@ assign CE_PIXEL = interlaced_eff ? ce_pix_q : 1'b1;
 // the branch changes the netlist anyway - and NEVER PER COMMIT. Do not derive
 // either from a git SHA or a timestamp: every compile would become a new
 // netlist. Same-day rebuilds on one branch append a digit ("dev-seekrealign2").
-`define CORE_VERSION "dev-menupanscan"
+`define CORE_VERSION "dev-trackshow"
 
 parameter CONF_STR = {
     "DVD;;",
@@ -1759,8 +1759,8 @@ wire hud_user_evt = pause_edge
                   | dpad_pend_evt;
 wire menu_edge  = joy_menu  & ~joy_prev[8];
 wire angle_edge = joy_angle & ~joy_prev[9];
-wire audio_edge = joy_audio & ~joy_prev[10];       // Phase 10: cycle audio track
-wire sub_edge   = joy_sub   & ~joy_prev[11];       // Phase 10: cycle subtitle track
+wire audio_edge = joy_audio & ~joy_prev[10];       // Phase 10: Audio press (show-first, see aud_step_w)
+wire sub_edge   = joy_sub   & ~joy_prev[11];       // Phase 10: Subtitle press (show-first)
 wire display_edge = joy_disp & ~joy_prev[12];      // Phase 11: toggle status line
 wire ff_edge    = joy_ff  & ~joy_prev[13];         // Fast Fwd press (scrub start)
 wire rew_edge   = joy_rew & ~joy_prev[14];         // Rewind press  (scrub start)
@@ -2724,9 +2724,31 @@ wire       seek_natural_mux = vm_seek_pulse & vm_from_wait_w;
 // subp_ntracks_w) come from the title IFO (default 8 = unconstrained until a
 // real IFO parses, so linear playback is unchanged), so a cycle can never land
 // on a stream the disc lacks (-> silence / garbage).
+//
+// SHOW-FIRST (a set-top player's contract, docs/track_selection.md "Show-first
+// Audio/Subtitle"): a press only SHOWS the current track; it CHANGES it only
+// while that button's own popup is on screen. Users pressed Audio to ask "which
+// track is this?" and had to cycle all the way round to get back. The change
+// pulses aud_step_w / sub_step_w come from transport_hud (which owns the popup
+// slot), masked here by the two things that hide the HUD outside its view: the
+// screensaver and a stage-2 Stop. The raw audio_edge / sub_edge still drive the
+// popup itself (.aud_evt/.sub_evt), so every press shows or refreshes it.
+// tools/check_track_step_wiring.py gates this seam.
+//
+// A step starts from the EFFECTIVE track (aud_log / sub_on_eff+sp_sel), not from
+// aud_cur/sub_idx: when a menu's SetSTN owns the selection those differ, and the
+// show press displayed the effective one -- stepping from aud_cur would make the
+// "AUD 2" the user just saw become "AUD 1".
 wire [3:0] audio_ntracks_w, subp_ntracks_w;
 wire [2:0] attr_a_fmt_w;
 wire [15:0] attr_a_lang_w, attr_s_lang_w;
+wire       hud_aud_step_w, hud_sub_step_w;   // from transport_hud_inst
+wire       hud_hidden_w;                     // saver / stage-2 Stop (assigned below)
+wire       aud_step_w = hud_aud_step_w & ~hud_hidden_w;
+wire       sub_step_w = hud_sub_step_w & ~hud_hidden_w;
+wire [2:0] aud_log;                          // effective logical audio track (below)
+wire [2:0] sp_sel;                           // effective logical subpicture track (below)
+wire       sub_on_eff;                       // effective subtitle display (below)
 reg  [2:0] aud_cur;
 reg        sub_on;
 reg  [2:0] sub_idx;
@@ -2736,12 +2758,12 @@ always @(posedge clk_sys or negedge reset_n) begin
     end else if (start_streaming) begin
         aud_cur <= 3'd0; sub_on <= 1'b0; sub_idx <= 3'd0;  // default: track 0, subs off
     end else begin
-        if (audio_edge)
-            aud_cur <= (({1'b0,aud_cur} + 4'd1) >= audio_ntracks_w) ? 3'd0 : aud_cur + 3'd1;
-        if (sub_edge) begin
-            if (!sub_on)                                        begin sub_on <= 1'b1; sub_idx <= 3'd0; end
-            else if (({1'b0,sub_idx} + 4'd1) >= subp_ntracks_w) begin sub_on <= 1'b0; sub_idx <= 3'd0; end
-            else                                                sub_idx <= sub_idx + 3'd1;
+        if (aud_step_w)
+            aud_cur <= (({1'b0,aud_log} + 4'd1) >= audio_ntracks_w) ? 3'd0 : aud_log + 3'd1;
+        if (sub_step_w) begin
+            if (!sub_on_eff)                                    begin sub_on <= 1'b1; sub_idx <= 3'd0; end
+            else if (({1'b0,sp_sel} + 4'd1) >= subp_ntracks_w)  begin sub_on <= 1'b0; sub_idx <= 3'd0; end
+            else                                                begin sub_on <= 1'b1; sub_idx <= sp_sel + 3'd1; end
         end
     end
 end
@@ -2778,15 +2800,17 @@ always @(posedge clk_sys or negedge reset_n) begin
                 vm_owns_angle <= 1'b1;
             if (angle_edge)
                 vm_owns_angle <= 1'b0;
-            // audio: a SetSTN that names a real track claims; the Audio button releases
+            // audio: a SetSTN that names a real track claims; an Audio STEP releases.
+            // ⚠ The step, not the press: a show-only press must leave the menu's
+            // choice in force, or it would silently swap the track to aud_cur.
             if (menus_on && vm_astn != vm_astn_p && vm_astn < 8'd8)
                 vm_owns_aud <= 1'b1;
-            if (audio_edge)
+            if (aud_step_w)
                 vm_owns_aud <= 1'b0;
-            // subpicture: SetSTN display-on claims; the Subtitle button releases
+            // subpicture: SetSTN display-on claims; a Subtitle STEP releases
             if (menus_on && vm_spstn != vm_spstn_p && vm_spstn[6])
                 vm_owns_sp <= 1'b1;
-            if (sub_edge)
+            if (sub_step_w)
                 vm_owns_sp <= 1'b0;
         end
     end
@@ -2794,7 +2818,7 @@ end
 // Selected audio track, clamped to the parsed count (belt-and-suspenders — a VM
 // SetSTN could name a track the title lacks; the button path is already bounded).
 wire [2:0] aud_sel = (menus_on && vm_owns_aud && vm_astn < 8'd8) ? vm_astn[2:0] : aud_cur;
-wire [2:0] aud_log = (({1'b0,aud_sel} >= audio_ntracks_w)
+assign     aud_log = (({1'b0,aud_sel} >= audio_ntracks_w)
                      ? (audio_ntracks_w[2:0] - 3'd1) : aud_sel);
 // ---- DVD audio logical->physical stream mapping (libdvdnav vm_get_audio_stream) ----
 // aud_log is a LOGICAL stream number (that's what SPRM1/SetSTN and the DVD spec
@@ -2892,7 +2916,11 @@ always @(posedge clk_sys or negedge reset_n)
 // non-zero subtitle track would make it drop the menu's own 0x20 stream ->
 // no menu graphic + nothing for the highlight to recolour (HW: deep menus blank).
 // Force stream 0 while a menu is up; SPRM2/gamepad selection is for the TITLE only.
-wire [2:0] sp_sel = (menus_on && vm_owns_sp && vm_spstn[6]) ? vm_spstn[2:0] : sub_idx;
+assign     sp_sel = (menus_on && vm_owns_sp && vm_spstn[6]) ? vm_spstn[2:0] : sub_idx;
+// Effective subtitle display, for the popup and the Subtitle step: the gamepad's
+// sub_on OR a menu SetSTN display-on that still owns the selection (the same two
+// terms sp_route_en carries for the title).
+assign     sub_on_eff = sub_on | (menus_on && vm_owns_sp && vm_spstn[6]);
 
 // ---- DVD subpicture display-mode substream mapping (in-title HLI buttons) ----
 // A VM SetSTN (SPRM2) selects a LOGICAL subpicture stream; the PHYSICAL substream
@@ -3455,10 +3483,10 @@ dvd_iso_reader dvd_iso_reader_inst (
     // Phase-10 track enumeration (title VTS audio/subpicture stream attrs)
     .audio_ntracks  (audio_ntracks_w),
     .subp_ntracks   (subp_ntracks_w),
-    .attr_a_sel     (aud_cur),            // read out the selected audio track
+    .attr_a_sel     (aud_log),            // read out the EFFECTIVE audio track (popup + format notice)
     .attr_a_fmt     (attr_a_fmt_w),
     .attr_a_lang    (attr_a_lang_w),
-    .attr_s_sel     (sub_idx),            // read out the selected subtitle track
+    .attr_s_sel     (sp_sel),             // read out the EFFECTIVE subtitle track
     .attr_s_lang    (attr_s_lang_w),
 
     .cmd_we         (vm_cmd_we),          // PGC command table -> VM BRAM
@@ -6361,11 +6389,16 @@ transport_hud #(.HUD_QX_ADJ(5)) transport_hud_inst (
                    : hud_cur_ch),                     // track on a CD
     .nr_pgm       (hud_dbg      ? cur_vts
                    : burst_nr),
-    // popups: B7/B8 cycle popups mirror the gamepad state (aud_cur/sub_idx —
-    // the same selectors that drive the reader's attr_* language readout);
+    // popups: B7/B8 popups show the EFFECTIVE selection (aud_log / sp_sel /
+    // sub_on_eff -- the same selectors that drive the reader's attr_* language
+    // readout), because the first press is a query and must answer truthfully
+    // even when a menu's SetSTN owns the track. Raw presses in; the "change"
+    // half comes back out as aud_step_o / sub_step_o (show-first, see above).
     // angle only inside a real multi-angle block; chapter matches the skip guard.
     .aud_evt      (audio_edge),
     .sub_evt      (sub_edge),
+    .aud_step_o   (hud_aud_step_w),
+    .sub_step_o   (hud_sub_step_w),
     .angle_evt    (angle_edge && (angle_count != 4'd0)),
     .chap_evt     ((chnext_edge | chprev_edge) && (cell_ready || cdda_tracks_on) && !menu_active),
     .css_warn     (css_scrambled),   // persistent "CSS ENCRYPTED" popup
@@ -6381,11 +6414,11 @@ transport_hud #(.HUD_QX_ADJ(5)) transport_hud_inst (
     .seek_fwd     (dpad_pend_dir),
     .seek_min     (dpad_pend_min),
     .seek_sec     (dpad_pend_sec),
-    .aud_no       ({1'b0, aud_cur} + 4'd1),
+    .aud_no       ({1'b0, aud_log} + 4'd1),
     .aud_cnt      (audio_ntracks_w),
     .aud_lang     (attr_a_lang_w),
-    .sub_enabled  (sub_on),
-    .sub_no       ({1'b0, sub_idx} + 4'd1),
+    .sub_enabled  (sub_on_eff),
+    .sub_no       ({1'b0, sp_sel} + 4'd1),
     .sub_cnt      (subp_ntracks_w),
     .sub_lang     (attr_s_lang_w),
     .ang_no       (cur_angle),
@@ -6572,6 +6605,9 @@ reg        sp_force_q;
 // also why transport_hud no longer has a "STOP FROM START" string.
 wire stop_full = stopped_w & ~stop_kept_w;      // stage 2: position forgotten
 wire hud_on_e  = hud_on_w & ~saver_on_w & ~stop_full;
+// Show-first Audio/Subtitle: a popup under these masks is not on screen, so a
+// press there must not step the track (it would change it blind).
+assign hud_hidden_w = saver_on_w | stop_full;
 wire bar_on_e  = bar_on_w & ~saver_on_w & ~stop_full;
 // THE PICTURE IS BLACK while Stop or the screensaver owns the screen. Consumed
 // TWICE: as the subpic_blend INPUT further down (see the comment there for why the

@@ -10,6 +10,9 @@
 //   T6: menu_active suppresses visibility (persist survives -> back on resume)
 //   T7: show_evt arms the timer; expires after SHOW_TICKS (shrunk for sim)
 //   T8: load_evt clears persistent mode
+//   T26: show-first Audio/Subtitle -- a press only SHOWS; aud_step_o/sub_step_o
+//        (the "change" pulse emu steps the track on) fires only for a press made
+//        while that button's OWN popup is visible
 //
 // Run: iverilog -g2012 -o /tmp/hud_sim dvd/transport_hud.sv bench/dvd/transport_hud_tb.sv
 //      vvp /tmp/hud_sim   (from the repo root -- the ROM loads dvd/hud_font.mem)
@@ -52,6 +55,7 @@ module transport_hud_tb;
     reg         sub_enabled = 0;
     reg         trk_mode = 0;      // audio CD: TR instead of CH
     wire        hud_on;
+    wire        aud_step_o, sub_step_o;
     wire [7:0]  hud_r, hud_g, hud_b;
     wire [3:0]  hud_alpha;
 
@@ -94,6 +98,7 @@ module transport_hud_tb;
         .aud_no(aud_no), .aud_cnt(aud_cnt), .aud_lang(aud_lang),
         .sub_enabled(sub_enabled), .sub_no(sub_no), .sub_cnt(sub_cnt),
         .sub_lang(sub_lang), .ang_no(ang_no), .ang_cnt(ang_cnt),
+        .aud_step_o(aud_step_o), .sub_step_o(sub_step_o),
         .hud_on(hud_on), .hud_r(hud_r), .hud_g(hud_g), .hud_b(hud_b),
         .hud_alpha(hud_alpha)
     );
@@ -168,6 +173,36 @@ module transport_hud_tb;
 
     task press_display;
         begin @(posedge clk); display_edge = 1; @(posedge clk); display_edge = 0; end
+    endtask
+
+    // T26: one press, sampled mid-pulse. Driven on the NEGEDGE so the DUT sees
+    // exactly one posedge with the event high (no blocking-assignment race), and
+    // the step outputs are read while it is high -- they are combinational on the
+    // press and on the popup state REGISTERED before it.
+    reg step_seen;
+    task press_tr(input is_sub);
+        begin
+            @(negedge clk);
+            if (is_sub) sub_evt = 1; else aud_evt = 1;
+            #1 step_seen = is_sub ? sub_step_o : aud_step_o;
+            if ((is_sub ? aud_step_o : sub_step_o) !== 1'b0) begin
+                errors = errors + 1;
+                $display("  FAIL T26 a %s press raised the OTHER step", is_sub ? "SUB" : "AUD");
+            end
+            @(negedge clk);
+            aud_evt = 0; sub_evt = 0;
+        end
+    endtask
+    task check_step(input [8*48-1:0] label, input is_sub, input want);
+        begin
+            press_tr(is_sub);
+            if (step_seen !== want) begin
+                errors = errors + 1;
+                $display("  FAIL %0s: step=%b want %b (pop_type=%0d pop_tmr=%0d)",
+                         label, step_seen, want, dut.pop_type, dut.pop_tmr);
+            end else
+                $display("  ok   %0s: step=%b", label, step_seen);
+        end
     endtask
 
     task check_vis(input [127:0] label, input want);
@@ -596,6 +631,50 @@ module transport_hud_tb;
         trk_mode = 0; @(posedge clk);
         check_line("T25c CH restored", ">     0:12:34/1:37:05 CH  3/12~~");
         check_popup("T25d CH popup", "CH     3/12~~~~~~~~~~~~~~~~~~~~~");
+
+        // ---- T26: show-first Audio/Subtitle ----------------------------------
+        // A set-top player's contract: the first press SHOWS the current track,
+        // a press while that popup is up CHANGES it. Every arm here is one way the
+        // gate could be wrong in a way the user would feel.
+        menu_active = 0; pause_q = 0;
+        wait (dut.pop_tmr == 27'd0); @(posedge clk);
+        if (aud_step_o !== 1'b0 || sub_step_o !== 1'b0) begin
+            errors = errors + 1; $display("  FAIL T26 step outputs not 0 at rest (%b %b)", aud_step_o, sub_step_o);
+        end
+        check_step("T26a aud first press shows only", 1'b0, 1'b0);
+        if (!(dut.pop_vis === 1'b1 && dut.pop_type === 4'd0)) begin
+            errors = errors + 1; $display("  FAIL T26a the show press did not raise the AUDIO popup");
+        end
+        check_step("T26b aud press while shown steps", 1'b0, 1'b1);
+        check_step("T26c aud steps again while shown", 1'b0, 1'b1);
+        // the other button's popup does not count: its first press only shows
+        check_step("T26d sub over the aud popup shows only", 1'b1, 1'b0);
+        if (dut.pop_type !== 4'd1) begin
+            errors = errors + 1; $display("  FAIL T26d the SUB popup did not take the slot");
+        end
+        check_step("T26e sub press while shown steps", 1'b1, 1'b1);
+        check_step("T26f aud over the sub popup shows only", 1'b0, 1'b0);
+        // a popup that EXPIRED is gone: the next press only shows again
+        wait (dut.pop_tmr == 27'd0); @(posedge clk);
+        check_step("T26g aud after expiry shows only", 1'b0, 1'b0);
+        // a chapter popup taking the slot ends "shown" for Audio
+        @(negedge clk); chap_evt = 1; @(negedge clk); chap_evt = 0;
+        check_step("T26h aud over a chapter popup shows only", 1'b0, 1'b0);
+        // a menu hides the popup, so presses there never change anything -- not
+        // even a second one inside the (invisible) popup window
+        wait (dut.pop_tmr == 27'd0); @(posedge clk);
+        menu_active = 1; @(posedge clk);
+        check_step("T26i aud in a menu shows only", 1'b0, 1'b0);
+        check_step("T26j 2nd aud in a menu still no step", 1'b0, 1'b0);
+        check_step("T26k sub in a menu shows only", 1'b1, 1'b0);
+        check_step("T26l 2nd sub in a menu still no step", 1'b1, 1'b0);
+        menu_active = 0; @(posedge clk);
+        // the press itself is the step: a visible popup with no press is not
+        @(posedge clk);
+        if (aud_step_o !== 1'b0 || sub_step_o !== 1'b0) begin
+            errors = errors + 1; $display("  FAIL T26m a visible popup stepped with no press");
+        end else
+            $display("  ok   T26m no press, no step");
 
         if (errors == 0) begin
             $display("TRANSPORT_HUD_TB: ALL TESTS PASSED");

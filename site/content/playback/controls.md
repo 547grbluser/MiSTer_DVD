@@ -12,8 +12,8 @@ standard numbering — whatever you mapped B1 to in the MiSTer menu is what "B1"
 | B4 | Select | | B13 | Return (go up) |
 | B5 | Menu | | B14 | Stop |
 | B6 | Angle (cycle) | | B15 | Aspect (cycle) |
-| B7 | Audio (cycle) | | B16 | Chapter Menu |
-| B8 | Subtitle (cycle) | | B17 | A-B Repeat |
+| B7 | Audio (show, then change) | | B16 | Chapter Menu |
+| B8 | Subtitle (show, then change) | | B17 | A-B Repeat |
 | B9 | Display (toggle status line) | | B18 | Frame Step (pause, then step) |
 | | | | B19 | Eject |
 | | | | B20 | Vol Up |
@@ -38,8 +38,8 @@ itself to MiSTer as a keyboard counts, which is how a **remote** drives the play
 | ++page-down++ / ++"N"++ | Next Chapter | | ++"Z"++ | Aspect (cycle) |
 | ++"M"++ / ++"X"++ / ++f1++ | Menu | | ++f5++ | Chapter Menu |
 | ++"T"++ / ++f2++ | Title menu | | ++"L"++ | A-B Repeat |
-| ++"A"++ / ++f3++ | Audio (cycle) | | ++"."++ | Frame Step |
-| ++"S"++ / ++f4++ | Subtitle (cycle) | | ++"E"++ | Eject |
+| ++"A"++ / ++f3++ | Audio (show, then change) | | ++"."++ | Frame Step |
+| ++"S"++ / ++f4++ | Subtitle (show, then change) | | ++"E"++ | Eject |
 | ++"G"++ | Angle (cycle) | | ++equal++ / ++num-plus++ | Vol Up |
 | ++"D"++ | Display (toggle status line) | | ++minus++ / ++num-minus++ | Vol Down |
 | | | | ++0++ – ++9++ | Select menu button by number |
@@ -106,8 +106,8 @@ plus the media keys in the table below.
 | Title | Title menu |
 | Guide, Contents | Chapter menu |
 | Info, Display | Toggle the status line |
-| Subtitle | Next subtitle track |
-| Audio, Language | Next audio track |
+| Subtitle | Show the subtitle track; again to change it |
+| Audio, Language | Show the audio track; again to change it |
 | Angle, Live TV | Next camera angle |
 | Zoom, Aspect | Cycle the aspect setting |
 | Repeat, Recorded TV | A-B repeat |
@@ -313,9 +313,18 @@ Pressing it again hides the line straight away.
 On an audio CD or a `.wav` it shows or hides the status line together with the progress
 bar, which start out shown because there is no picture behind them.
 
-**B7 / B8 / B6** cycle audio track, subtitle track and camera angle. Each shows a popup
-naming what you switched to, with the language where the disc provides one — `AUDIO 2/4 FR`,
-`SUB OFF`, `ANGLE 2/3`. Angle only does anything on a multi-angle disc.
+**B7 / B8** work like a set-top player's Audio and Subtitle buttons. The first press only
+**shows** the current track in a popup, with the language where the disc provides one —
+`AUDIO 2/4 FR`, `SUB 1/3 EN`, `SUB OFF` — and changes nothing. Press the same button again
+while that popup is on screen to move to the next track, and keep pressing to step on.
+Once the popup has gone, the next press just shows the track again. Subtitles step
+through each track and then `SUB OFF`.
+
+The popup always names the track that is actually playing, including one picked from the
+disc's own language menu.
+
+**B6** cycles the camera angle on every press, showing `ANGLE 2/3`. Angle only does
+anything on a multi-angle disc.
 
 !!! note "Some discs choose the angle for you"
     A few discs use the camera-angle mechanism to hold two versions of the same scene —
@@ -334,9 +343,10 @@ naming what you switched to, with the language where the disc provides one — `
     cycles through the ones that exist and shows the disc's own number, which is why you
     may see `AUDIO 3/2`-looking combinations on unusual discs.
 
-!!! warning "Changing audio track inside a menu"
-    Switching the audio track while a disc menu is open silences the menu's own audio until
-    you leave the menu. Menu audio otherwise plays normally on the default track.
+!!! note "Audio and Subtitle inside a disc menu"
+    While a disc menu is open, B7 and B8 do nothing. The popup is not shown there, and a
+    button that cannot show you the setting will not change it. Use the disc's own
+    language menu, or press the button again once playback starts.
 
 ### Stopping a disc
 
@@ -456,8 +466,9 @@ backwards without re-decoding, which is a different feature.
 **Audio + Subtitle held together for two seconds** writes a navigation support bundle for
 the disc you are playing to `/media/fat/DVD_reports/` — a small file that makes a menu or
 navigation bug reproducible without the disc. See
-[Reporting a bug](../reference/reporting-a-bug.md). It also steps the audio and subtitle
-tracks once each, which you can simply step back.
+[Reporting a bug](../reference/reporting-a-bug.md). The two presses normally just show the
+audio or subtitle popup and change nothing. If the audio popup was already on screen when you
+started, the audio track steps once, and you can step it back.
 
 ## D-pad seek
 

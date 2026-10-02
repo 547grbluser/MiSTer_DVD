@@ -22,6 +22,28 @@ predate later confirmations; the `CLAUDE.md` index carries the reconciled status
 
 ## Hardware status (THIS fork, verified 2026-06-21)
 
+- ⏳ **SHOW-FIRST AUDIO/SUBTITLE BUTTONS (2026-10-01, ✅ MERGED PR #145;
+  sim-proven, ⏳ HW-confirm pending).**
+  Full record: `docs/track_selection.md` "Show-first Audio/Subtitle".
+  - **Report (maintainer):** a set-top player's Audio/Subtitle button shows the current
+    setting first and changes it only when pressed again while it is on screen. This core
+    changed it on every press, so checking the track meant cycling all the way back round.
+  - **Change:** `transport_hud` emits `aud_step_o`/`sub_step_o` (press AND own popup
+    visible). `emu.sv` steps the track, and releases the menu's `SetSTN` ownership, on those
+    pulses only. The pulses are masked by the screensaver and a stage-2 Stop. The popup and
+    the reader's `attr_*` readout now show the EFFECTIVE track (`aud_log`/`sp_sel`), not
+    `aud_cur`/`sub_idx`, which was wrong after a language-menu pick. So `AUDIO UNSUPPORTED`
+    now judges the playing track.
+  - **Behaviour changes, deliberate:** B7/B8 do nothing inside a disc menu (the popup is
+    hidden there). The Audio+Subtitle bundle chord normally no longer steps the tracks.
+    Angle (B6) is unchanged (candidate follow-up).
+  - **Gate:** `bench/dvd/run_track_show.sh --red` (transport_hud_tb T26a–m,
+    `tools/check_track_step_wiring.py` A1–A9, 14 mutations). Build
+    `DVD_trackshow_20261002_0138.rbf` (SEED 7, 90.39/93.34 MHz, timing pass).
+  - **Next:** HW-confirm on the rig. Check four things: the first press shows without a
+    change; a second press inside the popup steps; after a language-menu pick the first press
+    names the menu's track; menu presses are inert.
+
 - ✅ **A 16:9 MENU'S PERMITTED DISPLAY MODE OVERRIDES LETTERBOX/CROP (2026-10-01, branch
   `feature/menu-panscan`; HW-CONFIRMED on the rig the same day).**
   Full record: `docs/crt_anamorphic.md` §12.

@@ -96,8 +96,9 @@ usually find one that decodes.
 
 ## Choosing a track
 
-**B7** cycles audio tracks, showing a popup with the track number and the language the disc
-declares — `AUDIO 2/4 FR`. The disc's own default is selected at start, influenced by the
+**B7** first shows the current audio track in a popup, with the track number and the
+language the disc declares — `AUDIO 2/4 FR`. Press it again while the popup is up to change
+to the next track. The disc's own default is selected at start, influenced by the
 **Player Language** setting, the way a set-top player's setup screen works.
 
 A disc's tracks are mapped through its own numbering, which can be sparse, so the numbers

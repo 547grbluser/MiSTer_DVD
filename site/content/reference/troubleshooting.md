@@ -158,7 +158,7 @@ bitstream and your receiver's volume owns the level.
 
 ### Silent on one track only
 
-Press **B7** to cycle audio tracks. The disc's default may be:
+Press **B7** to see which audio track is playing, and again while the popup is up to change it. The disc's default may be:
 
 - **DTS** — there is no DTS decoder in the core. Use
   [Passthru](../audio/passthrough.md) to a receiver, or pick the disc's AC-3 track.
@@ -480,7 +480,7 @@ See [Closed captions](../video/closed-captions.md).
 ### Subtitles do not appear
 
 Subtitles are separate from captions and are drawn by the core, so they work on HDMI. Press
-**B8** to cycle them; `SUB OFF` means they are disabled. Some discs author menu subpictures
+**B8** to see the current setting, and again while the popup is up to change it; `SUB OFF` means they are disabled. Some discs author menu subpictures
 with zero contrast, which is intentional on their part.
 
 ### A menu button highlight or a subtitle graphic is drawn wrongly
