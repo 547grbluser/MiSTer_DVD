@@ -388,6 +388,9 @@ PROFILES = {
                           abits_max=10, scale_range=(22, 34), min_bands=20),
     'max_subsubframes': dict(amode=9, lfe=2, npcmblocks=128, ssf_plan=plan(128, 4),
                              sync_ssf=1, abits_max=10, scale_range=(22, 34), min_bands=20),
+    # front AND surround sum/difference with uneven band counts per pair: the
+    # downmix must mix both channels of a butterflied pair to the larger count
+    'sumdiff51': dict(amode=9, lfe=2, npcmblocks=16, ssf_plan=[2], sumdiff=1),
     # everything else the discs never set
     'misc': dict(amode=9, lfe=2, npcmblocks=32, ssf_plan=[4], crc=1, drc=1, ts=1, aux=1,
                  pred_hist=0, br_code=LOSSLESS_BR, pcmr=5, sync_ssf=1),

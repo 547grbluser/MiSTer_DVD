@@ -443,7 +443,7 @@ sweep says what is common, not what is possible.
 
 ### Test coverage of the reference (`tools/test_dts_ref.py`)
 
-The gate set (`~/dts-streams/gate`, local, never committed), 33 streams:
+The gate set (`~/dts-streams/gate`, local, never committed), 34 streams:
 - **Twelve from `tools/gen_dts_fixtures.py`**, made from generated signals only:
   - Eight encoded by FFmpeg's DTS encoder: mono to 5.1, 192k–1536k. These supply the
     **Huffman sample codes**, and one near-full-scale stream drives the half IMDCT's
@@ -457,14 +457,16 @@ The gate set (`~/dts-streams/gate`, local, never committed), 33 streams:
     scale, FFmpeg clipped each speaker, and the downmix model (which scales before it
     could clip) differed by 3,583 LSB. That was an artefact of the fixture, not a decoder
     fault.
-- **Fourteen from `tools/dts_writer.py`**, our own syntax-level DTS core encoder. It writes
+- **Fifteen from `tools/dts_writer.py`**, our own syntax-level DTS core encoder. It writes
   frames field by field from a description, fills that description with a seeded
   generator of legal, moderate-level values, and parses every frame back to compare.
   It makes what nothing else does:
   - **joint intensity** (three shapes at once);
   - the **frame-shape spec maxima**: `npcmblocks` 128 (4,096 PCM samples a frame), as
-    16 subframes of 1 and as 4 subframes of 4 subsubframes with `sync_ssf`, in frames up
-    to 14 KB;
+    16 subframes of 1 and as 4 subframes of 4 subsubframes with `sync_ssf`. Measured on
+    the streams: 32 subbands, frames of 9.0–14.6 KB;
+  - **front and surround sum/difference with uneven band counts per pair**
+    (`sumdiff51`, and `amode3` for stereo): the pair-bound rule's two test streams;
   - **all ten channel arrangements** (AMODE 0–9; FFmpeg's encoder covers four);
   - every bit-allocation, scale-factor, transient and quantiser-index codebook
     selector, and bit allocations up to 26;

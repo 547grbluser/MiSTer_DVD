@@ -72,7 +72,8 @@ DERIVED = [
 WRITTEN = [('written_joint', 'joint', 40),
            ('written_max_subframes', 'max_subframes', 10),
            ('written_max_subsubframes', 'max_subsubframes', 10),
-           ('written_misc', 'misc', 30)] + \
+           ('written_misc', 'misc', 30),
+           ('written_sumdiff51', 'sumdiff51', 30)] + \
           [(f'written_amode{a}', f'amode{a}', 16) for a in range(10)]
 
 

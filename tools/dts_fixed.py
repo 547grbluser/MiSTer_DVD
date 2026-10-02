@@ -47,12 +47,6 @@ import dts_ref as R                                              # noqa: E402
 import dts_tables as T                                           # noqa: E402
 
 Q = 15                                         # downmix coefficient fraction bits
-# One guard bit through synthesis: the mix is formed at half scale and the PCM
-# doubled after. A subband-domain sum (the sum/difference butterfly, a downmix)
-# can pass 23 bits where the separately synthesised channels FFmpeg adds would
-# not -- written_amode3 lost 3,459 LSB to that clip without it. Costs 1/128 of
-# an s16 LSB.
-GUARD = 0
 # Mutation hooks for tools/test_dts_fixed.py's RED arms (empty in normal use).
 MUT = set()
 SQRT1_2 = 0.70710678118654752
@@ -218,11 +212,11 @@ class StreamDecoder:
                                 if g and b < nmix[ch]:
                                     acc += x[ch][b][j] * g
                                     self.ops['mac'] += 1
-                            inp.append(R.clip23(R.norm(acc, Q + GUARD) if 'mix_trunc' not in MUT
+                            inp.append(R.clip23(R.norm(acc, Q) if 'mix_trunc' not in MUT
                                                 else acc >> (Q - 2)))
                         pcm = self.synth[side].run(inp, win)
                         self.ops['synth_blocks'] += 1
-                        out.extend(to_s16(R.clip23(v << GUARD)) for v in pcm)
+                        out.extend(to_s16(v) for v in pcm)
                 t0 += R.SUBBAND_SAMPLES
         # bands past each channel's active count are cleared, history included
         for ch in range(nch):
