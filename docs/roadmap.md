@@ -458,6 +458,11 @@ finds the main feature, navigates to it, and plays from start.
 > decoding** (there is no in-fabric DCA decoder; a from-scratch one is out of scope, and
 > the HPS libdca path is retired with the rest of the HPS audio daemon). An AV receiver
 > decodes the bitstream. Design: **`docs/iec61937.md`**.
+>
+> **⚠️ PREMISE SUPERSEDED (2026-10-02): an in-fabric DTS *core* decoder is now being designed**
+> (maintainer decision), so a DTS track can play on a plain TV in `Decode PCM` mode.
+> Passthrough below is unchanged. Plan, decisions and phases: **`docs/dts_decoder.md`**
+> (📝 design, no RTL yet; branch `feature/dts-decode`).
 
 **Goal:** make DTS (and AC-3) tracks audible on an AV receiver.
 

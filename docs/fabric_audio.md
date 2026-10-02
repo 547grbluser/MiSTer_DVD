@@ -294,6 +294,8 @@ For bit-perfect 24-bit and 96 kHz, the plan routes LPCM **out S/PDIF as linear P
 No fabric DTS decoder exists, so DTS frames are detected (`frame_type==1`) and
 **dropped** (consumed, silent). Future plan: in-fabric **IEC 61937 bitstream
 passthrough to the Digital I/O board** (Toslink S/PDIF), not HPS decode.
+Passthrough shipped (`iec61937.md`). **2026-10-02: an in-fabric DTS core decoder is being
+designed** to replace this discard in `Decode PCM` mode: `dts_decoder.md`.
 
 ## Buffering & rate (hardware tuning, 2026-06-27)
 

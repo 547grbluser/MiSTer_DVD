@@ -170,14 +170,19 @@ It removes arbitration occupancy. That is a different (and, here, the binding) r
 
 ## 3. Fabric budget, as measured
 
-From `output_files/DVD.fit.rpt` of the abandoned Stage B build (so `main` has *more*
-headroom than this — treat these as a pessimistic floor):
+⚠ **Updated 2026-10-02 — the device is fuller than this section first said.** The last
+fit (the menu-panscan build, 2026-10-01, `releases/*.rbf.json`) is the current figure:
 
 | resource | used | total | headroom |
 |---|---|---|---|
-| ALM | 39,033 | 41,910 | ~2,900 (7 %) |
+| ALM | 40,785 | 41,910 | **~1,125 (3 %)** |
 | M10K | 512 | 553 | 41 (7 %) |
-| DSP | 101 | 112 | 11 (10 %) |
+| DSP | 95 | 112 | 17 (15 %) |
+
+The table this replaced came from the abandoned Stage B build (39,033 ALM, ~2,900 spare)
+and called itself "a pessimistic floor"; features merged since have made it the opposite.
+Re-read the newest `releases/*.rbf.json` `fit` block before estimating, rather than
+trusting either table.
 
 Per-module, for estimating future work:
 
@@ -395,7 +400,7 @@ has *already* decided to revisit it, not as an argument for revisiting it:
   structurally cannot do worse than the spatial prediction. That difference — not the
   quality of the interpolator — is the thing worth prototyping.
 - **The blockers are fabric and causality, not bandwidth** (§1 removed bandwidth):
-  ~2,900 ALM and 41 M10K spare, `clk_dec` already the limiter, and yadif's temporal check
+  ~2,900 ALM and 41 M10K spare at the time (~1,125 ALM by 2026-10-02, §3), `clk_dec` already the limiter, and yadif's temporal check
   is **non-causal** — it needs the *next* field, i.e. one full picture of display latency,
   which touches A/V anchoring, the pause/still paths and the governor.
 - **Prototype in `tools/deint_model.py` first, and add a metric for the artifacts that

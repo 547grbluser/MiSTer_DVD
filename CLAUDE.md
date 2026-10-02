@@ -174,7 +174,8 @@ feature should be designed:
   `!=` on X so a third of its pixels passed vacuously. The rules earned are in §4 and
   apply to every bench in this tree.
 
-Also: current fabric headroom (~7 % ALM / 7 % M10K / 10 % DSP), what a DDR3 line pump
+Also: current fabric headroom (~3 % ALM ≈ 1,125 / 7 % M10K / 15 % DSP as of 2026-10-02 —
+the ALM figure is the binding one), what a DDR3 line pump
 costs (~190 ALM + 6 M10K), and the retime trick that took a build from two failed seed
 sweeps to a first-fit pass.
 
@@ -442,6 +443,7 @@ otherwise; `--red` runs its mutation arms).
 | Mid-play load: full flush trio + decoder soft reset | ✅ | `av_sync.md` | `flush_ctl_tb` |
 | CSS-encrypted detect/warn/mute, density bucket (issue #59) | ✅ | `fabric_audio.md` | `run_css.sh` |
 | Non-seamless cell-join audio: in-band re-time (no display-time flush), seamless stamp, second-field PTS (PR #141) | ✅ | `nonseamless_audio.md` | `run_aud_retime.sh --red`, `run_pts_assoc.sh`, `check_aud_rephase_wiring.py` |
+| In-fabric DTS core decode (stereo, `Decode PCM`): microcoded engine, codebooks in bitstream-initialised FIFOs copied to DDR3 | 📝 design only, branch `feature/dts-decode`; next P0 (tables + library sweep) | `dts_decoder.md` | — |
 | Hard flush resets the audio reframers and realigns the demux: no stale PTS (~1.2 s hold, ~2.5 s silence) after a backward jump, no stray-sync click at the landing; pre-existing, not a regression | ✅ HW (0/68 vs 7/78), MERGED PR #143 | `dvd_nav.md` §2h "The stale audio PTS" | `run_seek_rf_pts.sh --red`, `check_rf_flush_wiring.py` |
 
 ### Formats and physical media (mostly the custom Main, `main/`)

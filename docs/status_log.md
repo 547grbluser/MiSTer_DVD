@@ -22,6 +22,32 @@ predate later confirmations; the `CLAUDE.md` index carries the reconciled status
 
 ## Hardware status (THIS fork, verified 2026-06-21)
 
+- 📝 **IN-FABRIC DTS CORE DECODER (2026-10-02, design only, no RTL; branch
+  `feature/dts-decode`, `CORE_VERSION dev-dtsdecode`).**
+  Full plan: `docs/dts_decoder.md`.
+  - **Ask (maintainer):** decode DTS so a DTS track plays on a plain TV, not only through a
+    receiver. Today `T_DTS` is a discard in `dvd_audio_decode` (`Decode PCM` is silent).
+  - **Decided:** in fabric, not on the HPS. An HPS round trip was costed and rejected under
+    the roadmap's "no HPS-side daemon" principle. The architecture is a microcoded
+    sequencer plus hardwired vector ops on one DSP multiplier at `clk_sys`. Stereo comes
+    from a subband-domain downmix before synthesis. Decoding is streaming, per subsubframe,
+    because a spec-max frame (128 subband samples) does not fit in a frame buffer.
+  - **Decided: codebook residency.** The two trained codebooks (512 Kbit, about 52 M10K,
+    measured with no exploitable structure) ship as the initial contents of write-first
+    FIFOs (`audio_ring` = `high_freq_vq` exactly; the LPCM and MP2 PCM FIFOs = `adpcm_vb`).
+    They are copied to DDR3 (`ram2`) once per configuration, under a flag with no reset
+    term, a sticky `dts_tables_ok` bit and a checksum. The rejected alternatives are a
+    `boot1.rom` file and paying the M10K.
+  - **Budget:** only ~1,125 ALM spare (97 %); DTS is estimated at 1,500–2,500 ALM, so a
+    reclaim (one bit reader, one PCM FIFO, optionally the MP2 and AC-3 parse onto the
+    engine) must land with it. `hw_budget_and_lessons.md` §3 corrected: it still showed the
+    Stage B build's ~2,900.
+  - **Open (⏳):** LFE in the downmix, the DDR3 address, AMODE 10–15, DYNF, CRC; the PCM-FIFO
+    merge must move half of `adpcm_vb` to another host.
+  - **Next:** P0: `tools/gen_dts_tables.py`, and the library sweep `tools/dts_scan.py` (on
+    the `acmod_scan.py` pattern, every frame, because PMODE and VQ vary per frame), then
+    the reference and fixed-point models.
+
 - ⏳ **SHOW-FIRST AUDIO/SUBTITLE BUTTONS (2026-10-01, ✅ MERGED PR #145;
   sim-proven, ⏳ HW-confirm pending).**
   Full record: `docs/track_selection.md` "Show-first Audio/Subtitle".
