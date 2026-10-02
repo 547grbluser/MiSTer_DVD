@@ -443,7 +443,7 @@ otherwise; `--red` runs its mutation arms).
 | Mid-play load: full flush trio + decoder soft reset | ✅ | `av_sync.md` | `flush_ctl_tb` |
 | CSS-encrypted detect/warn/mute, density bucket (issue #59) | ✅ | `fabric_audio.md` | `run_css.sh` |
 | Non-seamless cell-join audio: in-band re-time (no display-time flush), seamless stamp, second-field PTS (PR #141) | ✅ | `nonseamless_audio.md` | `run_aud_retime.sh --red`, `run_pts_assoc.sh`, `check_aud_rephase_wiring.py` |
-| In-fabric DTS core decode (stereo, `Decode PCM`): microcoded engine, codebooks in bitstream-initialised FIFOs copied to DDR3 | 📝 design only, branch `feature/dts-decode`; next P0 (tables + library sweep) | `dts_decoder.md` | — |
+| In-fabric DTS core decode (stereo, `Decode PCM`): microcoded engine, codebooks in bitstream-initialised FIFOs copied to DDR3 | 🔧 P0 nearly done (reference bit-exact vs FFmpeg, census of 147 streams); no RTL; branch `feature/dts-decode`; next: joint fixture, D3/D5 decisions, P1 | `dts_decoder.md` | `tools/test_dts_ref.py`, `tools/test_dts_fixed.py` |
 | Hard flush resets the audio reframers and realigns the demux: no stale PTS (~1.2 s hold, ~2.5 s silence) after a backward jump, no stray-sync click at the landing; pre-existing, not a regression | ✅ HW (0/68 vs 7/78), MERGED PR #143 | `dvd_nav.md` §2h "The stale audio PTS" | `run_seek_rf_pts.sh --red`, `check_rf_flush_wiring.py` |
 
 ### Formats and physical media (mostly the custom Main, `main/`)

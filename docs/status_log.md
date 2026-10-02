@@ -44,9 +44,19 @@ predate later confirmations; the `CLAUDE.md` index carries the reconciled status
     Stage B build's ~2,900.
   - **Open (⏳):** LFE in the downmix, the DDR3 address, AMODE 10–15, DYNF, CRC; the PCM-FIFO
     merge must move half of `adpcm_vb` to another host.
-  - **Next:** P0: `tools/gen_dts_tables.py`, and the library sweep `tools/dts_scan.py` (on
-    the `acmod_scan.py` pattern, every frame, because PMODE and VQ vary per frame), then
-    the reference and fixed-point models.
+  - **P0 progress (2026-10-02):**
+    - Tables are transcribed from a pinned FFmpeg (`tools/gen_dts_tables.py`). 53 of 62
+      Huffman books are not canonical, so the RTL walks a tree.
+    - `tools/dts_ref.py` is **bit-exact against `ffmpeg -flags bitexact -core_only 1`** on
+      18 streams.
+    - `tools/dts_fixed.py` (the hardware order) has a front end bit-exact with FFmpeg's
+      order, and its subband-domain downmix is within 1 LSB.
+    - Census: 147 streams on 90 discs (`docs/dts_decoder.md` §9).
+    - D5 proposed: decode *Shadoan*'s overflowed block codes leniently.
+    - Gates: `tools/test_dts_ref.py`, `tools/test_dts_fixed.py`; streams are local,
+      made by `tools/gen_dts_fixtures.py` and `tools/dts_scan.py --extract`.
+  - **Next:** a joint-intensity fixture (needs our own bitstream writer), the maintainer's
+    D3 (LFE, default downmix) and D5 decisions, then P1 (the engine, standalone fit).
 
 - ⏳ **SHOW-FIRST AUDIO/SUBTITLE BUTTONS (2026-10-01, ✅ MERGED PR #145;
   sim-proven, ⏳ HW-confirm pending).**
