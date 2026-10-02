@@ -1,6 +1,7 @@
 # In-fabric DTS core decoder (`dvd/dts/`, planned)
 
-**Status: 📝 DESIGN — decisions recorded 2026-10-02, no RTL yet.** Branch
+**Status: 🔧 P0 IN PROGRESS — the reference is bit-exact against FFmpeg; no RTL yet
+(2026-10-02).** Branch
 `feature/dts-decode` (`CORE_VERSION dev-dtsdecode`). Next concrete step: **P0** (§7).
 
 Today a DTS track is silent in `Decode PCM` mode: `dvd_audio_decode.sv` routes
@@ -88,11 +89,25 @@ code it; a band above a channel's count is zero for that channel.
 - **Two-tier validation.** The RTL is bit-exact against our own fixed-point model. That
   model is within an LSB bound of FFmpeg's `BITEXACT` core path (`filter_frame_fixed`)
   mixed *after* synthesis (§6).
+- ✅ **Measured (2026-10-02, `tools/dts_fixed.py verify`, `tools/test_dts_fixed.py`).**
+  Mixing before synthesis is at most **1 LSB** at s16 from mixing after, with the same Q15
+  gains. Terminator 2 (300 frames): RMS 0.11 LSB, 98.8 % of samples identical. A 1536 kbit/s
+  5.1 window from *A.I.*: RMS 0.11. The seven synthetic fixtures: RMS ≤ 0.19. Stereo and
+  mono are exact, because their gain is 1. The gate's bound is 1 LSB.
 - ⏳ **LFE: proposed to be left out of the stereo downmix** (the usual stereo-downmix
   practice). LFE is not subband-coded but decimated samples with their own interpolation
   FIR, so dropping it also removes that path. **Not yet decided by the maintainer.**
-- ⏳ **Downmix coefficients:** the standard ones per AMODE unless the stream embeds its
-  own. Confirm where the core carries embedded coefficients before P0's model is final.
+- ⏳ **Downmix coefficients (a parameter in the models; the default is proposed, not
+  decided).** Embedded coefficients sit in the core frame's auxiliary data (`AUX` sync
+  `0x9A1105A0`, a dynamic-downmix flag, then 9-bit codes into `DMIXTABLE`). FFmpeg uses
+  them only when they are LoRo or LtRt *and* a stereo layout is requested; otherwise it
+  outputs every channel and never downmixes. So the default rule is ours to choose. The
+  proposal: the rule this core's AC-3 decoder already uses (liba52 `A52_STEREO |
+  A52_ADJUST_LEVEL`): `Lo = k(L + c·C + s·Ls)`, `Ro = k(R + c·C + s·Rs)`,
+  `k = 1/(1+c+s)`, `c = s = 0.7071`. It cannot clip, and DTS and AC-3 come out at the same
+  level. Embedded coefficients that include an LFE term cannot be honoured in the subband
+  domain, because LFE is not subband-coded. The library census (§9) counts how often
+  that arises.
 
 ### D4 — Codebooks: shipped in the bitstream as the starting contents of write-first RAMs, copied once to DDR3 (2026-10-02, maintainer)
 
@@ -161,6 +176,23 @@ there was for a line pump. ⏳ Confirm that `sysmem_lite` accepts a `clk_sys` `r
 `ram1` is the decoder's port and is not used: occupancy, not bandwidth, is what hurt it
 before.
 
+### D5 — Overflowed block codes are decoded leniently and counted (⏳ proposed 2026-10-02)
+
+A block code packs four samples as base-`levels` digits. A code of `levels⁴` or more is out
+of range. **FFmpeg refuses the whole frame**; **libdca keeps the four low digits** and
+prints an error. One library disc, *Shadoan* (`SHADOAN_1_2.iso`), carries 428 such codes
+in 240 of 482 frames of one window, across six title sets. FFmpeg refuses exactly those
+240 frames. Decoded leniently, every frame parses cleanly through its DSYNC words, so the
+frames are valid and only those codes overflow (an encoder quirk). Refusing them would
+silence that disc about half the time.
+
+**Proposal:** decode leniently, as libdca does: keep the four low digits and count every
+overflowed code in telemetry (never silent, CLAUDE.md). `tools/dts_fixed.py`, the
+hardware's model, does this. `tools/dts_ref.py` matches FFmpeg by default and takes
+`OPT={'lenient_block'}`. Bit-exact comparison against FFmpeg is impossible on such frames
+(FFmpeg outputs none), so `tools/test_dts_ref.py` reports the stream as REFUSED, and
+`tools/test_dts_fixed.py` gates the lenient decode (both of its decoders run lenient).
+
 ## 3. The stream forces a streaming decode (design rule)
 
 A frame at the spec maximum does not fit in a frame buffer. `npcmblocks` is a 7-bit field
@@ -171,19 +203,29 @@ the codebook problem a second time.
 
 The bitstream order avoids it (verified in FFmpeg `dca_core.c`, `parse_frame_data`). Each
 subframe is `parse_subframe_header` (the side info for **all** channels, including every
-ADPCM VQ index and every high-frequency VQ index) followed by `parse_subframe_audio`, which
-loops over subsubframes (each 8 samples × bands × channels).
+ADPCM VQ index), then `parse_subframe_audio`. The audio data opens with every
+high-frequency VQ index and the LFE samples, then loops over subsubframes (each 8 samples
+× bands × channels).
 
 **Rule: decode per subsubframe as it is parsed.** Dequantise, predict, expand VQ, downmix
 and synthesise each 8-sample subsubframe before parsing the next. Never hold a frame.
+
+✅ **Proven equivalent (2026-10-02).** FFmpeg runs its inverse ADPCM, VQ expansion and
+joint intensity once per *subframe*, after all of that subframe's sample codes. Each is
+causal within a band, so doing them per subsubframe must give the same samples.
+`tools/dts_fixed.py` decodes in the streaming order, and its subband samples are
+**bit-identical** to `tools/dts_ref.py`'s FFmpeg-order ones. This holds on Terminator 2,
+on a 1536 kbit/s *A.I.* window with transients, and on all seven synthetic fixtures
+(`tools/test_dts_fixed.py` [1]; its `stale_history` RED arm proves the check can fail).
 
 **Persistent state** is small and sized to the maximum:
 - ADPCM history: 4 samples × 32 bands × channels.
 - The parse record for one subframe.
 - Two QMF histories (L/R, 512 taps each).
 
-**Codebook prefetch.** Every codebook index is in the subframe header, ahead of any sample
-code that needs it. So the microcode issues the DDR3 reads **as each index is parsed**, and
+**Codebook prefetch.** Every codebook index comes before any sample code that needs it:
+the ADPCM indices are in the subframe header, and the VQ indices open the subframe's
+audio data. So the microcode issues the DDR3 reads **as each index is parsed**, and
 the vectors are local before dequantisation needs them. At the maximum that is about 200
 fetches per subframe; serialised after the header, that would be about 1 ms of a 10.7 ms
 frame, which is why issue-as-parsed matters. A small local vector buffer (one subframe's
@@ -236,15 +278,24 @@ migration is on the critical path, not optional, unless P1's standalone fit come
 the bottom of its range. P1's fit replaces the engine rows. A migration is counted only
 when its own fit measures it.
 
-**Cycles (27 MHz, about 27M a second):**
-- **Synthesis (stereo after the downmix):** about 80 multiply-accumulates per output
-  sample per channel, about 7.7M a second.
-- **ADPCM, dequantisation and downmix:** about 2M a second at 5 channels.
-- **Parse:** about 240K sample codes a second at 1536 kbit/s. At about 15–20 cycles per
-  code that is about 4–5M a second. **The risk:** an interpreter that costs 13–19 cycles
-  per *bit*, not per code, would need 20M a second or more and blow the budget. If P1
-  measures that, the sample-code loop becomes a vector op.
-- **Total target:** under 60 % of the budget.
+**Cycles (27 MHz, about 27M a second). Measured by `tools/dts_fixed.py`'s operation
+counters (2026-10-02) on the heaviest stream type found, a 1536 kbit/s 5.1 window from
+*A.I.*:**
+- **Synthesis:** FFmpeg's factorised half IMDCT costs 288 multiplies per 32-sample block,
+  plus 512 window taps: about 800 MACs a block, against about 2,560 for MP2-style direct
+  matrixing. Stereo after the downmix is 32 blocks a frame, about **25.6K MACs a frame,
+  about 2.4M a second**. ⏳ **P1 decision:** keep the factorised IMDCT as the synthesis
+  vector op. It is also what makes the reference bit-exact. A direct matrix would cost
+  about three times the cycles and need its own LSB-bounded golden.
+- **Front end (dequantisation, ADPCM, VQ, joint, downmix):** **5,246 MACs a frame, about
+  0.5M a second.**
+- **Parse:** 16,104 bits a frame at 1536 kbit/s, about 1.5M bits a second, in about
+  2,240 subband samples a frame (210K a second). Most DVD streams code them as block
+  codes (2 codes per 8 samples) or raw 8–23-bit fields, not Huffman. **The risk** is an
+  interpreter that pays per *bit*: at 13–19 cycles a bit that is 20M+ a second. If P1
+  measures that, the sample-extraction loop becomes a vector op.
+- **Total target:** under 60 % of the budget. The arithmetic is about 3M MACs a second;
+  the parse is the cost to watch.
 
 ## 5. Spec maxima (CLAUDE.md "design to the DVD spec maximum")
 
@@ -291,7 +342,10 @@ in telemetry, never wrong audio.
 
 ## 7. Phases
 
-- **P0 — tools and measurement (next).**
+- **P0 — tools and measurement (🔧 in progress).** Done: the pinned table generator, the
+  reference (bit-exact against FFmpeg), the hardware-order model (front end bit-exact,
+  downmix within 1 LSB), the fixtures, the gates, and the census (§9). Left: the
+  joint-intensity fixture, and the maintainer's D3/D5 decisions.
   - `gen_dts_tables.py`.
   - **A library sweep, `tools/dts_scan.py`**, modelled on `tools/acmod_scan.py` (PES
     first-access-unit pointer, not a sync-word search). For every DTS track in
@@ -329,4 +383,74 @@ in telemetry, never wrong audio.
 - ⏳ AMODE 10–15 (user-defined, 6–8 channels): refuse or map (§5).
 - ⏳ Dynamic range compression (`DYNF`): ignore, or apply under an OSD option (an option
   would need `playback/settings.md`, which the docs parity check enforces).
-- ⏳ The core's CRC (`CPF`): check and refuse, or ignore as `mp2_decode` does.
+- ⏳ The core's CRC (`CPF`): check and refuse, or ignore as `mp2_decode` does. No library
+  stream sets it (§9).
+- ⏳ D5: lenient decoding of overflowed block codes, counted (recommended; *Shadoan*).
+- ⏳ The default downmix rule (D3): the AC-3 path's liba52 Lo/Ro is proposed. *Cinderella
+  III* is the one library stream with embedded coefficients, so it is the test case for
+  honouring them.
+- ⏳ A joint-intensity test stream (§9): no disc or encoder produces one.
+
+## 9. Library census (2026-10-02, `tools/dts_scan.py`)
+
+**Method.** Every image under the library root was opened. Each title set declaring a DTS
+stream had 8 windows of 500 sectors sampled evenly across its title VOBS (`0xC4` to
+the title set's end), and every frame in them was parsed with `tools/dts_ref.py`'s front
+end. That covered **147 streams on 90 discs, 145,786 frames**. 23 images could not be
+read (not ISO9660, or not DVD-Video: no `VIDEO_TS`). Raw rows are in
+`.sim/dts/scan.jsonl` (gitignored).
+
+| Feature | Streams | Frames |
+|---|---|---|
+| ADPCM prediction | **147 (all)** | 85 % |
+| High-frequency VQ | **118** | 77 % |
+| Transients (two scale factors) | 66 | 30 % |
+| Huffman sample codes | 0 | 0 % |
+| Joint intensity | 0 | 0 % |
+| Front / surround sum/difference | 0 / 0 | 0 % |
+| Embedded downmix (aux data) | 1 (*Cinderella III*, every frame) | 0.5 % |
+| Dynamic range, header CRC | 0 | 0 % |
+| XCh extension (DTS-ES discrete 6.1) | 8 | — |
+| `es_format` (ES matrixed) | 15 | — |
+
+**Uniform across the library:**
+- AMODE 9 (3/2) with LFE flag 2 (64× interpolation).
+- `npcmblocks` 16, one subframe per frame.
+- The non-perfect filter.
+- Frames of 1,006 or 2,013 bytes (768 kbit/s on 105 streams, 1536 kbit/s on 42).
+- Subband counts up to 32.
+- Predictor history on.
+
+**Errors:** only the *Shadoan* overflowed block codes (D5).
+
+**What this means.** Both trained codebooks are needed on real discs: ADPCM in every
+stream, VQ in four of five (confirming D4). Huffman sample codes, joint intensity and
+sum/difference never appear on these discs. They are in the format, so they are built
+and tested anyway (§5): the tests come from synthetic and derived fixtures, below. A
+sweep says what is common, not what is possible.
+
+### Test coverage of the reference (`tools/test_dts_ref.py`)
+
+The gate set (`~/dts-streams/gate`, local, never committed), 19 streams:
+- **Twelve from `tools/gen_dts_fixtures.py`**, made from generated signals only:
+  - Eight encoded by FFmpeg's DTS encoder: mono to 5.1, 192k–1536k. These supply the
+    **Huffman sample codes**, and one near-full-scale stream drives the half IMDCT's
+    **pre-shift**.
+  - Four derived by rewriting fixed-width fields the encoder never sets:
+    `filter_perfect`, `sumdiff_front` and `sumdiff_surround`, and the coding header's
+    2-bit **Huffman scale-adjustment** indices (set to ×1.4375).
+  - The sum/difference streams are encoded in sum/difference form, `(a+b)/2` and
+    `(a−b)/2`, so the decoder's butterflies rebuild in-range signals as a real stream's
+    would. ⚠ The first version flagged ordinary L/R content instead. Its `L+R` passed full
+    scale, FFmpeg clipped each speaker, and the downmix model (which scales before it
+    could clip) differed by 3,583 LSB. That was an artefact of the fixture, not a decoder
+    fault.
+- **Seven disc windows:** Terminator 2, plus windows for XCh, embedded downmix, 1536k
+  with transients, 768k with VQ and transients, ES, and the *Shadoan* overflow.
+  ⚠ The comparison runs FFmpeg with `-core_only 1`. Without it FFmpeg decodes XCh, and a
+  DTS-ES disc returns 7 channels to our 6.
+
+Every stage now has a stream that exercises it **except joint intensity**. No disc, and
+not FFmpeg's encoder, produces it, and it cannot be made by flipping a header bit,
+because it changes the bitstream layout. ⏳ It needs a stream written by our own bit-level
+encoder: a P0 follow-up, or P1's emulator tests by construction.

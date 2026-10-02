@@ -28,6 +28,12 @@ c = s = 0.7071 -- normalised so it cannot clip. LFE is left out (D3 ⏳).
 Output: s16 stereo, rounded half up from the 24-bit synthesis domain and
 saturated.
 
+Block codes past levels^4 are decoded leniently -- the four low digits kept,
+the overflow counted -- as libdca does and FFmpeg does not (D5, ⏳ proposed):
+one library disc carries hundreds of them in otherwise valid frames, and
+refusing them would silence it half the time. Both decoders in `verify` run
+lenient, so they stay comparable.
+
 Usage:
     tools/dts_fixed.py verify <file.dts> [--frames N]
     tools/dts_fixed.py decode <file.dts> out.wav [--frames N]
@@ -220,6 +226,7 @@ def mix_after(pcm, amode, gains):
 
 
 def run_verify(path, nframes=0):
+    R.OPT.add('lenient_block')                     # D5: the hardware's behaviour
     """-> {frames, fe_bad, worst, rms, hist, ops}: [1] the streaming front end
     against dts_ref's (bit-exact expected), [2] mix-before vs mix-after."""
     buf = open(path, 'rb').read()
@@ -265,6 +272,7 @@ def cmd_verify(args):
 
 def cmd_decode(args):
     import wave
+    R.OPT.add('lenient_block')                     # D5
     buf = open(args.file, 'rb').read()
     hw = StreamDecoder()
     pcm = bytearray()

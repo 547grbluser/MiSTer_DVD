@@ -47,6 +47,14 @@ AMODE_2F2R = 8
 # so a PASS cannot be vacuous. Empty in normal use.
 MUT = set()
 
+# Behaviour options. 'lenient_block': a block code past levels^4 keeps its four
+# low digits and is counted, as libdca does, instead of refusing the frame as
+# FFmpeg does (docs/dts_decoder.md D5). Off by default: the reference matches
+# the FFmpeg binary.
+OPT = set()
+LENIENT_COUNT = [0]
+IMDCT_SHIFTS = [0]            # half-IMDCT blocks that took the 2-bit pre-shift
+
 
 class DtsError(Exception):
     def __init__(self, code, msg):
@@ -233,9 +241,11 @@ def parse_coding_header(br, h):
             qsel[ch][n] = br.bits(T.QUANT_INDEX_SEL_NBITS[n])
     c['quant_sel'] = qsel
     adj = [[0] * CODE_BOOKS for _ in rng]
+    c['adj_pos'] = []             # bit positions of the 2-bit fields (fixtures rewrite them)
     for n in range(CODE_BOOKS):
         for ch in rng:
             if qsel[ch][n] < T.QUANT_INDEX_GROUP_SIZE[n]:
+                c['adj_pos'].append(br.pos)
                 adj[ch][n] = T.SCALE_FACTOR_ADJ[br.bits(2)]
     c['scale_adj'] = adj
     if h['crc_present']:
@@ -350,7 +360,9 @@ def extract_audio(br, c, ch, abits):
                     code, r = divmod(code, levels)
                     out.append(r - off + (1 if 'block_offset' in MUT else 0))
                 if code:
-                    raise DtsError('E_BLOCK_CODE', 'block code out of range')
+                    if 'lenient_block' not in OPT:
+                        raise DtsError('E_BLOCK_CODE', 'block code out of range')
+                    LENIENT_COUNT[0] += 1
             return out, False
     if 'raw_unsigned' in MUT:
         return [br.bits(abits - 3) for _ in range(SUBBAND_SAMPLES)], False
@@ -393,7 +405,7 @@ class CoreDecoder:
         sb = [[list(self.hist[ch][b]) + [0] * npb for b in range(SUBBANDS)] for ch in range(nch)]
         lfe = []
         stats = {'pmode_bands': 0, 'vq_bands': 0, 'huff': 0, 'block': 0, 'raw': 0,
-                 'transient': 0, 'joint_bands': 0, 'subframes': []}
+                 'transient': 0, 'joint_bands': 0, 'huff_adj': 0, 'subframes': []}
         sub_pos = 0
         for sf in range(c['nsubframes']):
             s = parse_subframe_header(br, h, c)
@@ -434,6 +446,8 @@ class CoreDecoder:
                         scale = s['scales'][ch][b][0 if (t == 0 or ssf < t or 'transient' in MUT) else 1]
                         if t:
                             stats['transient'] += 1
+                        if huff and c['scale_adj'][ch][a - 1] != 1 << 22:
+                            stats['huff_adj'] += 1
                         if huff and 'huff_adj' not in MUT:
                             scale = clip23((c['scale_adj'][ch][a - 1] * scale) >> 22)
                         out = dequantize(q, step, scale)
@@ -598,6 +612,7 @@ def imdct_half_32(inp):
     """FFmpeg dcadct.c imdct_half_32, transcribed: 32 subband samples -> 32."""
     mag = sum(abs(a) for a in inp)
     shift = 2 if mag > 0x400000 and 'imdct_noshift' not in MUT else 0
+    IMDCT_SHIFTS[0] += mag > 0x400000
     rnd = 1 << (shift - 1) if shift else 0
     a = [(v + rnd) >> shift for v in inp]
     b = _clp(_sum_a(a, 16) + _sum_b(a, 16))
@@ -665,6 +680,7 @@ class Decoder:
     def decode(self, data):
         r = self.core.decode_frame(data)
         h, c = r['h'], r['c']
+        shifts0 = IMDCT_SHIFTS[0]
         npb = h['npcmblocks']
         perfect = h['filter_perfect'] ^ ('window_swap' in MUT)
         win = T.FIR_32BANDS_PERFECT_FIXED if perfect else T.FIR_32BANDS_NONPERFECT_FIXED
@@ -703,6 +719,7 @@ class Decoder:
         if h['sumdiff_surround'] and h['audio_mode'] >= AMODE_2F2R:
             butterfly(SPK_LS, SPK_RS)
         r['pcm'] = {spk: [clip23(v) for v in v_] for spk, v_ in out.items()}
+        r['stats']['imdct_shift'] = IMDCT_SHIFTS[0] - shifts0
         return r
 
 
@@ -780,10 +797,12 @@ def ffmpeg_bitexact(path, nframes_samples=None):
     import json
     import subprocess
     probe = json.loads(subprocess.run(
-        ['ffprobe', '-v', 'error', '-select_streams', 'a:0', '-show_entries',
+        ['ffprobe', '-v', 'error', '-core_only', '1', '-select_streams', 'a:0', '-show_entries',
          'stream=channels', '-of', 'json', path], capture_output=True, check=True).stdout)
     nch = probe['streams'][0]['channels']
-    cmd = ['ffmpeg', '-v', 'error', '-flags', 'bitexact', '-i', path,
+    # core_only: this decoder (and the hardware) decodes the core alone; without
+    # it FFmpeg adds XCh's sixth channel on a DTS-ES disc
+    cmd = ['ffmpeg', '-v', 'error', '-flags', 'bitexact', '-core_only', '1', '-i', path,
            '-f', 's32le', '-acodec', 'pcm_s32le']
     if nframes_samples:
         cmd += ['-frames:a', str(nframes_samples)]
@@ -803,14 +822,16 @@ def run_compare(path, nframes=0):
     dec = Decoder()
     ours, spks, nf = [], None, 0
     feat = {'pmode_bands': 0, 'vq_bands': 0, 'huff': 0, 'block': 0, 'raw': 0,
-            'transient': 0, 'joint_bands': 0, 'lfe': 0, 'sumdiff_front': 0,
+            'transient': 0, 'joint_bands': 0, 'huff_adj': 0, 'imdct_shift': 0,
+            'lfe': 0, 'sumdiff_front': 0,
             'sumdiff_surround': 0, 'filter_perfect': 0, 'filter_nonperfect': 0}
     for _, fr in frames(buf):
         if nframes and nf >= nframes:
             break
         r = dec.decode(fr)
         nf += 1
-        for k in ('pmode_bands', 'vq_bands', 'huff', 'block', 'raw', 'transient', 'joint_bands'):
+        for k in ('pmode_bands', 'vq_bands', 'huff', 'block', 'raw', 'transient', 'joint_bands',
+                  'huff_adj', 'imdct_shift'):
             feat[k] += r['stats'][k]
         h = r['h']
         feat['lfe'] += bool(h['lfe_present'])
