@@ -442,7 +442,7 @@ module dvd_iso_reader #(
     // 2 letterbox only, 3 neither. Wide is always allowed, so it only means
     // anything on a 16:9 menu. emu lets it override the Analog Aspect
     // Letterbox/Crop choice while a 16:9 menu is up, the way a 4:3 set-top
-    // player does (docs/crt_anamorphic.md §11). Captured with menu_ar_wide.
+    // player does (docs/crt_anamorphic.md §12). Captured with menu_ar_wide.
     output reg  [1:0] menu_ar_df,
     // TITLE-domain aspect, from VTS_V_ATTR@0x200 of the same VTSI_MAT sector the
     // Phase-10 attribute sweep already has resident. Same reason menu_ar_wide

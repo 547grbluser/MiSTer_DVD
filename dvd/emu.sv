@@ -5576,7 +5576,7 @@ wire [1:0] analog_aspect_sel = aa_osd_sel;   // 0 Auto, 1 Fit, 2 Letterbox, 3 Cr
 // (menus_on && menu_active), and the flag is captured with menu_ar_wide_w during the
 // menu load. Both modes drive ARX/ARY 4:3, so a title<->menu flip between them never
 // re-inits the scaler; crt_ov_map follows analog_letterbox/analog_crop, so the menu
-// highlight tracks the swapped geometry. docs/crt_anamorphic.md §11.
+// highlight tracks the swapped geometry. docs/crt_anamorphic.md §12.
 wire analog_menu169  = menus_on & menu_active & menu_ar_wide_w;
 wire analog_want_lb  = (analog_aspect_sel == 2'd2) |
                        ((analog_aspect_sel == 2'd0) & ar_wide_auto_eff);   // Letterbox or Auto-16:9
