@@ -22,6 +22,32 @@ predate later confirmations; the `CLAUDE.md` index carries the reconciled status
 
 ## Hardware status (THIS fork, verified 2026-06-21)
 
+- ✅ **A 16:9 MENU'S PERMITTED DISPLAY MODE OVERRIDES LETTERBOX/CROP (2026-10-01, branch
+  `feature/menu-panscan`; HW-CONFIRMED on the rig the same day).**
+  Full record: `docs/crt_anamorphic.md` §12.
+  - **Request (maintainer):** a widescreen menu on a 4:3 TV should be pan&scanned even with
+    the player set to letterbox, as a set-top box does. The request named "dynamic pan&scan
+    metadata" as the mechanism.
+  - **Checked, and right conditionally.** The IFO video attribute's `permitted_df` (bit0 =
+    letterbox denied, bit1 = pan&scan denied) decides, in both directions. Library sweep
+    (1,520 ISOs): 16:9 VMGMs are 605 pan&scan-only / 157 letterbox-only / 65 both; VTS menus
+    of 952 discs are pan&scan-only; 935 of 940 main features are letterbox-only.
+  - **Refuted: dynamic vectors.** Pan&scan-only menus carry `display_horizontal_size = 540`
+    (100/102 sampled) but every `frame_centre_horizontal_offset` is 0 — a static centre crop.
+    `picture_display_extension` stays unparsed.
+  - **Built:** `dvd_iso_reader` `menu_ar_df` (V_ATR high byte [1:0], captured with
+    `menu_ar_wide`); emu's `analog_letterbox`/`analog_crop` swap while a 16:9 menu is up
+    (df=1: Letterbox/Auto → Crop; df=2: Crop → Letterbox). Menus only, Fit and df 0/3 untouched,
+    titles bit-identical (user decision). ARX/ARY, the decoder and `crt_ov_map` follow the two
+    enables unchanged; menus keep the wide SPU byte + button group 1 on purpose.
+  - **Gate:** `bench/dvd/run_menu_panscan.sh --red` — `check_menu_panscan_wiring.py` evaluates
+    the resolve over all 1,024 input points against a model; `iso_reader_menu_tb` T2/T4 pin the
+    capture. 8 mutation arms.
+  - **Limitations:** analog interlaced raster only (no crop path on Progressive/HDMI-only);
+    Crop's window is 528 px, not the authored 540; one-frame geometry overlap at a
+    title↔menu crossing; in-title menus not covered; SPRM14 still constant `0x0100`.
+  - **HW (2026-10-01, rig, Interlaced, control arm = v0.8.0 through the same script):** *28 Days Later* (VTSM df=1) under Letterbox — v0.8.0 letterboxes the menu, the new build shows it full-height cropped, highlight on its button after a down-press (same authored position as the control), and Play Movie (VTS df=2) returns to letterbox. *MythBusters 2008-03* (df=2) under Crop — v0.8.0 crops off the episode list's left edge, the MYTHBUSTERS logo and the PLAY ALL box; the new build letterboxes it with everything visible.
+
 - ✅ **A SEEK FLUSH RESETS THE AUDIO REFRAMERS: NO STALE PTS AFTER A BACKWARD JUMP
   (2026-09-30, ✅ MERGED PR #143; both halves HW-CONFIRMED).**
   Full record: `docs/dvd_nav.md` §2h "The stale audio PTS".

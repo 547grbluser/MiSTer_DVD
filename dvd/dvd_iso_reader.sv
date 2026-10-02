@@ -435,6 +435,15 @@ module dvd_iso_reader #(
     // Auto aspect while a menu is active (titles keep the seq-header path).
     // 1 = the loaded menu domain is 16:9 (display aspect bits 11:10 == 3).
     output reg        menu_ar_wide,
+    // Permitted display mode of the same menu V_ATR (bits 9:8 of the BE u16 =
+    // bits 1:0 of the high byte; libdvdread video_attr_t.permitted_df).
+    // bit0 = letterbox DENIED, bit1 = pan&scan DENIED (dvdnav.h: "bit0 set =
+    // deny letterboxing, bit1 set = deny pan&scan"): 0 both, 1 pan&scan only,
+    // 2 letterbox only, 3 neither. Wide is always allowed, so it only means
+    // anything on a 16:9 menu. emu lets it override the Analog Aspect
+    // Letterbox/Crop choice while a 16:9 menu is up, the way a 4:3 set-top
+    // player does (docs/crt_anamorphic.md §12). Captured with menu_ar_wide.
+    output reg  [1:0] menu_ar_df,
     // TITLE-domain aspect, from VTS_V_ATTR@0x200 of the same VTSI_MAT sector the
     // Phase-10 attribute sweep already has resident. Same reason menu_ar_wide
     // exists, one domain over: libdvdnav's vm_get_video_attr() returns
@@ -2453,6 +2462,7 @@ always @(posedge clk or negedge rst_n) begin
         still_last   <= 1'b0;
         dom          <= DOM_TT;
         menu_ar_wide <= 1'b0;             // default 4:3 until a menu V_ATR is read
+        menu_ar_df   <= 2'd0;             // both permitted = no override
         title_ar_wide<= 1'b0;             // default 4:3 until a title V_ATR is read
         attr_vatr    <= 1'b0;
         use_jcell    <= 1'b0;
@@ -5600,6 +5610,7 @@ always @(posedge clk or negedge rst_n) begin
             // i.e. 0x0C in the high byte. Then issue the (deferred) PGCI_UT read.
             S_MENU_VATR: begin
                 menu_ar_wide <= (rbuf[0] & 8'h0C) == 8'h0C;
+                menu_ar_df   <= rbuf[0][1:0];    // permitted_df (bit0 no-LB, bit1 no-P&S)
                 sec_base <= jmp_ut_lba;
                 sec_off  <= 32'd0;
                 fetch_base <= 11'd0;
