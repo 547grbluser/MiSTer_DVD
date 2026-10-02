@@ -957,7 +957,7 @@ half-line, weave workaround, 1440-wide pixel repetition) is the
     line walks; CRT Auto aspect now menu-aware (`ar_wide_auto_eff`, matches HDMI). Detail +
     HW-gate checklist: `docs/crt_anamorphic.md` §9.
   - **Menu permitted display mode overrides Letterbox/Crop (2026-10-01, branch
-    `feature/menu-panscan`) — sim-gated, ⏳ HW-confirm pending.** A 16:9 menu whose IFO V_ATR
+    `feature/menu-panscan`) — ✅ HW-CONFIRMED 2026-10-01 (control arm v0.8.0).** A 16:9 menu whose IFO V_ATR
     denies letterbox (`permitted_df`=1, the common case: 605/827 16:9 VMGMs) is cropped under
     Letterbox/Auto, and one that denies pan&scan is letterboxed under Crop — what a 4:3 set-top
     player does. Menus only, by user decision (main features deny pan&scan). Gate

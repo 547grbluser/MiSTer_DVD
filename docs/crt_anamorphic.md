@@ -595,7 +595,7 @@ live the moment `disp_vscale_en` is un-gated from `interlaced_eff` — i.e. the 
 `TOL = 6` on the line count, `hole` counts only **fully** black lines, and `hfill_ok` is a
 frame-wide min/max. **A single partially drawn line is invisible to it.**
 
-## 12. Menu permitted display mode — a 16:9 menu overrides Letterbox/Crop (2026-10-01, ⏳ HW-confirm pending)
+## 12. Menu permitted display mode — a 16:9 menu overrides Letterbox/Crop (2026-10-01, ✅ HW-CONFIRMED)
 
 **Field request (maintainer):** a 16:9 disc menu shown on a 4:3 TV should be pan&scanned
 even when the player is set to letterbox — the way a set-top box does it — so the menu
@@ -685,7 +685,5 @@ points against a reference model (+ titles identical to v0.8.0, + the port and t
 downstream seams), and `iso_reader_menu_tb` T2/T4 pin the capture (VTSM `0x4D` → 1, then
 VMGM `0x4E` → 2). 8 mutation arms, each caught by its own assertion.
 
-**Next step: HW-confirm on the CRT** (interlaced raster). (a) A df=1 menu (e.g.
-*101 Dalmatians II*'s VMGM) under Letterbox and under Auto → full-height crop, highlights on
-their buttons; (b) a df=2 menu under Crop → letterboxed; (c) the title after it returns to
-the user's setting; (d) Fit and HDMI-Progressive unchanged.
+**HW (2026-10-01, rig, Interlaced, control arm = v0.8.0 through the same script):** *28 Days Later* (VTSM df=1) under Letterbox — v0.8.0 letterboxes the menu, the new build shows it full-height cropped, highlight on its button after a down-press (same authored position as the control), and Play Movie (VTS df=2) returns to letterbox. *MythBusters 2008-03* (df=2) under Crop — v0.8.0 crops off the episode list's left edge, the MYTHBUSTERS logo and the PLAY ALL box; the new build letterboxes it with everything visible.
+Not separately exercised on HW: Auto (same `analog_want_lb` term as Letterbox, gated in sim), Fit and Progressive (resolve unchanged there; the gate proves it).

@@ -22,8 +22,8 @@ predate later confirmations; the `CLAUDE.md` index carries the reconciled status
 
 ## Hardware status (THIS fork, verified 2026-06-21)
 
-- 🔧 **A 16:9 MENU'S PERMITTED DISPLAY MODE OVERRIDES LETTERBOX/CROP (2026-10-01, branch
-  `feature/menu-panscan`; sim-gated, ⏳ HW-confirm pending on the CRT).**
+- ✅ **A 16:9 MENU'S PERMITTED DISPLAY MODE OVERRIDES LETTERBOX/CROP (2026-10-01, branch
+  `feature/menu-panscan`; HW-CONFIRMED on the rig the same day).**
   Full record: `docs/crt_anamorphic.md` §12.
   - **Request (maintainer):** a widescreen menu on a 4:3 TV should be pan&scanned even with
     the player set to letterbox, as a set-top box does. The request named "dynamic pan&scan
@@ -46,8 +46,7 @@ predate later confirmations; the `CLAUDE.md` index carries the reconciled status
   - **Limitations:** analog interlaced raster only (no crop path on Progressive/HDMI-only);
     Crop's window is 528 px, not the authored 540; one-frame geometry overlap at a
     title↔menu crossing; in-title menus not covered; SPRM14 still constant `0x0100`.
-  - **Next:** HW-confirm on the CRT — a df=1 menu under Letterbox and Auto, a df=2 menu under
-    Crop, then the title returns to the setting.
+  - **HW (2026-10-01, rig, Interlaced, control arm = v0.8.0 through the same script):** *28 Days Later* (VTSM df=1) under Letterbox — v0.8.0 letterboxes the menu, the new build shows it full-height cropped, highlight on its button after a down-press (same authored position as the control), and Play Movie (VTS df=2) returns to letterbox. *MythBusters 2008-03* (df=2) under Crop — v0.8.0 crops off the episode list's left edge, the MYTHBUSTERS logo and the PLAY ALL box; the new build letterboxes it with everything visible.
 
 - ✅ **A SEEK FLUSH RESETS THE AUDIO REFRAMERS: NO STALE PTS AFTER A BACKWARD JUMP
   (2026-09-30, ✅ MERGED PR #143; both halves HW-CONFIRMED).**
