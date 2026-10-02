@@ -400,7 +400,9 @@ in telemetry, never wrong audio.
     first frames.
     The sweep sets priorities and test fixtures. It does not set limits: §5 does.
   - `dts_ref.py`, `dts_fixed.py`, and the LFE and downmix decisions (D3 ⏳).
-- **P1 — the engine, standalone.** ISA, assembler, emulator, microcode, RTL, benches, then
+- **P1 — the engine, standalone.** (P1a ✅ 2026-10-02: ISA, assembler, emulator and
+  microcode, bit-exact on all 34 streams, 31 % of real time worst case, §10. P1b next.)
+  ISA, assembler, emulator, microcode, RTL, benches, then
   a standalone fit with every port a virtual pin. **This is the go/no-go on ALM and
   cycles.** A previously built microcoded decoder of this kind is the template for the
   ISA and the verification method; ⚠ port it under new file names, and strip header
@@ -590,10 +592,49 @@ off-chip per D4):
 | Window prototypes, perfect and non-perfect | 2 × 512 × 24 bit | 3 |
 | IMDCT constants, scale / step / joint / adjustment tables, AC-3 gains | ~600 words | 1–2 |
 | Huffman tree, every core book | 2,647 nodes × ~26 bit | 9 |
-| Microcode | ~1K × 40 bit (estimate) | 4–6 |
-| **Total** | | **~32–37** |
+| Microcode | 521 × 40 bit (measured, P1a) | 2–3 |
+| **Total** | | **~30–34** |
 
 ⚠ **This is above §4's 18–25 estimate.** The Huffman tree (9, not 4) and the
 per-subsubframe buffers were under-counted there. It still fits the 41 free M10K with
 the codebooks off-chip, but not with much to spare. The planned PCM-FIFO merge (~20,
 P4) is what restores margin, and P1b's standalone fit replaces these numbers.
+
+### P1a result (2026-10-02): the emulator is bit-exact; 31 % of real time at the spec maximum
+
+- `dvd/dts/dts.uasm` is **521 instruction words**. It follows `StreamDecoder.decode` step
+  for step and makes every check FFmpeg makes, plus a 48 kHz-only check (the core's
+  output rate).
+- Generated images, checked current by `--check`: `dvd/dts/dts_ucode.mem`, the 92-word
+  constant ROM `dts_const.mem`, and the 2,647-node Huffman tree `dts_huff.mem`.
+- **`tools/test_dts_isa.py` passes on all 34 gate streams:**
+  - [1] the emulator's PCM is **bit-identical** to `tools/dts_fixed.py`, with no engine
+    error. That covers both spec-maximum frame shapes, joint intensity, 5.1
+    sum/difference, all ten AMODEs, *Shadoan*'s lenient block codes, and non-unity
+    Huffman adjustments;
+  - [2] every frame within 60 % of real time;
+  - [3] the `.mem` images match the source.
+  - Its five microcode RED arms (`;MUT` lines) each bite on every stream that exercises
+    them: transient 19 streams, VQ slice 19, ADPCM 26, joint 1, pair bound 2. A gap is
+    reported only where the stream cannot show the stage: one subsubframe per subframe,
+    or *Shadoan*'s VQ bands, which all decode to zero.
+- **Cycles (P1a's model, `dts_isa.CYC`; P1b's RTL measures the real ones):**
+  - **Worst frame: 30.9 % of real time** (`written_max_subframes`: 712K cycles for
+    4,096 samples).
+  - **A typical disc frame: 24 %** (Terminator 2: 69K cycles for 512 samples, against
+    288K available).
+  - Split: sequencer 28–33 %, `MIXSYN` 34–42 %, `XQ` 25–30 %, `ADPCM` 3–4 %.
+  - §4's per-bit risk does not arise: the interpreter never touches a sample code's bits,
+    and `XQ` reads them at about one cycle per bit.
+- **Bugs found on the way:**
+  - An assembler bug put `vop`'s op number in the immediate field, so every vector op
+    ran as `XCLR` and every frame failed DSYNC. Bit-position tracing against `dts_ref`
+    found it.
+  - Two RED-arm preconditions were too loose, and the gate's BLIND report caught both.
+
+**Next, P1b (a fresh session):** the RTL, `dvd/dts/dts_seq.sv` (sequencer, bit reader,
+tree walker) and `dvd/dts/dts_vec.sv` (the nine vector ops on one 27×27 multiplier).
+Then trace-scored benches against `Machine.trace`, and a standalone fit with every port
+a virtual pin: **the go/no-go on ALM, M10K and fmax**. Port the template's verification
+method, not its files: new names, nothing referencing outside this repository.
+

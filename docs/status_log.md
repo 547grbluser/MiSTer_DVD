@@ -71,7 +71,14 @@ predate later confirmations; the `CLAUDE.md` index carries the reconciled status
   - **Decided (maintainer, 2026-10-02):** D3's mix follows the AC-3 path exactly,
     including its mono-surround −3 dB inside the normalisation (the model had that wrong
     at first). Embedded coefficients are ignored and counted (`dmix_ignored`).
-  - **Next:** P1 (the engine, standalone fit).
+  - **P1a (2026-10-02):**
+    - `tools/dts_isa.py` (ISA, assembler, emulator) and `dvd/dts/dts.uasm` (521
+      words): PCM bit-identical to `dts_fixed.py` on all 34 gate streams.
+    - Worst frame 30.9 % of real time (spec-maximum frame); a typical disc frame 24 %.
+    - `tools/test_dts_isa.py` passes with five microcode RED arms.
+    - Memory map now ~30–34 M10K, without the codebooks (`docs/dts_decoder.md` §10).
+  - **Next:** P1b, the RTL (sequencer and vector ops), trace-scored benches, and a
+    standalone fit: the go/no-go.
 
 - ⏳ **SHOW-FIRST AUDIO/SUBTITLE BUTTONS (2026-10-01, ✅ MERGED PR #145;
   sim-proven, ⏳ HW-confirm pending).**
