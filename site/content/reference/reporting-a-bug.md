@@ -80,8 +80,9 @@ This works for **physical discs** as well as images, and it needs no PC. It also
 two things the PC route cannot: the **core version**, so you never have to read it off the
 OSD, and the **exact point on the disc** you were at when you pressed the chord.
 
-Holding those two buttons also steps the audio track and the subtitle track once each —
-that is expected, and pressing them again puts things back.
+Holding those two buttons normally just shows the audio or subtitle popup without
+changing anything. If the audio popup was already on screen when you pressed the chord,
+the audio track steps once — step it back with **B7**.
 
 It captures the menu **button positions** too, for the part of the disc you were on when
 you pressed the chord — which is what a highlight problem needs. It does that instead of

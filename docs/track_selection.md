@@ -108,6 +108,8 @@ cf. the `pgc-palette-seek-reset-bug` lesson) and are re-parsed at each title mou
   the Subtitle button cycles `off → 0..subp_ntracks-1 → off` (`sub_on` + `sub_idx`).
   Both bounded by the parsed counts, so a cycle can never land on a missing stream.
   Reset to {track 0, subs off} on a fresh mount.
+  ⚠ Since 2026-10-01 a press only *shows* the track, and the cycle happens on a press made
+  while that popup is up. See "Show-first Audio/Subtitle" below.
 - `aud_track_eff`/`sp_track_eff` clamp the effective select (including a VM `SetSTN`
   pick) to `min(sel, ntracks-1)`. The VM↔user last-writer-wins arbitration is kept;
   the "user moved" signal is now the button edge instead of an OSD status change.
@@ -634,8 +636,97 @@ a chain bench: emu's glue has no bench, and each module bench is handed the othe
 value, so a missing or wrong port connection is invisible to both. It reads the connections
 out of `dvd/emu.sv` rather than restating them.
 
+## Show-first Audio/Subtitle (2026-10-01) — ⏳ HW-confirm pending
+
+**Behaviour.** The first press of **Audio** (B7) or **Subtitle** (B8) only *shows* the
+current setting (`AUDIO 2/4 FR`, `SUB OFF`). Pressing the same button again **while that
+popup is still on screen** changes it, and each further press inside the window steps
+again. Once the popup times out (~2.5 s), the next press shows again. This is what a
+set-top player does.
+
+**Why.** The original Phase 10 design changed the track on every press. Users pressed Audio
+to ask "which track is this?", which moved them off the track in use, and getting back
+meant cycling all the way round (field report, the maintainer's own use).
+
+**Where the decision lives.** `dvd/transport_hud.sv` already owns the single popup slot, so
+it decides. Two new outputs:
+
+```
+aud_step_o = aud_evt && pop_vis && (pop_type == 0)
+sub_step_o = sub_evt && pop_vis && (pop_type == 1)
+```
+
+`pop_tmr` and `pop_type` are registered, so the gate reads the popup state from *before* the
+press. There is no loop: the raw press still re-arms the popup through `.aud_evt` and
+`.sub_evt`, so every press either shows the popup or refreshes it. In `emu.sv` the change
+pulse is `aud_step_w = hud_aud_step_w & ~hud_hidden_w` (and the same for `sub_step_w`).
+`hud_hidden_w = saver_on_w | stop_full` covers the two masks applied to `hud_on_e` outside
+the module: a popup under the screensaver or a stage-2 Stop is not on screen, so a press
+there must not step the track either.
+
+**Consequences, each deliberate:**
+
+- **The menu `SetSTN` ownership (`vm_owns_aud` / `vm_owns_sp`) is released by the *step*,
+  not by the press.** Releasing it on the raw edge would let a show-only press silently swap
+  a menu-chosen track for `aud_cur`, a state change with no visible cue, which is exactly
+  the complaint being fixed.
+- **The popup shows the *effective* selection** (`aud_log`, `sp_sel`, and
+  `sub_on_eff = sub_on | (menus_on && vm_owns_sp && vm_spstn[6])`), and the step advances
+  *from* it. Before this change the popup showed `aud_cur`/`sub_idx`, which is wrong
+  whenever a disc's language menu has set the track. That was harmless while every press
+  cycled, but now that the first press is a query it has to answer truthfully. Stepping from
+  `aud_cur` would turn the "AUDIO 2" the user just saw into "AUDIO 1".
+- **The reader's attribute readout follows** (`attr_a_sel = aud_log`,
+  `attr_s_sel = sp_sel`), so the popup's language belongs to the track its number names.
+  `attr_a_fmt` feeds `aud_unsupported`, so the `AUDIO UNSUPPORTED` notice now judges the
+  track that actually plays, not `aud_cur`. Edge case: inside a menu *domain* the stream map
+  forces logical 0 while `aud_log` still names the title's selection, so the notice
+  describes the track the title will play. A menu-preset format-3 track is the only way to
+  reach that, and it is not worth gating.
+- **In a disc menu the buttons change nothing.** `pop_vis` excludes types 0/1 while
+  `menu_active`, so the popup is not drawn and no press steps. "No feedback, no change" is
+  the right default. It also retires the old manual warning that changing audio inside a
+  menu silenced the menu's own audio. A popup timer armed inside a menu shows for whatever
+  is left of its window once the menu closes.
+- **The support-bundle chord (Audio + Subtitle held 2 s)** normally changes nothing now.
+  Both presses only show their popup, and on a same-cycle press `aud_evt` wins the slot. It
+  steps the audio track once only if the audio popup was already up when the chord began.
+- **A tap-repeating IR remote held on Audio**: the first tap shows and the rest step,
+  about 9 per second, the same rate as before minus one step.
+
+**Rejected alternatives.**
+
+- Gating in `emu.sv` on `pop_tmr != 0 && pop_type == N`. That changes the track blind
+  under a menu-hidden popup. Mutation H2 is this mistake.
+- A separate "show window" timer in `emu.sv`. It duplicates HUD state and can disagree
+  with what is actually on screen.
+
+**Not changed:** the **Angle** button (B6) still changes on every press. Real players treat
+it the same way as Audio and Subtitle, so it is a candidate follow-up with the same shape
+(`ang_step_o`, `pop_type == 2`). It was left out because it was not asked for.
+
+**Gate:** `bench/dvd/run_track_show.sh [--red]`.
+
+- `transport_hud_tb` T26a–m covers the decision: first press shows only; a press while
+  shown steps; the other button's popup, an expired popup, a chapter popup and a menu-hidden
+  popup all count as "not shown"; no press means no step.
+- `tools/check_track_step_wiring.py` A1–A9 covers the `emu.sv` seam: the step and the
+  ownership release use the step pulse; the hide masks; raw presses go into the HUD; the
+  popup and readout show the effective selection; the step advances from it; and
+  `audio_edge`/`sub_edge` have no other consumer.
+- `--red` has 14 mutations (M1–M10 in `emu.sv`, H1–H4 in the HUD), and each one fails its
+  own assertion.
+
+**Next step:** HW-confirm on the rig. Check four things:
+
+- The first press shows the popup without changing the track, and the second press steps.
+- After a language-menu pick, the first press shows the menu's choice.
+- Presses inside a menu do nothing.
+- The chord no longer steps the tracks.
+
 ## Follow-ups
 
+- **Show-first Angle (B6)** — see "Show-first Audio/Subtitle" above.
 - **Phase 11: on-screen track indicator** ("AUD 2/4 · fr") using the `attr_*` readout
   + the subpicture blend. This is the piece the OSD *cannot* do.
 - ~~Menu-domain title entry (VM First Play path) currently leaves the counts at the
