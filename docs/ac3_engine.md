@@ -4,8 +4,10 @@
 on 30 streams. The whole AC-3 parse runs as an engine program (`dvd/dts/ac3.uasm`,
 emulated by `tools/ac3_isa.py`) and is bit-exact against the model on every block of
 those 30 streams. The worst frame needs **36 % of real time** with the IMDCT in series.
-⏳ **Next: the maintainer's decision on the microcode's size** (1,279 words with DTS's
-program; A1 result below), then RTL and a fit if scenario E goes ahead. Branch
+✅ **Decided (maintainer, 2026-10-02): next is the AC-3 engine's RTL and a standalone
+fit (A2), before MP2.** ALMs are the binding resource, and the AC-3 engine's ALM cost
+is scenario E's least certain number; the same fit prices the hardwired
+bit-allocation op. The 2K ROM is accepted until then. Branch
 `feature/ac3-engine` (from `feature/dts-decode`, `CORE_VERSION dev-ac3engine`, not
 pushed).
 
@@ -202,7 +204,10 @@ allocations differ, so the mantissa bit counts differ and the block desynchronis
   rule.
 - `tools/ac3_scan.py` decodes every library window both ways and counts the blocks
   that differ. That measures how often a real disc hits this.
-- Fixing it changes today's decoder, so it is the maintainer's call, not this branch's.
+- ✅ **Decided (maintainer, 2026-10-02): leave today's decoder as it is.** It changes
+  no block on the library, and touching the shipping decoder carries risk for no
+  audible gain. An engine port reproduces the RTL's rule (trace identity), and could
+  take liba52's later at almost no cost.
 
 ## A1a result: side information, exponents and bit allocation on the engine (2026-10-02)
 
