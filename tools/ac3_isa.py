@@ -45,8 +45,6 @@ import dts_isa as D     # noqa: E402
 
 REPO = os.path.dirname(HERE)
 UASM = os.path.join(REPO, 'dvd', 'dts', 'ac3.uasm')
-UMEM = os.path.join(REPO, 'dvd', 'dts', 'ac3_ucode.mem')
-CMEM = os.path.join(REPO, 'dvd', 'dts', 'ac3_const.mem')
 
 # AC-3's ops are numbered from 16 (the vop field is 6 bits; DTS's take 0-8 and share CNT)
 VOPS = {'cnt': 8, 'expd': 16, 'bapsd': 17, 'bapfill': 18, 'bapzero': 19, 'qrst': 20, 'aq': 21,
@@ -65,10 +63,11 @@ GROUP_EXTRA = {-1: 2 * 5, -2: 2 * 7, -3: 1 * 7}
 
 
 def build_const():
+    """AC-3's constants, placed after DTS's in the shared constant ROM."""
     words, base = [], {}
 
     def put(name, vals):
-        base[name] = D.MEM_CONST + len(words)
+        base[name] = D.MEM_CONST + len(D.CONST) + len(words)
         words.extend(v & 0xFFFF for v in vals)
     put('NFCHANS', M.NFCHANS)
     put('CPLBNDTAB', M.CPL_BNDTAB)
@@ -87,8 +86,12 @@ CONST, CBASE = build_const()
 
 
 def load_program(mutate=None):
-    words, labels, _ = D.assemble(open(UASM).read(), mutate, vops=VOPS, cbase=CBASE)
-    return words, labels
+    """-> (the whole ROM image: DTS's program then AC-3's, AC-3's labels). AC-3 is
+    assembled at the origin where DTS's program ends, so its pcs are the RTL's."""
+    dw, _ = D.load_program()
+    words, labels, _ = D.assemble(open(UASM).read(), mutate, vops=VOPS, cbase=CBASE,
+                                  org=len(dw))
+    return dw + words, labels
 
 
 class _Bits:
@@ -111,7 +114,7 @@ class Machine(D.Machine):
 
     def __init__(self, words, labels):
         super().__init__(words, labels)
-        self.const = CONST
+        self.const = D.CONST + CONST       # the shared constant ROM
         self.op_err = None
         self.coef = [[0] * 256 for _ in range(7)]
         self.mq = None
@@ -319,23 +322,9 @@ def emulate(path, nframes=0, mutate=None):
 
 
 def write_mems(check=False):
-    words, labels = load_program()
-    dw, _ = D.load_program()
-    files = {UMEM: [f'{w:010x}' for w in words], CMEM: [f'{w:04x}' for w in CONST]}
-    bad = []
-    for path, lines in files.items():
-        text = '\n'.join(lines) + '\n'
-        if check:
-            if not os.path.exists(path) or open(path).read() != text:
-                bad.append(os.path.relpath(path, REPO))
-        else:
-            open(path, 'w').write(text)
-    print(f'ac3_isa: {len(words)} microcode words ({len(dw)} DTS + {len(words)} AC-3 = '
-          f'{len(dw) + len(words)} in one ROM), {len(CONST)} constant words')
-    if check:
-        print('ac3_isa: ' + ('FAIL -- stale: ' + ', '.join(bad) if bad else 'PASS -- generated files match'))
-        return 1 if bad else 0
-    return 0
+    """The engine's images are written by tools/dts_isa.py --asm (both programs, one
+    ROM); this checks or writes them the same way."""
+    return D.write_mems(check)
 
 
 def main():

@@ -18,8 +18,12 @@
 // instruction) and then exactly that many bytes. Bits past fr_len read 0 and pulse
 // overrun_bit; they never come from the next frame. FEND, and ERR, drain the frame's
 // untaken bytes; ERR then restarts the program at FRAME (the emulator's `err`). A
-// taken branch to an error vector (pc[9:5] == UC_ERRV) is ERR with code pc[4:0]: the
-// program carries no one-word stub per error code (500 words: two M10K, not four).
+// taken branch to an error vector (pc[10:5] == UC_ERRV, the ROM's top 32 words) is ERR
+// with code pc[4:0]: the program carries no one-word stub per error code.
+//
+// TWO PROGRAMS, ONE ROM (docs/ac3_engine.md A2): DTS's at 0 and AC-3's after it
+// (engine_ucode.mem, 2K deep). `codec` picks the entry point at reset and the
+// restart point after a refusal; it must only change while the engine is reset.
 //
 // The Huffman unit walks a binary tree, one code bit a cycle (53 of the 62 core books
 // are not canonical, docs/dts_decoder.md D2): a node is {right, left}, an entry
@@ -49,6 +53,7 @@
 module dts_seq (
     input  wire          clk,
     input  wire          rst_n,
+    input  wire          codec,              // 0 DTS, 1 AC-3 (change only in reset)
 
     // frames: a descriptor, then fr_len bytes
     input  wire   [15:0] fr_len,
@@ -60,7 +65,7 @@ module dts_seq (
 
     // vector ops: a start pulse with the op and r8..r15; the sequencer waits for done
     output logic         vop_start,
-    output logic   [3:0] vop_op,
+    output logic   [5:0] vop_op,
     output logic [127:0] vop_args,           // {r15, r14, ..., r8}
     input  wire          vop_done,
 
@@ -79,7 +84,7 @@ module dts_seq (
     // the trace (benches): kind 0 a register write (addr = the register), 1 a store
     // (addr = the address), 2 an XQ code (addr = its index), in program order
     output logic         tr_valid,
-    output logic   [9:0] tr_pc,
+    output logic  [10:0] tr_pc,
     output logic   [1:0] tr_kind,
     output logic  [10:0] tr_addr,
     output logic  [23:0] tr_val
@@ -91,7 +96,7 @@ module dts_seq (
                      O_GET = 6'd5, O_GETR = 6'd6, O_VLC = 6'd7, O_BR = 6'd8, O_BRI = 6'd9,
                      O_JMP = 6'd10, O_CALL = 6'd11, O_RET = 6'd12, O_ERR = 6'd13,
                      O_VOP = 6'd14, O_FRAME = 6'd15, O_FEND = 6'd16, O_BPOS = 6'd17;
-    localparam [3:0] V_XQ = 4'd1;
+    localparam [5:0] V_XQ = 6'd1;
 
     // ------------------------------------------------------------------ memories
     (* ramstyle = "M10K" *) logic [39:0] prog  [0:UC_WORDS-1];
@@ -101,8 +106,8 @@ module dts_seq (
     logic [11:0] hroot [0:HUFF_BOOKS-1];
     (* ramstyle = "M10K" *) logic [15:0] rec   [0:2047];
     initial begin
-        $readmemh("dvd/dts/dts_ucode.mem", prog);
-        $readmemh("dvd/dts/dts_const.mem", crom);
+        $readmemh("dvd/dts/engine_ucode.mem", prog);
+        $readmemh("dvd/dts/engine_const.mem", crom);
         $readmemh("dvd/dts/dts_huff_lo.mem", huff_lo);
         for (int i = 0; i < 1024; i++) huff_hi[i] = 18'd0;
         $readmemh("dvd/dts/dts_huff_hi.mem", huff_hi);
@@ -116,10 +121,12 @@ module dts_seq (
                               S_XQ_W} state_t;
     state_t state;
 
-    logic  [9:0] pc, npc, rom_addr;
+    logic [10:0] pc, npc, rom_addr;
+    wire  [10:0] uc_reset = codec ? UC_AC3_RESET : UC_DTS_RESET;
+    wire  [10:0] uc_frame = codec ? UC_AC3_FRAME : UC_DTS_FRAME;
     logic [39:0] ir;
     logic [15:0] rf [0:15];
-    logic  [9:0] stack [0:7];
+    logic [10:0] stack [0:7];
     logic  [2:0] sp;
 
     wire  [5:0] op   = ir[39:34];
@@ -167,16 +174,16 @@ module dts_seq (
     wire [15:0] maddr = vrs + vrt + imm;
 
     always_comb begin
-        npc = pc + 10'd1;
+        npc = pc + 11'd1;
         case (op)
-            O_BR, O_BRI: if (taken) npc = imm[9:0];
-            O_JMP, O_CALL: npc = imm[9:0];
+            O_BR, O_BRI: if (taken) npc = imm[10:0];
+            O_JMP, O_CALL: npc = imm[10:0];
             O_RET: npc = stack[sp - 3'd1];
             default: ;
         endcase
     end
     // a taken branch to an error vector refuses the frame (code = the vector's index)
-    wire br_err = ((op == O_BR) || (op == O_BRI)) && taken && (imm[9:5] == UC_ERRV);
+    wire br_err = ((op == O_BR) || (op == O_BRI)) && taken && (imm[10:5] == UC_ERRV);
     wire multi = (op == O_LD) || (op == O_GET) || (op == O_GETR) || (op == O_VLC) ||
                  (op == O_VOP) || (op == O_FRAME) || (op == O_FEND) || (op == O_ERR) || br_err;
 
@@ -237,7 +244,7 @@ module dts_seq (
     logic  [7:0] v_sym;
     always_ff @(posedge clk) begin
         rec_q   <= rec[maddr[10:0]];
-        crom_q  <= crom[maddr[6:0]];
+        crom_q  <= crom[maddr[9:0]];
         hroot_q <= hroot[hroot_ra];
         hlo_q   <= huff_lo[h_ra[10:0]];
         hhi_q   <= huff_hi[h_ra[9:0]];
@@ -249,10 +256,10 @@ module dts_seq (
     // the program ROM address: what the next S_DEC executes
     logic drain_err;
     always_comb begin
-        if (state == S_RESET)                 rom_addr = UC_RESET;
-        else if (state == S_DEC)              rom_addr = multi ? pc + 10'd1 : npc;
-        else if (state == S_DRAIN && drain_err) rom_addr = UC_FRAME;
-        else                                  rom_addr = pc + 10'd1;
+        if (state == S_RESET)                 rom_addr = uc_reset;
+        else if (state == S_DEC)              rom_addr = multi ? pc + 11'd1 : npc;
+        else if (state == S_DRAIN && drain_err) rom_addr = uc_frame;
+        else                                  rom_addr = pc + 11'd1;
     end
 
     // ------------------------------------------------------------------ XQ's reader
@@ -370,7 +377,7 @@ module dts_seq (
         end
         if (!rst_n) begin
             state <= S_RESET;
-            pc <= UC_RESET;
+            pc <= uc_reset;
             sp <= 3'd0;
             cur_n <= 4'd0;
             in_frame <= 1'b0;
@@ -391,7 +398,7 @@ module dts_seq (
                         state <= S_BITS;
                     end
                     O_VLC: state <= S_VLC_R;          // the root ROM reads the book now
-                    O_CALL: begin stack[sp] <= pc + 10'd1; sp <= sp + 3'd1; end
+                    O_CALL: begin stack[sp] <= pc + 11'd1; sp <= sp + 3'd1; end
                     O_RET: sp <= sp - 3'd1;
                     O_ERR, O_BR, O_BRI: if (op == O_ERR || br_err) begin
                         err_valid <= 1'b1; err_code <= imm[4:0]; sp <= 3'd0;
@@ -399,8 +406,8 @@ module dts_seq (
                         state <= S_DRAIN;
                     end
                     O_VOP: begin
-                        vop_start <= 1'b1; vop_op <= aux[3:0];
-                        if (aux[3:0] == V_XQ) begin
+                        vop_start <= 1'b1; vop_op <= aux;
+                        if (aux == V_XQ) begin
                             x_k <= 3'd0; x_half <= 1'b0; x_dig <= 2'd0;
                             x_rem <= 5'd0; x_dq <= 19'd0;
                             x_lev <= XQ_LEVELS[5 * x_abm1b +: 5];
@@ -425,10 +432,10 @@ module dts_seq (
                 endcase
                 if (!multi) pc <= npc;
             end
-            S_LD: begin pc <= pc + 10'd1; state <= S_DEC; end
+            S_LD: begin pc <= pc + 11'd1; state <= S_DEC; end
             S_BITS: begin
                 if (get_left == 5'd0) begin
-                    pc <= pc + 10'd1; state <= S_DEC;
+                    pc <= pc + 11'd1; state <= S_DEC;
                 end else if (bit_ok) begin
                     get_acc <= {get_acc[14:0], bit_val};
                     get_left <= get_left - 5'd1;
@@ -436,15 +443,15 @@ module dts_seq (
             end
             S_VLC_R: begin h_cur <= hroot_q; state <= S_VLC_B; end
             S_VLC_B: if (bit_ok && h_leaf) begin v_sym <= h_ent[7:0]; state <= S_VLC_W; end
-            S_VLC_W: begin pc <= pc + 10'd1; state <= S_DEC; end
+            S_VLC_W: begin pc <= pc + 11'd1; state <= S_DEC; end
             S_FRAME: if (fr_valid) begin
                 in_frame <= 1'b1; fbytes <= fr_len; ftaken <= 16'd0; fbits <= 18'd0;
-                pc <= pc + 10'd1; state <= S_DEC;
+                pc <= pc + 11'd1; state <= S_DEC;
             end
-            S_VOP: if (vop_done) begin pc <= pc + 10'd1; state <= S_DEC; end
+            S_VOP: if (vop_done) begin pc <= pc + 11'd1; state <= S_DEC; end
             S_DRAIN: begin
                 if (ftaken == fbytes) begin
-                    pc <= drain_err ? UC_FRAME : pc + 10'd1;
+                    pc <= drain_err ? uc_frame : pc + 11'd1;
                     drain_err <= 1'b0;
                     state <= S_DEC;
                 end else if (in_valid) ftaken <= ftaken + 16'd1;
@@ -492,7 +499,7 @@ module dts_seq (
                 end
             end
             // ---- XQ: the engine writes the last code's sample
-            S_XQ_W: if (vop_done) begin pc <= pc + 10'd1; state <= S_DEC; end
+            S_XQ_W: if (vop_done) begin pc <= pc + 11'd1; state <= S_DEC; end
             default: state <= S_RESET;
         endcase
     end

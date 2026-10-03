@@ -35,14 +35,14 @@ module dts_top_tb;
     logic [4:0]  last_err;
     logic [31:0] err_seen;
     logic        vop_start, vop_done, tr_valid;
-    logic [3:0]  vop_op;
-    logic [9:0]  tr_pc;
+    logic [5:0]  vop_op;
+    logic [10:0] tr_pc;
     logic [1:0]  tr_kind;
     logic [10:0] tr_addr;
     logic [23:0] tr_val;
 
     dts_top dut (
-        .clk, .rst_n, .fr_len, .fr_valid, .fr_ready, .in_byte, .in_valid, .in_ready,
+        .clk, .rst_n, .codec(1'b0), .fr_len, .fr_valid, .fr_ready, .in_byte, .in_valid, .in_ready,
         .cb_req, .cb_sel, .cb_addr, .cb_valid, .cb_data,
         .pcm_l, .pcm_r, .pcm_valid, .pcm_ready,
         .frames, .refused, .last_err, .err_seen, .overrun_bits, .lenient_codes,
@@ -54,12 +54,12 @@ module dts_top_tb;
     logic [7:0]   bytes [];
     logic [15:0]  flen [];
     logic [31:0]  pcm_exp [];
-    logic [131:0] vop_exp [];
+    logic [133:0] vop_exp [];
     logic [63:0]  cb_ad [0:4095];
     logic [63:0]  cb_vq [0:4095];
     int n_bytes, n_frames, n_ev, n_vops, n_pairs, n_err, n_ovr, n_len, n_dmix;
     int bi, fi, pi, vi, gap, fgap, ogap, busy, idle, last_prog, quiet;
-    logic [3:0] cur_op;
+    logic [5:0] cur_op;
     // +opstats: cycles by vector op (start to done), and the sequencer's own (the rest)
     longint op_cyc [0:8];
     int op_n [0:8];
@@ -99,7 +99,7 @@ module dts_top_tb;
         fd = $fopen({stem, ".vops"}, "r");
         for (int i = 0; i < n_vops; i++) begin
             r = $fscanf(fd, "%h %h %h %h %h", v0, v1, v2, v3, v4);
-            vop_exp[i] = {v0[3:0], v1, v2, v3, v4};
+            vop_exp[i] = {v0[5:0], v1, v2, v3, v4};
         end
         $fclose(fd);
         $readmemh({cbdir, "/cb_adpcm.mem"}, cb_ad);
@@ -221,14 +221,14 @@ module dts_top_tb;
             if (vop_start) begin cur_op <= vop_op; op_t0 = busy; end
             if (vop_done) begin op_cyc[cur_op] += busy - op_t0; op_n[cur_op]++; end
             if (vop_done) begin
-                logic [131:0] e;
+                logic [133:0] e;
                 logic [31:0] cx, ch, cr, cb;
                 if (vi >= n_vops) $fatal(1, "FAIL [count] a vector op past the golden's %0d", n_vops);
                 e = vop_exp[vi];
                 #1;
                 cx = ck_x(0); ch = ck_h(0); cr = ck_r(0); cb = ck_b(0);
-                if (cur_op !== e[131:128])
-                    $fatal(1, "FAIL [vop] op %0d: rtl op %0d, emulator op %0d", vi, cur_op, e[131:128]);
+                if (cur_op !== e[133:128])
+                    $fatal(1, "FAIL [vop] op %0d: rtl op %0d, emulator op %0d", vi, cur_op, e[133:128]);
                 if (cx !== e[127:96]) $fatal(1, "FAIL [vop] op %0d (%0d): X differs (%08x, emulator %08x)", vi, cur_op, cx, e[127:96]);
                 if (ch !== e[95:64])  $fatal(1, "FAIL [vop] op %0d (%0d): the ADPCM history differs (%08x, emulator %08x)", vi, cur_op, ch, e[95:64]);
                 if (cr !== e[63:32])  $fatal(1, "FAIL [vop] op %0d (%0d): the IMDCT rings differ (%08x, emulator %08x)", vi, cur_op, cr, e[63:32]);

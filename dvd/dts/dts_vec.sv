@@ -51,7 +51,7 @@ module dts_vec (
     input  wire          rst_n,
 
     input  wire          start,
-    input  wire    [3:0] op,
+    input  wire    [5:0] op,
     input  wire  [127:0] args,
     output logic         done,
 
@@ -74,8 +74,8 @@ module dts_vec (
 `include "dvd/dts/dts_ucode.svh"
 `include "dvd/dts/dts_vec.svh"
 
-    localparam [3:0] OP_XCLR = 4'd0, OP_XQ = 4'd1, OP_XVQ = 4'd2, OP_ADPCM = 4'd3,
-                     OP_JOINT = 4'd4, OP_BFLY = 4'd5, OP_MIXSYN = 4'd6, OP_HCLR = 4'd7;
+    localparam [5:0] OP_XCLR = 6'd0, OP_XQ = 6'd1, OP_XVQ = 6'd2, OP_ADPCM = 6'd3,
+                     OP_JOINT = 6'd4, OP_BFLY = 6'd5, OP_MIXSYN = 6'd6, OP_HCLR = 6'd7;
 
     // ------------------------------------------------------------------ ROMs
     logic [23:0] vk    [0:VK_WORDS-1];
@@ -159,7 +159,7 @@ module dts_vec (
         V_MX, V_IPS, V_IP, V_WIN, V_WINW, V_EMIT, V_EMITL, V_EMITW
     } vstate_t;
     vstate_t st;
-    logic  [3:0] vop;
+    logic  [5:0] vop;
     logic [15:0] a0, a1, a2, a3, a4, a5, a6, a7;
     logic [11:0] k, k_d, lcnt;
     logic        dv;

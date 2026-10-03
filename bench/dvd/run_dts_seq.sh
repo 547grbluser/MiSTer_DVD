@@ -153,7 +153,7 @@ PYEOF
   mut Q3 $T "bit_ok = 1'b1; bit_val = cur[cur_n - 4'd1];" "bit_ok = 1'b1; bit_val = cur[4'd8 - cur_n];" '\[trace\]' &
   mut Q4 $T "wire   [8:0] h_ent   = bit_val ? hnode_q[17:9] : hnode_q[8:0];" "wire   [8:0] h_ent   = bit_val ? hnode_q[8:0] : hnode_q[17:9];" '\[trace\]' &
   wait
-  mut Q5 $T "O_CALL: begin stack[sp] <= pc + 10'd1;" "O_CALL: begin stack[sp] <= pc;" '\[(trace|hang)\]' &
+  mut Q5 $T "O_CALL: begin stack[sp] <= pc + 11'd1;" "O_CALL: begin stack[sp] <= pc;" '\[(trace|hang)\]' &
   mut Q6 written_misc "O_BPOS: begin w_en = 1'b1; w_val = fbits[15:0]; end" "O_BPOS: begin w_en = 1'b1; w_val = {3'd0, fbits[15:3]}; end" '\[trace\]' &
   mut Q7 $T "S_LD:    begin w_en = 1'b1; w_val = ld_const ? crom_q : rec_q; end" "S_LD:    begin w_en = 1'b1; w_val = maddr; end" '\[trace\]' &
   mut Q8 $T "in_ready = ftaken != fbytes;" "in_ready = ftaken + 16'd1 < fbytes;" '\[(trace|count|hang)\]' &
@@ -166,7 +166,7 @@ PYEOF
   mut Q13 R2 "wire         zero_fill = in_frame && (ftaken == fbytes);" "wire         zero_fill = 1'b0;" '\[(trace|count|hang)\]' &
   mut Q14 synth_stereo_768k "wire  [5:0] x_book  = XQ_QBOOK[6 * x_abm1 +: 6] + {3'd0, x_sel};" "wire  [5:0] x_book  = XQ_QBOOK[6 * x_abm1 +: 6];" '\[trace\]' &
   mut Q18 synth_stereo_768k "wire  [11:0] h_child = h_cur + {4'd0, h_ent[7:0]};" "wire  [11:0] h_child = h_root + {4'd0, h_ent[7:0]};" '\[trace\]' &
-  mut Q19 R1 "wire br_err = ((op == O_BR) || (op == O_BRI)) && taken && (imm[9:5] == UC_ERRV);" "wire br_err = 1'b0;" '\[(trace|count|hang)\]' &
+  mut Q19 R1 "wire br_err = ((op == O_BR) || (op == O_BRI)) && taken && (imm[10:5] == UC_ERRV);" "wire br_err = 1'b0;" '\[(trace|count|hang)\]' &
   mut Q15 $T "x_dbit = x_dq[x_itm1];" "x_dbit = x_dq[x_it];" '\[trace\]' &
   mut Q16 R2 "else if (zero_fill) overrun_bit <= 1'b1;" "else if (zero_fill) overrun_bit <= 1'b0;" '\[count\]' &
   mut Q17 written_amode9 "S_VLC_W: begin w_en = 1'b1; w_val = {{8{v_sym[7]}}, v_sym}; end" "S_VLC_W: begin w_en = 1'b1; w_val = {8'd0, v_sym}; end" '\[trace\]' &

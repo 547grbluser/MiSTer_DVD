@@ -19,6 +19,7 @@
 module dts_top (
     input  wire          clk,
     input  wire          rst_n,
+    input  wire          codec,              // 0 DTS, 1 AC-3 (change only in reset)
 
     input  wire   [15:0] fr_len,
     input  wire          fr_valid,
@@ -48,10 +49,10 @@ module dts_top (
 
     // benches
     output logic         vop_start,
-    output logic   [3:0] vop_op,
+    output logic   [5:0] vop_op,
     output logic         vop_done,
     output logic         tr_valid,
-    output logic   [9:0] tr_pc,
+    output logic  [10:0] tr_pc,
     output logic   [1:0] tr_kind,
     output logic  [10:0] tr_addr,
     output logic  [23:0] tr_val
@@ -64,7 +65,7 @@ module dts_top (
     logic   [4:0] err_code;
 
     dts_seq u_seq (
-        .clk, .rst_n, .fr_len, .fr_valid, .fr_ready, .in_byte, .in_valid, .in_ready,
+        .clk, .rst_n, .codec, .fr_len, .fr_valid, .fr_ready, .in_byte, .in_valid, .in_ready,
         .vop_start, .vop_op, .vop_args, .vop_done, .xq_code, .xq_valid, .xq_ready,
         .err_valid, .err_code, .frame_done, .overrun_bit, .lenient,
         .tr_valid, .tr_pc, .tr_kind, .tr_addr, .tr_val);
@@ -76,7 +77,7 @@ module dts_top (
         .pcm_l, .pcm_r, .pcm_valid, .pcm_ready);
 
     // CNT's counter id is r8 (dts_isa.CNT_DMIX_IGNORED = 0)
-    wire cnt_dmix = vop_start && (vop_op == 4'd8) && (vop_args[15:0] == 16'd0);
+    wire cnt_dmix = vop_start && (vop_op == 6'd8) && (vop_args[15:0] == 16'd0);
 
     always_ff @(posedge clk) begin
         if (!rst_n) begin

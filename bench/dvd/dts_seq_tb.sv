@@ -22,20 +22,20 @@ module dts_seq_tb;
     logic [7:0]   in_byte;
     logic         in_valid, in_ready;
     logic         vop_start, vop_done;
-    logic [3:0]   vop_op;
+    logic [5:0]   vop_op;
     logic [127:0] vop_args;
     logic [23:0]  xq_code;
     logic         xq_valid, xq_ready;
     logic         err_valid, frame_done, overrun_bit, lenient;
     logic [4:0]   err_code;
     logic         tr_valid;
-    logic [9:0]   tr_pc;
+    logic [10:0]  tr_pc;
     logic [1:0]   tr_kind;
     logic [10:0]  tr_addr;
     logic [23:0]  tr_val;
 
     dts_seq dut (
-        .clk, .rst_n, .fr_len, .fr_valid, .fr_ready, .in_byte, .in_valid, .in_ready,
+        .clk, .rst_n, .codec(1'b0), .fr_len, .fr_valid, .fr_ready, .in_byte, .in_valid, .in_ready,
         .vop_start, .vop_op, .vop_args, .vop_done, .xq_code, .xq_valid, .xq_ready,
         .err_valid, .err_code, .frame_done, .overrun_bit, .lenient,
         .tr_valid, .tr_pc, .tr_kind, .tr_addr, .tr_val);
@@ -44,7 +44,7 @@ module dts_seq_tb;
     int stall, xstall;
     logic [7:0]  bytes [];
     logic [15:0] flen [];
-    logic [48:0] exp [];                 // {kind 2, pc 10, addr 13, val 24}
+    logic [49:0] exp [];                 // {kind 2, pc 11, addr 13, val 24}
     int n_bytes, n_frames, n_ev, n_vops, n_pairs, n_err, n_ovr, n_len, n_dmix;
     int bi, fi, ei, frames, errs, gap, fgap, busy, idle, last_ei, quiet, ovr, len, nlen, ncnt;
 
@@ -71,7 +71,7 @@ module dts_seq_tb;
         fd = $fopen({stem, ".trace"}, "r");
         for (int i = 0; i < n_ev; i++) begin
             r = $fscanf(fd, "%h %h %h %h", k, pc, a, v);
-            exp[i] = {k[1:0], pc[9:0], a[12:0], v[23:0]};
+            exp[i] = {k[1:0], pc[10:0], a[12:0], v[23:0]};
         end
         $fclose(fd);
     end
@@ -116,9 +116,9 @@ module dts_seq_tb;
             vcnt <= 0; xq_op <= 1'b0; xtaken <= 0; xq_ready <= 1'b0; xgap <= 0;
         end else begin
             if (vop_start) begin
-                xq_op <= (vop_op == 4'd1);
+                xq_op <= (vop_op == 6'd1);
                 xtaken <= 0;
-                vcnt <= (vop_op == 4'd1) ? 0 : 1 + ($urandom % 4);
+                vcnt <= (vop_op == 6'd1) ? 0 : 1 + ($urandom % 4);
             end else if (vcnt > 0) begin
                 vcnt <= vcnt - 1;
                 if (vcnt == 1) vop_done <= 1'b1;
@@ -134,7 +134,7 @@ module dts_seq_tb;
     end
 
     // the scoreboard
-    logic [48:0] e;
+    logic [49:0] e;
     always @(posedge clk) begin
         if (!rst_n) begin
             ei <= 0; frames <= 0; errs <= 0; ovr <= 0; nlen <= 0; ncnt <= 0;
@@ -146,14 +146,14 @@ module dts_seq_tb;
                 e = exp[ei];
                 if ({tr_kind, tr_pc, 2'd0, tr_addr, tr_val} !== e)
                     $fatal(1, "FAIL [trace] event %0d: rtl kind %0d pc %03x addr %03x val %06x, emulator kind %0d pc %03x addr %03x val %06x",
-                           ei, tr_kind, tr_pc, tr_addr, tr_val, e[48:47], e[46:37], e[36:24], e[23:0]);
+                           ei, tr_kind, tr_pc, tr_addr, tr_val, e[49:48], e[47:37], e[36:24], e[23:0]);
                 ei <= ei + 1;
             end
             if (frame_done) frames <= frames + 1;
             if (err_valid) errs <= errs + 1;
             if (overrun_bit) ovr <= ovr + 1;
             if (lenient) nlen <= nlen + 1;
-            if (vop_start && vop_op == 4'd8) ncnt <= ncnt + 1;
+            if (vop_start && vop_op == 6'd8) ncnt <= ncnt + 1;
         end
     end
 

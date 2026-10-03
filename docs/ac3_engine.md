@@ -371,6 +371,25 @@ channel loop.
   The hardwired per-band bit-allocation op is decided at the fit, when its ALM price is
   known.
 
+## A2a: one engine, two programs (2026-10-02)
+
+- **One microcode ROM for both programs:** `dvd/dts/engine_ucode.mem`, 2K × 40, with DTS's
+  program at 0 (500 words) and AC-3's after it (779 words, origin 500). It is written
+  by `tools/dts_isa.py --asm`, which assembles both; `tools/ac3_isa.py` assembles at
+  the origin, so the emulator's pcs are the RTL's. One constant ROM likewise:
+  `engine_const.mem`, DTS's 92 words then AC-3's 436, 528 in all.
+- **The error vectors moved to the ROM's top 32 words (2016–2047)**, so they clear
+  both programs. The assembler refuses any word that reaches them. The pc is 11 bits.
+- **`dts_seq.sv` gained a `codec` input** (0 DTS, 1 AC-3; change it only in reset).
+  It picks the entry point and the restart point after a refusal (`UC_DTS_*` /
+  `UC_AC3_*` in `dts_ucode.svh`). The vop field is 6 bits through `dts_vec` and
+  `dts_top`.
+- **Gates:** the DTS benches pass unchanged after the widening (`run_dts_seq.sh --red`
+  37 arms and 19 mutations; `run_dts.sh --red` 41 and 18), and so do `test_dts_isa.py`
+  and `test_ac3_isa.py`.
+- **Next:** fit leg (a), the DTS engine with the 2K ROM, then A2b (the sequencer-side
+  AC-3 units).
+
 ## Gate set
 
 - `tools/streams/*.ac3` (`tools/gen_test_stream.sh`): acmod 3–6 uncoupled at 640k,
