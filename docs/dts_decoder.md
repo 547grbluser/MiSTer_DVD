@@ -318,7 +318,47 @@ Against ~1,125 spare at 97 %, only **D** fits with margin. **C** lands at about 
 would not be expected to fit or close timing. **A** and **B** do not fit. So the AC-3 parse
 migration is on the critical path, not optional, unless P1's standalone fit comes in near
 the bottom of its range. P1's fit replaces the engine rows. A migration is counted only
-when its own fit measures it.
+when its own fit measures it. (P1b measured the engine at ~2,070 ALM in-core, the top of
+its row: §10 "P1b result".)
+
+**Scenario E: the engine for MP2 and AC-3 only, no DTS (estimated 2026-10-02, at the
+maintainer's request).** Does the engine concept save area over v0.8.0 on its own merits?
+The baseline is the per-entity fit of the menu-panscan build (2026-10-01, one feature
+after v0.8.0, with the same audio path). The removed rows are measured; the added rows
+are estimates.
+
+| Change | ALM | Basis |
+|---|---|---|
+| `mp2_decode`, its bit reader included | −878 | measured |
+| AC-3 parse without `imdct_512`: `audblk_parse` 713, `mantissa_dequant` 762, `bit_allocation` 591, `exponent_decode` 207, `bsi_parse` + `sync_crc` + glue 148 | −2,421 | measured |
+| AC-3's `bit_reader` + `bit_fifo` | −266 | measured |
+| **Removed** | **−3,565** | |
+| Sequencer: P1b's design, the Huffman walker dropped; its block-code divider serves AC-3's grouped mantissas (÷3, ÷5, ÷11) and exponents, and MP2's grouped samples | +800 … +850 | P1b measured 853 with DTS's features |
+| Vector engine: the datapath; MP2 synthesis on the program-ROM IMDCT executor and the window loop; AC-3's dequantisation, exponent and bit-allocation ops (bit allocation alone +300 … +600, §4) | +1,200 … +1,500 | estimate, the least certain row: P1b's 1,120 is not split between datapath and ops |
+| Glue into `imdct_512`'s coefficient input, telemetry | +100 … +200 | estimate |
+| **Added** | **+2,100 … +2,550** | |
+| **E. Net, against today** | **−1,000 … −1,450** (central ~−1,200) | |
+
+- **Cross-check:** scenario D (DTS plus both migrations) is about −450. Removing
+  DTS's own share (its ops, the codebook copier, the `ram2` plumbing: ~700–900) gives
+  −1,150 … −1,350, which agrees with the bottom-up figure.
+- **M10K: about −40.** MP2's 37 blocks and the AC-3 parse's ~24 are freed; the engine
+  needs about 15–20 (no Huffman tree, no codebooks).
+- **The one-PCM-FIFO merge** (−100 … −200, §4 row B) is independent of this and
+  available in every scenario.
+- **Cycles: feasible, not proven.** AC-3 5.1 at 448 kbit/s gives about 864K cycles a
+  frame. With bit allocation as a vector op, the guess is 200–300K, with `imdct_512`
+  running alongside. Interpreted, bit allocation alone would be about 550K, over half
+  the budget, so it must be a vector op.
+- **Cost and risk.** This is the expensive migration:
+  - the AC-3 path must stay bit-exact against `bench/ac3` and trace-identical
+    (`logic_reclaim.md` method);
+  - MP2's synthesis on the factorised transform needs its own LSB-bounded golden,
+    because it does not round like today's direct matrixing.
+
+  The cheap first step is a P1a-style emulator for the AC-3 parse, which would measure
+  its ops and cycles before any RTL. Like every row here, E counts only once a fit
+  measures it.
 
 **Cycles (27 MHz, about 27M a second). Measured by `tools/dts_fixed.py`'s operation
 counters (2026-10-02) on the heaviest stream type found, a 1536 kbit/s 5.1 window from
