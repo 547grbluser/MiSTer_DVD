@@ -476,6 +476,23 @@ reader, XQ's restoring divider and the record and constant ROM ports. `tools/ac3
   and the mantissa unit cost more than the sketch (two divisions a group, about
   2 + bits + 1 a bin).
 - DTS's gates stay green: `run_dts_seq.sh` (37 arms) and `run_dts.sh` (41).
+- **Fit leg (b), the sequencer half** (`tools/fit_unit.sh dts_top`, same settings as
+  leg (a); the vector side's AC-3 ops are not in it yet):
+
+  | | ALM | sequencer | vector engine | M10K | DSP | Fmax −40 °C / 100 °C |
+  |---|---|---|---|---|---|---|
+  | A2a: DTS engine + the shared 2K ROM | 2,233 | ~860 | ~1,120 | 39 | 1 | 35.5 / 36.8 MHz |
+  | **A2b: + AC-3's sequencer units** | **2,679** | **1,297** | 1,124 | **39** | 1 | **37.5 / 39.1 MHz** |
+
+  - **AC-3's sequencer units cost about +440 ALM** and no M10K. MLEV fits in the
+    constant ROM, which is still 1K deep, and the record RAM still infers as an M10K
+    (map report checked).
+  - Scenario E (`dts_decoder.md` §4) budgeted AC-3's ops, bit allocation included, in
+    its vector-engine row: +1,200 … +1,500 together with MP2's synthesis, bit
+    allocation alone +300 … +600. The whole sequencer half lands inside that, with A2c's
+    vector ops still to add.
+  - Not yet priced: the hardwired per-band bit-allocation op (the 2K-ROM decision), so
+    the comparison waits for leg (b) complete.
 - **Next (A2c):** AC-3's ops in `dts_vec.sv`:
   - the bin items: the scale shift, the dither LFSR × 23170 and the recombine, all on
     the DSP;
