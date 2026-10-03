@@ -694,11 +694,33 @@ DTS (P2, P3) follows.
     drops, A/V drift median −19.6 ms.
   - `tools/audio_check.py` learned show-first Audio (PR #145): a single press after
     the popup has timed out only re-shows the track.
-  - ⏳ **Open observation:** after switching from an AC-3 track to the DTS track, the
-    first ~0.5 s carried a quiet tail (−50 … −76 dBFS RMS, −39 dBFS peak) on the
-    engine build. The control measured −86 dBFS. That is one or two samples per build,
-    and audio_ring is reset on a switch, so it is not yet a finding. It needs repeat
-    captures on both builds and a track-switch scenario in simulation.
+  - ✅ **The "quiet tail" after an AC-3 → DTS switch was the harness, not the core**
+    (closed 2026-10-03).
+    - **The report:** `audio_check` read −51 … −65 dBFS on *T2*'s DTS track on the W1
+      build, where DTS is discarded. A 0.5 s profile put it in the capture's first half
+      second; the control build read −86 dBFS.
+    - **The measurement that settled it:** one continuous capture SPANNING the switch,
+      the presses timestamped against it, 3 runs per build, alternating W1 and the
+      control. Audio plays at −43 … −49 dBFS before every press. **Both builds go to
+      exact digital silence within 50 ms of the switch and stay there for the 3 s
+      measured, 6 of 6 runs.**
+    - **The cause:** every capture's first 0.5–1 s is not live audio. It reads silent,
+      or opens with a fragment of stale buffered samples and then a gap (`ctl1`: −60
+      then −240 dBFS while the core played at −45). `audio_check` starts each capture
+      just AFTER switching tracks, so that fragment was the previous track's audio, at a
+      level that depended on the scene. Hence one build "had" a tail and the other
+      hardly did.
+    - The audio_ring-reset argument already said no stale frame could reach the
+      decoder, and `aud_switch_chain_tb` agrees for AC-3 targets.
+    - **Fixed in `tools/audio_check.py`:**
+      - it captures `LEAD_S` = 1 s more and measures only what follows. *T2*'s DTS track
+        on W1 now reads −999 dBFS on 3 of 3 runs, exactly silent, and audible
+        (−27.9 dBFS) on the P3 build;
+      - show-first stepping waits for the popup to expire (2.5 s, `SHOW_TICKS`) before
+        "show, step", because a double press inside the popup stepped twice and skipped
+        a track. It retries a missed screenshot once, and says why if it stops short;
+      - the `--red` self-test still passes, and the finding's stale "acmod 2 and 7 only"
+        hint is replaced.
 - **Next:** DTS. P2 (codebooks: initialised hosts, the copier, `ram2`), then P3 (the
   `T_DTS` arm drives the same engine with `codec = 0`, switching programs in reset).
 

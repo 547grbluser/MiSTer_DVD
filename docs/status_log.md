@@ -47,7 +47,8 @@ predate later confirmations; the `CLAUDE.md` index carries the reconciled status
       `dvd_audio_decode`, bit-identical block for block (`run_ac3_ab.sh`, 31 arms). In
       core the front end is ~2,395 ALM against `ac3_front`'s 2,687 (−290), M10K +15,
       SEED 1 re-pinned (clk_dec 90.49 / 88.33). HIL: AC-3 audible on BBB, MiB (4/4) and
-      T2; one open observation, a quiet ~0.5 s tail after an AC-3→DTS switch.
+      T2. The "quiet tail" after an AC-3→DTS switch was a capture start-up artifact in
+      `audio_check` (fixed; both builds go silent within 50 ms, 6 of 6 runs).
     - A2d: standalone fit 2,921 ALM / 39 M10K / 1 DSP, 35.8 MHz at −40 °C. AC-3 adds
       +688 to the DTS engine, against −2,687 measured for today's AC-3 parse and bit
       readers. DTS plus the migrated parse is about +200 … +300 ALM net, against ~1,125
