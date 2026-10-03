@@ -462,7 +462,9 @@ finds the main feature, navigates to it, and plays from start.
 > **⚠️ PREMISE SUPERSEDED (2026-10-02): an in-fabric DTS *core* decoder is now being designed**
 > (maintainer decision), so a DTS track can play on a plain TV in `Decode PCM` mode.
 > Passthrough below is unchanged. Plan, decisions and phases: **`docs/dts_decoder.md`**
-> (📝 design, no RTL yet; branch `feature/dts-decode`).
+> (🔧 the engine's RTL is built and fitted standalone, 2026-10-02, not wired; ⏳ next: the
+> maintainer orders P2/P3/P4, because the engine does not fit the ALM spare without the
+> AC-3 parse reclaim; branch `feature/dts-decode`).
 
 **Goal:** make DTS (and AC-3) tracks audible on an AV receiver.
 

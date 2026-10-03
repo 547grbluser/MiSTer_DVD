@@ -22,8 +22,8 @@ predate later confirmations; the `CLAUDE.md` index carries the reconciled status
 
 ## Hardware status (THIS fork, verified 2026-06-21)
 
-- 📝 **IN-FABRIC DTS CORE DECODER (2026-10-02, design only, no RTL; branch
-  `feature/dts-decode`, `CORE_VERSION dev-dtsdecode`).**
+- 🔧 **IN-FABRIC DTS CORE DECODER (2026-10-02: the engine RTL built and fitted
+  standalone, not wired; branch `feature/dts-decode`, `CORE_VERSION dev-dtsdecode`).**
   Full plan: `docs/dts_decoder.md`.
   - **Ask (maintainer):** decode DTS so a DTS track plays on a plain TV, not only through a
     receiver. Today `T_DTS` is a discard in `dvd_audio_decode` (`Decode PCM` is silent).
@@ -77,8 +77,29 @@ predate later confirmations; the `CLAUDE.md` index carries the reconciled status
     - Worst frame 30.9 % of real time (spec-maximum frame); a typical disc frame 24 %.
     - `tools/test_dts_isa.py` passes with five microcode RED arms.
     - Memory map now ~30–34 M10K, without the codebooks (`docs/dts_decoder.md` §10).
-  - **Next:** P1b, the RTL (sequencer and vector ops), trace-scored benches, and a
-    standalone fit: the go/no-go.
+  - **P1b (2026-10-02):** the RTL. `docs/dts_decoder.md` §10's P1b sections hold the
+    full record.
+    - `dvd/dts/dts_seq.sv` (the sequencer, the bit reader, the tree walk and XQ's code
+      reader) and `dvd/dts/dts_vec.sv` (nine vector ops on one 27×27 DSP; the half
+      IMDCT as a 597-term ROM program, proven equal to FFmpeg's) are joined in
+      `dvd/dts/dts_top.sv`.
+    - Gates: `bench/dvd/run_dts_seq.sh` scores every register write, store and XQ code
+      against the emulator; `bench/dvd/run_dts.sh` scores every vector op's buffers by
+      checksum and every PCM pair. Both cover all 34 streams plus a refusal, a
+      truncation, stalls and a latency sweep, with 19 and 18 RED mutations, each caught
+      by its own arm.
+    - Found on the way: a lost address line (JOINT read the band's scale). Also the
+      model's `nmix` mix bound proved redundant in hardware (X above it is zero by
+      construction), so the RTL drops it.
+    - **Standalone fit (`tools/fit_unit.sh`): 2,227 ALM, 31 M10K, 1 DSP, 35.8 MHz at
+      −40 °C.** The first fit took 43 M10K; packing fixes brought it to 31 (the
+      Huffman tree's relative offsets in two ROMs, error vectors to get the microcode
+      under 512 words, four small RAMs in one).
+    - The emulator's cycle model, calibrated on the RTL to within 0.3 %, puts the worst
+      of 61,678 census frames at 39.8 % of real time (`tools/dts_cycles.py`).
+  - **Next (⏳ maintainer decision):** the engine does not fit the ~1,125 spare ALMs
+    alone. §4's scenario D (the AC-3 parse onto the engine) is on the critical path, so
+    the order of P2 (codebooks in DDR3), P3 (wiring) and the P4 reclaims comes first.
 
 - ⏳ **SHOW-FIRST AUDIO/SUBTITLE BUTTONS (2026-10-01, ✅ MERGED PR #145;
   sim-proven, ⏳ HW-confirm pending).**

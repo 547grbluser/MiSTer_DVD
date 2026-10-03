@@ -716,24 +716,27 @@ BP_RET:
         ret
 
 ; ================================================================ errors
-ESYNC:      err E_SYNC
-EDEFICIT:   err E_DEFICIT
-EPCMBLK:    err E_PCMBLK
-EFSIZE:     err E_FSIZE
-EAMODE:     err E_AMODE
-ERATE:      err E_RATE
-ERESERVED:  err E_RESERVED
-ELFE:       err E_LFE
-EPCMRES:    err E_PCMRES
-ENCH:       err E_NCH
-ESUBBANDS:  err E_SUBBANDS
-EJOINT:     err E_JOINT
-ESFSEL:     err E_SFSEL
-EBASEL:     err E_BASEL
-EABITS:     err E_ABITS
-ESCALE:     err E_SCALE
-EJSEL:      err E_JSEL
-EJSCALE:    err E_JSCALE
-EDSYNC:     err E_DSYNC
-ELFESCALE:  err E_LFESCALE
-ESUBOVF:    err E_SUBOVF
+; A branch to ERRV + code refuses the frame with that code (the `err` instruction's
+; effect, without a one-word stub per code: the program stays within 512 words, two
+; M10K instead of four). ERRV is the assembler's error-vector base.
+.equ ESYNC       ERRV + E_SYNC
+.equ EDEFICIT    ERRV + E_DEFICIT
+.equ EPCMBLK     ERRV + E_PCMBLK
+.equ EFSIZE      ERRV + E_FSIZE
+.equ EAMODE      ERRV + E_AMODE
+.equ ERATE       ERRV + E_RATE
+.equ ERESERVED   ERRV + E_RESERVED
+.equ ELFE        ERRV + E_LFE
+.equ EPCMRES     ERRV + E_PCMRES
+.equ ENCH        ERRV + E_NCH
+.equ ESUBBANDS   ERRV + E_SUBBANDS
+.equ EJOINT      ERRV + E_JOINT
+.equ ESFSEL      ERRV + E_SFSEL
+.equ EBASEL      ERRV + E_BASEL
+.equ EABITS      ERRV + E_ABITS
+.equ ESCALE      ERRV + E_SCALE
+.equ EJSEL       ERRV + E_JSEL
+.equ EJSCALE     ERRV + E_JSCALE
+.equ EDSYNC      ERRV + E_DSYNC
+.equ ELFESCALE   ERRV + E_LFESCALE
+.equ ESUBOVF     ERRV + E_SUBOVF

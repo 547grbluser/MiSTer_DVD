@@ -93,23 +93,29 @@ module dts_vec (
     (* ramstyle = "M10K" *) logic [24:0] xb   [0:2047];   // X {ch, band, j}: 25 bits (a butterflied band)
     (* ramstyle = "M10K" *) logic [23:0] hb   [0:1023];   // ADPCM history {ch, band, k}, k 0 the oldest
     (* ramstyle = "M10K" *) logic [23:0] ring [0:1023];   // IMDCT rings {side, i}
-    logic [28:0] b2 [0:63];                               // window partial sums {side, i}: 29 bits
-    logic [23:0] sc [0:63];                               // IMDCT scratch {region, i}
-    logic [15:0] lh [0:31];                               // the L side's PCM
-    logic [15:0] rh [0:31];                               // the R side's PCM
+    // the four small buffers share one M10K (each alone took a block): their phases
+    // never overlap -- the IMDCT scratch (mix, IMDCT), the window's carried sums
+    // (window) and the PCM pairs (written by the window's outputs, read by the emit):
+    //   0..63    sc  {region, i}   the IMDCT scratch, 24 bits
+    //   64..127  b2  {side, i}     the window's carried partial sums, 29 bits
+    //   128..191 pcm {side, i}     the 32 PCM pairs, 16 bits (L then R)
+    (* ramstyle = "M10K" *) logic [28:0] sm [0:255];
     initial begin                    // as the emulator: every buffer starts at zero
         for (int n = 0; n < 2048; n++) xb[n] = 25'd0;
         for (int n = 0; n < 1024; n++) begin hb[n] = 24'd0; ring[n] = 24'd0; end
-        for (int n = 0; n < 64; n++) begin b2[n] = 29'd0; sc[n] = 24'd0; end
-        for (int n = 0; n < 32; n++) begin lh[n] = 16'd0; rh[n] = 16'd0; end
+        for (int n = 0; n < 256; n++) sm[n] = 29'd0;
     end
 
     logic [10:0] xb_ra;  logic [24:0] xb_q;
     logic  [9:0] hb_ra;  logic [23:0] hb_q;
     logic  [9:0] rg_ra;  logic [23:0] rg_q;
-    logic  [5:0] b2_ra;  logic [28:0] b2_q;
-    logic  [5:0] sc_ra;  logic [23:0] sc_q;
-    logic  [4:0] pb_ra;  logic [15:0] lh_q, rh_q;
+    logic  [5:0] b2_ra, sc_ra;
+    logic  [7:0] sm_ra;  logic [28:0] sm_q;
+    logic  [4:0] pb_ra;
+    logic        pb_r;                                    // the emit reads R (else L)
+    wire  [28:0] b2_q = sm_q;
+    wire  [23:0] sc_q = sm_q[23:0];
+    logic [15:0] pl_hold;                                 // the emit's L, while R is read
     logic  [8:0] vk_ra;  logic [23:0] vk_q;
     logic  [9:0] wn_ra;  logic [23:0] wn_q;
     logic  [9:0] ip_ra;  logic [19:0] ip_q;
@@ -133,10 +139,10 @@ module dts_vec (
         xb_q <= xb[xb_ra];    if (x_xb_we) xb[x_xb_wa] <= res[24:0];
         hb_q <= hb[hb_ra];    if (x_hb_we) hb[x_hb_wa] <= res[23:0];
         rg_q <= ring[rg_ra];  if (x_rg_we) ring[x_rg_wa] <= res[23:0];
-        b2_q <= b2[b2_ra];    if (x_b2_we) b2[x_b2_wa] <= res[28:0];
-        sc_q <= sc[sc_ra];    if (x_sc_we) sc[x_sc_wa] <= res[23:0];
-        lh_q <= lh[pb_ra];    if (p_we && !p_wa[5]) lh[p_wa[4:0]] <= p_s16;
-        rh_q <= rh[pb_ra];    if (p_we && p_wa[5])  rh[p_wa[4:0]] <= p_s16;
+        sm_q <= sm[sm_ra];
+        if (x_sc_we)      sm[{2'b00, x_sc_wa}] <= res[28:0];
+        else if (x_b2_we) sm[{2'b01, x_b2_wa}] <= res[28:0];
+        else if (p_we)    sm[{2'b10, p_wa}]    <= {13'd0, p_s16};
         vk_q <= vk[vk_ra];
         wn_q <= win[wn_ra];
         ip_q <= iprog[ip_ra];
@@ -150,7 +156,7 @@ module dts_vec (
         V_VQ0, V_VQ1, V_JO0, V_JO1,
         V_AD0, V_AD1, V_AD2, V_AD3,
         V_BF,
-        V_MX, V_IPS, V_IP, V_WIN, V_WINW, V_EMIT, V_EMITW
+        V_MX, V_IPS, V_IP, V_WIN, V_WINW, V_EMIT, V_EMITL, V_EMITW
     } vstate_t;
     vstate_t st;
     logic  [3:0] vop;
@@ -279,6 +285,12 @@ module dts_vec (
     end
     wire [23:0] res_abs = res[23] ? (24'd0 - res[23:0]) : res[23:0];
 
+    // synthesis translate_off
+    always @(posedge clk)
+        if ((x_sc_we || x_b2_we) && p_we)
+            $fatal(1, "dts_vec: the small-buffer M10K took two writes in one cycle");
+    // synthesis translate_on
+
     always_ff @(posedge clk) begin
         x_prod <= ma * mb;
         x_acc_clr <= acc_clr; x_acc_en <= acc_en; x_direct <= direct; x_trunc <= trunc;
@@ -314,6 +326,12 @@ module dts_vec (
         b2_ra = {side, w_q[0], w_i};
         sc_ra = ip_q[5:0];
         pb_ra = k[4:0];
+        // the shared small-buffer RAM's one read: the scratch (IMDCT), the carried
+        // sums (window) or a PCM word (emit)
+        pb_r = (st == V_EMITL) || (st == V_EMITW);
+        sm_ra = (st == V_WIN) ? {2'b01, b2_ra} :
+                (st == V_EMIT || st == V_EMITL || st == V_EMITW) ? {2'b10, pb_r, pb_ra} :
+                {2'b00, sc_ra};
         vk_ra = q_sidx;
         wn_ra = {a7[0], w_t, w_q, w_i};
         ip_ra = (st == V_IPS) ? 10'd0 : (ip_bub || ip_final) ? ip_d : ip_d + 10'd1;
@@ -616,9 +634,10 @@ module dts_vec (
                     end
                 end
             end
-            V_EMIT: st <= V_EMITW;                  // pair k is read
+            V_EMIT: st <= V_EMITL;                  // pair k's L is read
+            V_EMITL: begin pl_hold <= sm_q[15:0]; st <= V_EMITW; end   // ... then its R
             V_EMITW: if (!pcm_valid || pcm_ready) begin
-                pcm_l <= lh_q; pcm_r <= rh_q; pcm_valid <= 1'b1;
+                pcm_l <= pl_hold; pcm_r <= sm_q[15:0]; pcm_valid <= 1'b1;
                 k <= k + 12'd1;
                 if (k == 12'd31) st <= V_DONE; else st <= V_EMIT;
             end

@@ -211,7 +211,7 @@ module dts_top_tb;
     endfunction
     function automatic logic [31:0] ck_b(input int dummy);
         logic [63:0] acc; acc = 0;
-        for (int i = 0; i < 64; i++) acc = acc + (i + 1) * dut.u_vec.b2[i];
+        for (int i = 0; i < 64; i++) acc = acc + (i + 1) * dut.u_vec.sm[64 + i];   // b2
         return acc[31:0];
     endfunction
 

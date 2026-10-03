@@ -23,6 +23,9 @@ vector ops' arguments.
     vlc   rd, imm[rs]       the Huffman symbol of book (rs + imm), signed
     b<c>  rs, rt, label     branch if rs <c> rt, c in eq ne lt ge (signed)
     b<c>i rs, k, label      ... against a signed 10-bit constant k
+                            A taken branch to ERR_BASE + code (an error vector,
+                            pc 992..1023) is `err code`: the program refuses the
+                            frame without a one-word stub per error code.
     jmp / call label, ret   (call stack depth 8)
     err   code              count the error code, drop the rest of the frame,
                             restart at the label FRAME
@@ -62,7 +65,8 @@ REPO = os.path.dirname(HERE)
 UASM = os.path.join(REPO, 'dvd', 'dts', 'dts.uasm')
 UMEM = os.path.join(REPO, 'dvd', 'dts', 'dts_ucode.mem')
 CMEM = os.path.join(REPO, 'dvd', 'dts', 'dts_const.mem')
-HMEM = os.path.join(REPO, 'dvd', 'dts', 'dts_huff.mem')
+HMEM = os.path.join(REPO, 'dvd', 'dts', 'dts_huff_lo.mem')      # nodes 0..2047
+HMEM_HI = os.path.join(REPO, 'dvd', 'dts', 'dts_huff_hi.mem')   # nodes 2048..: see huff_mem_words
 RMEM = os.path.join(REPO, 'dvd', 'dts', 'dts_hroot.mem')
 USVH = os.path.join(REPO, 'dvd', 'dts', 'dts_ucode.svh')
 VDIR = os.path.join(REPO, 'dvd', 'dts')
@@ -79,6 +83,7 @@ VOP = {n: i for i, n in enumerate(VOPS)}
 MEM_REC, MEM_CONST = 0x0000, 0x1000
 REC_WORDS = 0x0800
 STACK_DEPTH = 8
+ERR_BASE = 0x3E0                  # error vectors: a taken branch to ERR_BASE + code is err
 NCH_MAX = 5                       # primary channels (AMODE < 10)
 
 # Counters the CNT op and the engine keep (telemetry ids)
@@ -138,12 +143,36 @@ HUFF_NODES, HUFF_ROOTS = build_huff_tree()
 
 
 def huff_mem_words():
-    """26-bit node words: {right(13), left(13)}, an entry = {leaf, value[11:0]}."""
+    """18-bit node words: {right(9), left(9)}; an entry = {leaf, value[7:0]}. A leaf's
+    value is the signed symbol; an internal entry's is the child's offset FORWARD from
+    this node (child index - node index, 1..255). Every child follows its parent in
+    build order (offsets 1..118 measured), so 8 bits hold both. The 2,647 nodes are
+    split into two ROMs, 2,048 (2K x 5 mode, 4 M10K) and the rest (1K x 10, 2 M10K):
+    6 blocks with a 2:1 output mux. 26-bit absolute entries in one ROM took 13 (Quartus
+    put 2,647 words in 4K x 2 mode); one 18-bit ROM sliced 512 deep took 6 but a 6:1
+    mux of 40 ALMs. The book roots stay absolute (dts_hroot.mem)."""
     out = []
-    for left, right in HUFF_NODES:
+    for n, (left, right) in enumerate(HUFF_NODES):
         def ent(e):
-            return (e[0] << 12) | (e[1] & 0xFFF)
-        out.append((ent(right) << 13) | ent(left))
+            leaf, v = e
+            if leaf:
+                assert -128 <= v <= 127, v
+                return (1 << 8) | (v & 0xFF)
+            off = v - n
+            assert 1 <= off <= 255, (n, v)
+            return off
+        out.append((ent(right) << 9) | ent(left))
+    assert len(out) <= 2048 + 1024, 'dts_seq.sv holds 2,048 + 1,024 nodes'
+    # decode the image back, the way the RTL walks it, and compare every code
+    for b, book in enumerate(BOOKS):
+        for code, ln, sym in T.VLC[book]['codes']:
+            n = HUFF_ROOTS[b]
+            for k in range(ln - 1, -1, -1):
+                e = (out[n] >> (9 if (code >> k) & 1 else 0)) & 0x1FF
+                if e >> 8:
+                    assert k == 0 and ((e & 0xFF) ^ 0x80) - 0x80 == sym, (book, code)
+                    break
+                n += e & 0xFF
     return out
 
 
@@ -196,6 +225,7 @@ def assemble(text, mutate=None):
     equ.update({'B_' + n.upper(): i for n, i in BOOK_ID.items()})
     equ.update({'V_' + n.upper(): i for n, i in VOP.items()})
     equ['CNT_DMIX_IGNORED'] = CNT_DMIX_IGNORED
+    equ['ERRV'] = ERR_BASE
     aliases, labels, stmts = {}, {}, []
     mutated = False
     for ln, raw in enumerate(text.splitlines(), 1):
@@ -228,6 +258,8 @@ def assemble(text, mutate=None):
         stmts.append((ln, line, dict(aliases)))
     if mutate and not mutated:
         raise AsmError(f'no MUT {mutate} in the source')
+    if len(stmts) > ERR_BASE:
+        raise AsmError(f'{len(stmts)} words reach the error vectors at {ERR_BASE}')
 
     def ev(expr, ln):
         env = dict(equ)
@@ -290,7 +322,10 @@ def assemble(text, mutate=None):
                 words.append(encode('bri', CONDS.index(mn[1:3]), reg(0), c >> 6,
                                     ev(args[2], ln), c & 63))
             elif mn in ('jmp', 'call'):
-                words.append(encode(mn, 0, 0, 0, ev(args[0], ln)))
+                tgt = ev(args[0], ln)
+                if tgt >= ERR_BASE:
+                    raise AsmError(f'line {ln}: {mn} to an error vector (only branches may)')
+                words.append(encode(mn, 0, 0, 0, tgt))
             elif mn in ('ret', 'fend', 'nop'):
                 words.append(encode(mn))
             elif mn == 'err':
@@ -328,14 +363,15 @@ class EngineError(Exception):
 #           Huffman 1 + the code bits; block codes 4 x their bits (the first digit
 #           divided as the bits arrive, three more in place); raw codes their bits
 #     XVQ   16 + the codebook latency; ADPCM 12 unpredicted, 47 + max(5, latency + 3)
-#     MIXSYN 64 + 2 x (32 x channels + 1,131): per side the mix, the IMDCT program
-#           (597 terms + its stage barriers), the window (512 MACs); then 32 pairs out
+#     MIXSYN 96 + 2 x (32 x channels + 1,131): per side the mix, the IMDCT program
+#           (597 terms + its stage barriers), the window (512 MACs); then 32 pairs
+#           out, 3 cycles each (L and R share one RAM read port)
 CYC = {
     'instr': 1, 'ld': 2, 'get': 2, 'vlc': 3, 'frame': 2, 'drain_byte': 2,
     'xclr': 1284, 'hclr': 4, 'hclr_band': 4, 'joint': 14, 'bfly': 1027, 'cnt': 2,
     'vop': 2, 'xq_setup': 10, 'xq_setup_huff': 12, 'xq_tail': 3, 'xvq': 16,
     'adpcm_plain': 12, 'adpcm_pred': 47,
-    'mixsyn': 64, 'mixsyn_side': 1131,
+    'mixsyn': 96, 'mixsyn_side': 1131,
 }
 CB_LATENCY = 20       # the codebook port's request-to-row latency (cycles), P2 measures it
 
@@ -610,6 +646,13 @@ class Machine:
                 if (c == 'eq' and a == b) or (c == 'ne' and a != b) or \
                         (c == 'lt' and a < b) or (c == 'ge' and a >= b):
                     npc = imm
+                    if npc >= ERR_BASE:            # an error vector: err (npc - ERR_BASE)
+                        self.cycles += self.drain_cycles()
+                        code = npc - ERR_BASE
+                        self.errors[code] = self.errors.get(code, 0) + 1
+                        self.cur = None
+                        self.stack = []
+                        npc = self.labels['FRAME']
             elif op == 'jmp':
                 npc = imm
             elif op == 'call':
@@ -691,6 +734,7 @@ def ucode_svh(words, labels):
         f'localparam int HUFF_BOOKS  = {len(HUFF_ROOTS)};',
         f"localparam [9:0] UC_RESET  = 10'd{labels.get('RESET', 0)};",
         f"localparam [9:0] UC_FRAME  = 10'd{labels['FRAME']};",
+        f"localparam [4:0] UC_ERRV   = 5'd{ERR_BASE >> 5};      // error vectors: pc[9:5] == this",
         '// the first quantiser-index book of abits (book = QBOOK + selector)',
         f'localparam [{6 * R.CODE_BOOKS - 1}:0] XQ_QBOOK  = {_packed([QBOOK[a - 1] for a in ab], 6)};',
         '// selectors below this are Huffman books',
@@ -706,7 +750,8 @@ def write_mems(check=False):
     words, labels, _ = assemble(open(UASM).read())
     files = {UMEM: [f'{w:010x}' for w in words],
              CMEM: [f'{w:04x}' for w in CONST],
-             HMEM: [f'{w:07x}' for w in huff_mem_words()],
+             HMEM: [f'{w:05x}' for w in huff_mem_words()[:2048]],
+             HMEM_HI: [f'{w:05x}' for w in huff_mem_words()[2048:]],
              RMEM: [f'{r:03x}' for r in HUFF_ROOTS],
              USVH: ucode_svh(words, labels)}
     import dts_vecrom as V                       # the vector engine's ROMs

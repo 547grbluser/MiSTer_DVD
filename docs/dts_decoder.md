@@ -1,11 +1,12 @@
-# In-fabric DTS core decoder (`dvd/dts/`, planned)
+# In-fabric DTS core decoder (`dvd/dts/`)
 
-**Status: ✅ P0 BUILT; D3 and D5 decided. The reference is bit-exact against
-FFmpeg on 32 streams, spec maxima and joint intensity included; no RTL yet
-(2026-10-02).** Branch
-`feature/dts-decode` (`CORE_VERSION dev-dtsdecode`). Next concrete step: **P1** (§7), the
-engine standalone, with `tools/dts_fixed.py` as its golden and `tools/dts_writer.py`'s
-spec-maximum streams among its tests.
+**Status: ✅ P1 BUILT (2026-10-02): the engine's RTL is bit-exact against the
+emulator on all 34 gate streams. Standalone fit: 2,227 ALM, 31 M10K, 1 DSP,
+35.8 MHz at the binding −40 °C corner. Worst frame 39.8 % of real time over 61,678 census
+frames. Not wired into the core.** Branch `feature/dts-decode` (`CORE_VERSION
+dev-dtsdecode`). ⏳ **Next: a maintainer decision.** The engine does not fit the core's
+~1,125 spare ALMs on its own (§10 "P1b result"), so the order of P2 (codebook residency),
+P3 (wiring) and the P4 reclaims comes first.
 
 Today a DTS track is silent in `Decode PCM` mode: `dvd_audio_decode.sv` routes
 `frame_type == 1` to a discard (`// DTS: discard`), and DTS is audible only through IEC 61937
@@ -400,8 +401,10 @@ in telemetry, never wrong audio.
     first frames.
     The sweep sets priorities and test fixtures. It does not set limits: §5 does.
   - `dts_ref.py`, `dts_fixed.py`, and the LFE and downmix decisions (D3 ⏳).
-- **P1 — the engine, standalone.** (P1a ✅ 2026-10-02: ISA, assembler, emulator and
-  microcode, bit-exact on all 34 streams, 31 % of real time worst case, §10. P1b next.)
+- **P1 — the engine, standalone.** ✅ (P1a 2026-10-02: ISA, assembler, emulator and
+  microcode, bit-exact on all 34 streams. P1b 2026-10-02: the RTL bit-exact against the
+  emulator, the standalone fit 2,227 ALM / 31 M10K / 1 DSP / 35.8 MHz, §10 "P1b
+  result".)
   ISA, assembler, emulator, microcode, RTL, benches, then
   a standalone fit with every port a virtual pin. **This is the go/no-go on ALM and
   cycles.** A previously built microcoded decoder of this kind is the template for the
@@ -832,4 +835,78 @@ against `Machine.checksums` (same address order), and every PCM pair bit-exact.
   `w[511−i] = ±w[i]`, negated where bit 4 ≠ bit 5. That allows half a ROM (−1 M10K) for an
   add/subtract in the accumulator.
 
-**Next:** the standalone fit (ALM, M10K, DSP, fmax at both slow corners).
+### P1b result: the standalone fit, the go/no-go (2026-10-02)
+
+`USE_DOCKER=1 tools/fit_unit.sh dts_top "clk=27" dvd/dts/dts_seq.sv dvd/dts/dts_vec.sv
+dvd/dts/dts_top.sv`: Quartus 17.0.2, every port a virtual pin, SEED 1, both slow corners.
+
+| | First fit | **Final fit** (after the packing below) | §4 / §10 estimate | In the core |
+|---|---|---|---|---|
+| ALM | 2,176 | **2,227**: sequencer 853, vector engine 1,120, top 254 (about 100 of telemetry; the rest is virtual-pin packing) | engine 1,600–2,000 | ~1,125 spare at 97 % |
+| M10K | 43 | **31** | 30–34 | 41 free |
+| DSP | 1 | **1** | 1 | 17 free |
+| Fmax, −40 °C (binding) | 37.7 MHz | **35.8 MHz** (1.33× the clock); 37.7 at 100 °C | — | 27 MHz |
+
+**Cycles** (the calibrated emulator, `tools/dts_cycles.py --dir ~/dts-streams/census`):
+**every frame of all 327 census windows (61,678 frames, 147 streams on 90 discs) within
+39.8 % of real time**, the worst on *Shadoan*. None was refused. On the RTL bench the
+gate set's worst frame is 37.1 % (`tools/test_dts_isa.py`, 8 frames a stream).
+
+**Verdict.**
+- **Cycles, timing, M10K, DSP: go.** ⚠ The Fmax flatters: alone on an empty device
+  the placer has room it will not have beside the decoder. A 33 % margin is a good start,
+  not a promise.
+- **ALM: DTS alone does not fit.** About 2,100 for the engine and its telemetry, against
+  ~1,125 spare. §4's scenario table holds: A (DTS alone) and B do not fit, and the
+  **AC-3 parse migration (D) stays on the critical path**. This is the maintainer's
+  decision, and it orders P2, P3 and P4. No P4 work is started.
+
+**The M10K packing (43 → 31).** Most of the 43 was packing, not capacity. Each change
+was re-proved by both gates (`run_dts_seq.sh --red`, `run_dts.sh --red`) before the refit:
+- **Huffman tree 13 → 6** (decided). Quartus put 2,647 × 26-bit absolute nodes in
+  4K × 2 mode. Two changes fixed it:
+  - **A child is stored as an offset forward from its node.** The build order keeps
+    every child after its parent (1–118 measured), and the symbols are −64…64. So an
+    entry is `{leaf, 8 bits}` and a node 18 bits.
+  - **The tree is split into two ROMs**, 2,048 words (2K × 5, 4 blocks) and 1,024 (2),
+    with a 2:1 mux. A single ROM sliced 512 deep (`max_depth`) also gave 6 blocks, but
+    a 6:1 mux of 40 ALMs.
+
+  The generator decodes its image back and checks every code. RED Q18 (the offset
+  taken from the root) is caught.
+- **Microcode 4 → 2** (decided). The program was 9 words over 512. A taken branch to
+  an error vector (`ERR_BASE` + code, pc 992–1023) now acts as `err code`, so the 21
+  one-word `err` stubs are gone. The program is 500 words. The assembler refuses
+  `jmp`/`call` to a vector and a program that reaches the vectors. RED Q19 (a vector that
+  is not an error) is caught.
+- **Four tiny RAMs 4 → 1** (decided). The IMDCT scratch, the window's carried sums and
+  the PCM pairs share one 256 × 29 M10K: their phases never overlap. A simulation-only
+  check `$fatal`s on a same-cycle write collision. The emit reads L and R one after the
+  other, which adds 32 cycles to each MIXSYN.
+- Cost of all three: about +50 ALMs (the child adder, the vector decode, the shared RAM's
+  muxes), and Fmax 37.7 → 35.8 MHz.
+- ⏳ **Recorded, not taken: the window half.** Each prototype mirrors itself,
+  `w[511−i] = ±w[i]`, negated where bit 4 ≠ bit 5. That saves one M10K for an
+  add/subtract in the accumulator. With ALMs binding and M10K at 31, it was not worth it.
+- **Still in logic, not M10K:** the constant ROM (92 × 16), the IMDCT coefficients
+  (113 × 27) and the book roots (62 × 12). Moving them would trade ALMs for M10K, which is
+  the direction P4 wants, if M10K stays spare.
+
+**The handoff's open decisions, closed:**
+- ✅ Block-code division: restoring, the first digit divided as its bits arrive (above).
+- ✅ `mod_a`'s −85,479,984: stored halved, shift 22, inside the IMDCT program.
+- ✅ The cycle model: `dts_isa.CYC` was rebuilt from the RTL's structure. It is within
+  −0.22 / +0.04 % of the RTL bench on every timed arm, so `tools/dts_cycles.py` and
+  `test_dts_isa.py` [2] give RTL-accurate real-time margins cheaply.
+- ✅ A standalone-fit script: `tools/fit_unit.sh`.
+- ⏳ **A refused frame's output: deferred to P3**, with the PTS gate. Today the engine
+  emits the PCM it produced before the error and nothing after it (a refusal at the last
+  DSYNC leaves half the frame's pairs). The benches pin that behaviour (R1).
+- ⏳ `ram2`'s latency (P2): the cycles are reported as a function of it, 32 % → 36 % of
+  real time from 1 to 150 cycles. Prefetch is needed only far above that.
+
+**Gates for this engine:** `bench/dvd/run_dts_seq.sh --red` (37 arms, 19 mutations),
+`bench/dvd/run_dts.sh --red` (41 arms, 18 mutations), `python3 tools/test_dts_isa.py`,
+`python3 tools/dts_vecrom.py`, `python3 tools/dts_isa.py --asm --check`. Streams come
+from `DTS_GATE_DIR` (default `~/dts-streams/gate`, rebuilt by
+`tools/gen_dts_fixtures.py --discs`).
