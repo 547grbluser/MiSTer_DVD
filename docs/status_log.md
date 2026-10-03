@@ -22,7 +22,7 @@ predate later confirmations; the `CLAUDE.md` index carries the reconciled status
 
 ## Hardware status (THIS fork, verified 2026-06-21)
 
-- 🔧 **THE AC-3 PARSE ON THE SHARED AUDIO ENGINE (scenario E; 2026-10-03: A0–A2c done,
+- 🔧 **THE AC-3 PARSE ON THE SHARED AUDIO ENGINE (scenario E; 2026-10-03: A0–A2d done,
   not wired; branch `feature/ac3-engine` from `feature/dts-decode`, `CORE_VERSION
   dev-ac3engine`, not pushed).** Full record: `docs/ac3_engine.md`.
   - **Ask (maintainer):** measure whether moving the AC-3 parse (and later MP2) onto the
@@ -43,8 +43,12 @@ predate later confirmations; the `CLAUDE.md` index carries the reconciled status
       Worst frame 37.3 % of real time on the RTL.
   - **Decided (maintainer):** the 2K ROM for now; invalid codes refused and counted;
     today's decoder keeps its delta-BA rule; the RTL and a standalone fit (A2) before MP2.
-  - **Next:** A2d, fit leg (b) complete, against 2,233 ALM / 39 M10K, and the comparison
-    with today's AC-3 parse.
+    - A2d: standalone fit 2,921 ALM / 39 M10K / 1 DSP, 35.8 MHz at −40 °C. AC-3 adds
+      +688 to the DTS engine, against −2,687 measured for today's AC-3 parse and bit
+      readers. DTS plus the migrated parse is about +200 … +300 ALM net, against ~1,125
+      spare: it fits, where DTS alone does not.
+  - **Next:** the maintainer's decision. Recommended: wire the engine in for both (the
+    in-core fit is the real measurement). `docs/ac3_engine.md` "Open decisions".
   - **Known gaps:**
     - BAPZERO's write value: the only zero-SNR window codes exponent 0;
     - the pending item at a refusal: today's timing never leaves one at the engine;

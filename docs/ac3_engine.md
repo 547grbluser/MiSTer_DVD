@@ -1,6 +1,6 @@
 # The AC-3 parse on the shared audio engine (scenario E)
 
-**Status (2026-10-03): ✅ A0, ✅ A1, ✅ A2a, ✅ A2b, ✅ A2c done; next A2d (the fit).** The model is
+**Status (2026-10-03): ✅ A0–A2d done: the engine RTL decodes AC-3 and is fitted.** The model is
 bit-exact against the RTL on 30 streams. The whole AC-3 parse runs as an engine
 program (`dvd/dts/ac3.uasm`, emulated by `tools/ac3_isa.py`) and is bit-exact against
 the model on every block of those 30 streams. The sequencer's AC-3 units are built
@@ -8,7 +8,10 @@ the model on every block of those 30 streams. The sequencer's AC-3 units are bui
 their exact RTL cycle counts. **The whole engine decodes AC-3 (A2c):** every
 coefficient of every block it hands `imdct_512` equals dvd/ac3's own, on all 30
 streams. The worst frame needs **37 % of real time** with the IMDCT in series, on the
-RTL. **Next: A2d**, the standalone fit.
+RTL. **The fit (A2d): the engine running both programs is 2,921 ALM / 39 M10K / 1
+DSP standalone, 35.8 MHz cold. AC-3 adds +688 ALM to the DTS engine, against −2,687
+for today's AC-3 parse, so DTS plus the migrated parse comes to about +200 … +300 ALM
+net against ~1,125 spare.** ⏳ Next: the maintainer's call (§ "Open decisions").
 ✅ **Decided (maintainer, 2026-10-02): next is the AC-3 engine's RTL and a standalone
 fit (A2), before MP2.** ALMs are the binding resource, and the AC-3 engine's ALM cost
 is scenario E's least certain number; the same fit prices the hardwired
@@ -571,8 +574,50 @@ dump** up to the first refusal. So the engine is scored against today's RTL dire
     reset. That is not so after a DTS track.
 - DTS's gates stay green: `run_dts_seq.sh` and `run_dts.sh` (41 arms). The sequencer gate
   is `run_ac3_seq.sh --red`: 35 arms, 21 mutations.
-- **Next: A2d**, fit leg (b) complete, against 2,233 ALM / 39 M10K. Then the
-  comparison with today's AC-3 parse (−2,421 ALM measured, §4 of `dts_decoder.md`).
+- Next: A2d, below.
+
+## A2d: the standalone fit, the ALM answer (2026-10-03)
+
+`USE_DOCKER=1 tools/fit_unit.sh dts_top "clk=27" dvd/dts/dts_seq.sv dvd/dts/dts_vec.sv
+dvd/dts/dts_top.sv`, the same settings as P1b and leg (a): every port a virtual pin,
+SEED 1, both slow corners.
+
+| | ALM | sequencer | vector engine | top | M10K | DSP | Fmax −40 °C / 100 °C |
+|---|---|---|---|---|---|---|---|
+| P1b: DTS engine | 2,227 | 853 | 1,120 | 254 | 31 | 1 | 35.8 / 37.7 MHz |
+| A2a: + the shared 2K ROM | 2,233 | (P1b's split + 6) | | | 39 | 1 | 35.5 / 36.8 MHz |
+| A2b: + AC-3's sequencer units | 2,679 | 1,297 | 1,124 | 258 | 39 | 1 | 37.5 / 39.1 MHz |
+| **A2c: + AC-3's vector ops — the engine running both** | **2,921** | **1,300** | **1,331** | **290** | **39** | **1** | **35.8 / 37.3 MHz** |
+
+- **AC-3 on the engine costs +688 ALM** over the DTS engine with the shared ROM: the
+  sequencer's units +440, the vector ops +207, and the top's latches and new ports +32.
+  It costs **no M10K and no DSP**: the 2K ROM's 8 M10K were counted in leg (a).
+- **Against today's AC-3 parse**, measured per entity in the v0.8.0-era core
+  (`dts_decoder.md` §4 scenario E's removed rows): `audblk_parse`, `mantissa_dequant`,
+  `bit_allocation`, `exponent_decode`, `bsi_parse` + `sync_crc` + glue = 2,421; its two
+  bit readers 266; **−2,687 ALM** in all.
+- **DTS decode plus the AC-3 parse on one engine, against today's build:**
+
+  | | ALM |
+  |---|---|
+  | the engine, in core: 2,921 standalone − ~150 of virtual-pin packing (P1b's estimate) | ~+2,770 |
+  | glue into `imdct_512`'s coefficient port; the frame path (estimate) | +100 … +200 |
+  | today's AC-3 parse and bit readers, removed (measured) | −2,687 |
+  | **net** | **~+200 … +300** |
+
+  That is against **~1,125 ALM spare** at 97 %. **DTS fits once the AC-3 parse
+  moves onto the engine.** The DTS engine alone (~2,070 in core) does not.
+  ⚠ Standalone numbers: packing beside the decoder moves area ±5–10 %, and the
+  Fmax flatters. 35.8 MHz cold is 1.32× the clock, alone on an empty device.
+  M10K: +39 for the engine, −24 for the AC-3 parse, so about +15 against 41 free.
+- **Scenario E without DTS** (MP2 and AC-3 on the engine, no DTS) is not measured by
+  this fit. The fitted engine carries DTS's Huffman walker, XQ reader and DTS vector
+  ops. A no-DTS variant would need those parts removed and a refit.
+- **The hardwired per-band bit-allocation op is not worth building.** The 2K-ROM
+  decision deferred it to this fit. The microcoded bit allocation costs ROM words, not
+  ALMs, and the ROM's extra 4–6 M10K are affordable (M10K is not the binding resource).
+  A hardwired op would *add* ALMs, the binding resource, to save M10K. Recommendation:
+  keep the 2K ROM.
 
 ## Gate set
 
@@ -588,6 +633,18 @@ dump** up to the first refusal. So the engine is scored against today's RTL dire
   that both sides refused identically.
 
 ## Open decisions (⏳ the maintainer's)
+
+- **What A2d's fit enables (2026-10-03).** DTS decode plus the AC-3 parse on one engine
+  measures about +200 … +300 ALM net against today, within the ~1,125 spare. The
+  options, in order of what they buy:
+  1. **Wire the engine into the core for both** (DTS P2/P3 plus the AC-3 migration):
+     replace `ac3_parse`'s front end, feed `imdct_512` from `coef_q`, route DTS frames.
+     This is the in-core fit that turns these estimates into a measurement, and the
+     audio regression risk lives here (`bench/ac3` and the HIL by ear).
+  2. **Measure scenario E without DTS** first (a no-DTS variant and a refit), if the
+     no-DTS saving is wanted as a fallback number.
+  3. **MP2 on the engine** (the rest of scenario E). It saves ~−878 more, but its
+     synthesis needs its own LSB-bounded golden.
 
 - **The RTL's refusals.** It refuses acmod 0 (dual mono) and coupling-channel
   `deltbae == NEW`, and halts on any error. Trace identity says the engine reproduces
