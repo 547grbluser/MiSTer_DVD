@@ -178,9 +178,12 @@ around the stop:
   matching it exactly is not meaningful.
 - **0 windows where the model and the RTL disagree before a stop.**
 
-⏳ **Decision for an engine port: invalid codes.** Refuse the frame and count it, or
-decode leniently and count it (DTS's D5 precedent). Either way the behaviour becomes
-defined, where today's RTL reads out of range.
+✅ **Decided (maintainer, 2026-10-02): an engine port refuses a frame with an invalid
+code, and counts it** (`E_GROUP` for a grouped code past its range, `E_EXP` for an
+exponent outside 0–24, `E_CHBW` for a bandwidth code above 60). That is the house
+fail-loud rule, and `ac3.uasm` already does it. Decoding leniently and counting (DTS's
+D5) was the alternative. Either makes the behaviour defined where today's RTL reads out
+of range; 68 library windows carry such codes, 55 of them on one damaged disc.
 
 ⚠ **Finding: a latent RTL deviation from liba52 in delta bit allocation.**
 `audblk_parse.sv` resets `deltbae` to NONE at the **start of every block**, and
@@ -359,7 +362,9 @@ channel loop.
 - `dvd/dts/ac3_ucode.mem` and `ac3_const.mem` are **emulator images**. No RTL reads
   them yet, and nothing in `DVD.qsf` names them.
 - MP2 would be a third program in the same ROM.
-- Recommendation: accept the 2K ROM for now, and decide at the fit.
+- ✅ **Decided (maintainer, 2026-10-02): accept the 2K-deep ROM (8 M10K) for now.**
+  The hardwired per-band bit-allocation op is decided at the fit, when its ALM price is
+  known.
 
 ## Gate set
 
