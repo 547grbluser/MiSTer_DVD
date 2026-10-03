@@ -13,6 +13,11 @@ durable scope/decisions/verification knowledge from that repo so it isn't lost.
 - **Strict full-fabric RTL.** No soft processor / microcoded sequencer — the
   irregular parse / bit-allocation path is hand-written FSMs. (The Han thesis uses a
   PicoBlaze for control; we use it for the *algorithms only*, not the architecture.)
+  ⏳ **Being revisited at the maintainer's request (2026-10-02):** moving the parse
+  onto the microcoded engine built for DTS (`dvd/dts/`) is estimated at −1,000 …
+  −1,450 ALM with MP2 (`dts_decoder.md` §4 scenario E). It is measured first by a
+  model and an emulator, not RTL: `docs/ac3_engine.md`. This decision stands until a
+  fit says otherwise.
 - **Fail loud, never decode wrong.** Any syntax the datapath doesn't yet handle sets
   sticky **`err_unsupported`** (hardware) / `$fatal` (sim) rather than emitting
   garbage. As features land the fail-loud set *shrinks*, but an unhandled path always

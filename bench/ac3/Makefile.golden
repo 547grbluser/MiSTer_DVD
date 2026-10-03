@@ -1,0 +1,24 @@
+# Verilator build of the AC-3 front end's golden tap (golden_main.cpp): the parse's
+# exact per-block output, the contract docs/ac3_engine.md's engine port must match.
+#   make -f Makefile.golden            # build obj_golden/ac3_golden
+# Same RTL list as Makefile.cosim; --public-flat-rw exposes the internal blksw/dynrng.
+# No liba52: the RTL is the golden here.
+TOP     := ac3_front
+RTLDIR  := $(abspath $(CURDIR)/../../dvd/ac3)
+MDIR    := obj_golden
+BIN     := $(MDIR)/ac3_golden
+VSRC := \
+    $(RTLDIR)/bit_fifo.sv $(RTLDIR)/bit_reader.sv $(RTLDIR)/sync_crc.sv \
+    $(RTLDIR)/bsi_parse.sv $(RTLDIR)/audblk_parse.sv $(RTLDIR)/exponent_decode.sv \
+    $(RTLDIR)/bit_allocation.sv $(RTLDIR)/mantissa_dequant.sv $(RTLDIR)/imdct_512.sv \
+    $(RTLDIR)/ac3_parse.sv $(RTLDIR)/ac3_front.sv
+VFLAGS := --cc --exe --build -j 0 --public-flat-rw \
+    --top-module $(TOP) +incdir+$(RTLDIR) +define+AC3_COSIM \
+    --Mdir $(MDIR) -o ac3_golden -Wno-fatal -Wno-lint -Wno-style \
+    -CFLAGS "-std=c++17 -O2"
+.PHONY: all clean
+all: $(BIN)
+$(BIN): golden_main.cpp $(VSRC)
+	verilator $(VFLAGS) golden_main.cpp $(VSRC)
+clean:
+	rm -rf $(MDIR)
