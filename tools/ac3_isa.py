@@ -152,6 +152,7 @@ class Machine(D.Machine):
         self.mant_cycles = 0
         self.ucyc = {}                   # op -> cycles in its unit's states (the RTL's)
         self.vec_model = 0               # the modelled (vector-side) cycles, all frames
+        self.czero_nz = 0                # CZEROs that zeroed a nonzero coefficient
 
     def exp_of(self, base):
         return lambda k: self.rec[(base + k) & 0x7FF] & 31
@@ -302,6 +303,8 @@ class Machine(D.Machine):
             return self.charge(op, t, v + CYC['vec_tail'])
         if name == 'czero':
             slot, lo, hi = a[0], a[1], a[2]
+            if any(self.coef[slot][k] for k in range(lo, min(hi, 256))):
+                self.czero_nz += 1             # it zeroed a live coefficient (a RED arm's need)
             for k in range(lo, min(hi, 256)):
                 self.coef[slot][k] = 0
             n = max(0, min(hi, 256) - lo)
@@ -315,6 +318,11 @@ class Machine(D.Machine):
             return self.charge(op, 0, CYC['remat'] + 4 * max(n, 0))   # 2 reads + 2 writes a bin
         if name == 'imdct':
             self.snapshot()
+            b, r = self.blocks[-1], self.rec
+            side = (b['blksw'], b['dynrng'], r[0x000], r[0x002], r[0x004], r[0x005])
+            if tuple(x & 0xFFFF for x in a[:6]) != side:       # the args imdct_512 takes
+                raise D.EngineError(f'IMDCT args {a[:6]} are not the record\'s {side}')
+            b['side'] = side
             return self.charge(op, 0, CYC['imdct'])
         if name == 'cnt':
             return D.CYC['cnt']
@@ -393,6 +401,14 @@ def emulate(path, nframes=0, mutate=None):
 
 
 MLEV_OFF = {-1: 0, -2: 3, 3: 8, -3: 16, 4: 27}
+IP_DITH = 768                  # the dither LFSR's table in dts_vec's IMDCT program ROM
+
+
+def iprog_words(prog):
+    """dts_vec's iprog ROM: DTS's IMDCT program, then (at IP_DITH) the dither LFSR's
+    table, which AC-3's AQ / AQC read: AC-3 never runs that program."""
+    assert len(prog) <= IP_DITH
+    return list(prog) + [0] * (IP_DITH - len(prog)) + list(M.DITHER_LUT)
 
 
 def svh_lines():

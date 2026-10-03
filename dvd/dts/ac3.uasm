@@ -569,6 +569,22 @@ M_REMAT:
         min     r9, r9, r2              ; end = min(endmant0, endmant1)
         vop     REMAT                   ;MUT noremat: nop
 M_DONE:
+        ; the block's side information for imdct_512, as the op's arguments: r8 blksw
+        ; (a bit a channel), r9 dynrng, r10 acmod, r11 lfeon, r12 cmixlev, r13 surmixlev
+        li      r8, 0
+        li      r4, 0
+        ld      r7, F_NF
+M_BLKSW:
+        ld      r2, A_BLKSW[r4]
+        shl     r2, r2, r4
+        or      r8, r8, r2
+        addi    r4, r4, 1
+        blt     r4, r7, M_BLKSW
+        ld      r9, F_DYNRNG
+        ld      r10, F_ACMOD
+        ld      r11, F_LFEON
+        ld      r12, F_CMIX
+        ld      r13, F_SURMIX
         vop     IMDCT                   ; this block's coefficients are ready
         ret
 

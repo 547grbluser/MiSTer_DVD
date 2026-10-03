@@ -467,9 +467,9 @@ finds the main feature, navigates to it, and plays from start.
 > AC-3 parse reclaim; branch `feature/dts-decode`).
 >
 > **The AC-3 parse on the same engine (scenario E)** is being measured first:
-> **`docs/ac3_engine.md`**. A0–A2b are done (the model, the program, the shared ROM and
-> the sequencer's AC-3 units, all bit-exact). ⏳ Next: A2c, the vector side, then fit
-> leg (b) for the ALM answer. Branch `feature/ac3-engine`.
+> **`docs/ac3_engine.md`**. A0–A2c are done: the engine RTL decodes AC-3, every
+> coefficient equal to today's decoder's. ⏳ Next: A2d, the standalone fit, for the ALM
+> answer. Branch `feature/ac3-engine`.
 
 **Goal:** make DTS (and AC-3) tracks audible on an AV receiver.
 

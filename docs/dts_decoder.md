@@ -323,7 +323,7 @@ its row: §10 "P1b result".)
 
 **Scenario E: the engine for MP2 and AC-3 only, no DTS (estimated 2026-10-02, at the
 maintainer's request).** ⏩ The AC-3 half is now measured by an emulator
-(`docs/ac3_engine.md`, A1), and its sequencer units are built (A2b). The whole parse
+(`docs/ac3_engine.md`, A1), and the engine RTL now decodes it (A2c). The whole parse
 runs on the engine, bit-exact against the RTL on 30 streams. The worst frame needs
 37 % of real time with the IMDCT in series, now counting the built units at their RTL
 cycles. Its microcode is 779 words (1,279 with DTS's program, so a 2K-deep ROM of 8

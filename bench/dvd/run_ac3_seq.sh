@@ -12,6 +12,7 @@
 #     refused frame and one after it, so the restart is scored too)
 #   S1 noise 5.1 (the worst frame) with input stalls and item back-pressure
 #   S2 the invalid grouped-code window (E_GROUP mid-AQ) with stalls and back-pressure
+#   S3 the same under heavy back-pressure, so an item is still pending at the refusal
 #   R1 tone 5.1, frame 1's exponent codes rewritten: EXPD refuses (E_EXP)
 #   T1 tone 5.1, frame 1 delivered 200 bytes short: read past its end as zeros (counted)
 # and on every arm with no stall and no refusal, [cycles]: each op's cycles in its own
@@ -76,6 +77,7 @@ for s in "${STREAMS[@]}"; do
 done
 ARMS+=("S1|$NOISE|--frames 3|+stall=20 +xstall=5")
 ARMS+=("S2|$GROUP|--frames 5|+stall=10 +xstall=4")
+ARMS+=("S3|$GROUP|--frames 5|+xstall=200")
 ARMS+=("R1|$TONE|--frames 4 --badexp 1|")
 ARMS+=("T1|$TONE|--frames 4 --truncate 1:200|+cyc")
 declare -A STEM SIMARGS
@@ -206,9 +208,13 @@ PYEOF
   wait
   # back-pressure and refusal
   mut X18 S1 "S_AQ_E: if (can_out) begin                         // the next bin" "S_AQ_E: if (1'b1) begin                         // the next bin" "\[(trace|count|hang)\]" &
-  mut X19 S2 "cur_n <= 4'd0; in_frame <= 1'b0; drain_err <= 1'b1; xq_valid <= 1'b0;
-            state <= S_DRAIN;" "cur_n <= 4'd0; in_frame <= 1'b0; drain_err <= 1'b0; xq_valid <= 1'b0;
+  mut X19 S2 "cur_n <= 4'd0; in_frame <= 1'b0; drain_err <= 1'b1;
+            state <= S_DRAIN;" "cur_n <= 4'd0; in_frame <= 1'b0; drain_err <= 1'b0;
             state <= S_DRAIN;" "\[(trace|count|hang)\]" &
+  # the pending item at a refusal is kept for the engine (it stepped the emulator's LFSR)
+  mut X21 S3 "cur_n <= 4'd0; in_frame <= 1'b0; drain_err <= 1'b1;
+            state <= S_DRAIN;" "cur_n <= 4'd0; in_frame <= 1'b0; drain_err <= 1'b1; xq_valid <= 1'b0;
+            state <= S_DRAIN;" "\[count\]" &
   wait
   for f in "$RES"/*; do grep -v MUTFAIL "$f"; grep -q MUTFAIL "$f" && fail=1; done
   rm -rf "$RES"

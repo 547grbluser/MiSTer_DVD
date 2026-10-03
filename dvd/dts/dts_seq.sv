@@ -330,7 +330,8 @@ module dts_seq (
     //           ROM), one item to the vector engine. AQC first sends the band's channel
     //           set and each coupled channel's coordinate (Q5.18, a serial shift, ch1's
     //           phase applied). A refusal mid-op pulses err_valid: the vector engine
-    //           aborts the op on it.
+    //           finishes the item in flight and the one pending (every item emitted
+    //           has stepped the emulator's dither LFSR), then ends the op without done.
     logic  [5:0] u_op;
     logic [10:0] u_base, u_cop;              // a channel's bin base; a coordinate word
     logic  [8:0] u_k, u_end;                 // the next bin to read; the end
@@ -823,10 +824,12 @@ module dts_seq (
             end
             default: state <= S_RESET;
         endcase
-        // a unit's refusal: as ERR (drain the frame, restart at FRAME)
+        // a unit's refusal: as ERR (drain the frame, restart at FRAME). A pending item
+        // STAYS: the emulator stepped the dither LFSR for every bin it emitted, so the
+        // vector engine must process it (it drains on err_valid, docs/ac3_engine.md)
         if (rst_n && u_ref) begin
             err_valid <= 1'b1; err_code <= u_rcode; sp <= 3'd0;
-            cur_n <= 4'd0; in_frame <= 1'b0; drain_err <= 1'b1; xq_valid <= 1'b0;
+            cur_n <= 4'd0; in_frame <= 1'b0; drain_err <= 1'b1;
             state <= S_DRAIN;
         end
     end

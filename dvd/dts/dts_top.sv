@@ -9,6 +9,12 @@
 // top-level port: the codebooks are off-chip (docs/dts_decoder.md D4), answered by
 // the bench in P1b and by ram2 from P2. clk_sys, 27 MHz. docs/dts_decoder.md sec 10.
 //
+// AC-3 (codec 1, docs/ac3_engine.md): no PCM; each block's coefficients are handed to
+// imdct_512 instead. At the program's IMDCT op, imdct_req rises with the block's side
+// information latched (blk_*); the caller reads X through coef_ra -> coef_q (one cycle;
+// {slot, bin}: slots 0-4 the full-bandwidth channels, 6 LFE, 24-bit Q1.23 sign-extended
+// to 25) and pulses imdct_done.
+//
 // Telemetry (16-bit counters, saturating): frames decoded; frames refused, with the
 // last refusal's code (dts.uasm E_*) and a sticky mask of every code seen; bits read
 // past a frame's end (as 0); overflowed block codes decoded leniently (D5); frames
@@ -47,6 +53,18 @@ module dts_top (
     output logic  [15:0] lenient_codes,
     output logic  [15:0] dmix_ignored,
 
+    // AC-3: the block for imdct_512
+    output logic         imdct_req,
+    input  wire          imdct_done,
+    input  wire   [10:0] coef_ra,
+    output logic  [24:0] coef_q,
+    output logic   [4:0] blk_blksw,          // a bit a channel
+    output logic   [7:0] blk_dynrng,
+    output logic   [2:0] blk_acmod,
+    output logic         blk_lfeon,
+    output logic   [1:0] blk_cmix,
+    output logic   [1:0] blk_surmix,
+
     // benches
     output logic         vop_start,
     output logic   [5:0] vop_op,
@@ -60,13 +78,14 @@ module dts_top (
 
     logic [127:0] vop_args;
     logic  [23:0] xq_code;
+    logic  [10:0] xq_addr;
     logic         xq_valid, xq_ready;
     logic         err_valid, frame_done, overrun_bit, lenient;
     logic   [4:0] err_code;
 
     dts_seq u_seq (
         .clk, .rst_n, .codec, .fr_len, .fr_valid, .fr_ready, .in_byte, .in_valid, .in_ready,
-        .vop_start, .vop_op, .vop_args, .vop_done, .xq_code, .xq_valid, .xq_ready,
+        .vop_start, .vop_op, .vop_args, .vop_done, .xq_code, .xq_addr, .xq_valid, .xq_ready,
         .err_valid, .err_code, .frame_done, .overrun_bit, .lenient,
         .tr_valid, .tr_pc, .tr_kind, .tr_addr, .tr_val);
 
@@ -74,7 +93,17 @@ module dts_top (
         .clk, .rst_n, .start(vop_start), .op(vop_op), .args(vop_args), .done(vop_done),
         .xq_code, .xq_valid, .xq_ready,
         .cb_req, .cb_sel, .cb_addr, .cb_valid, .cb_data,
-        .pcm_l, .pcm_r, .pcm_valid, .pcm_ready);
+        .pcm_l, .pcm_r, .pcm_valid, .pcm_ready,
+        .xq_addr, .abort(err_valid), .imdct_req, .imdct_done, .coef_ra, .coef_q);
+
+    // AC-3: IMDCT's arguments, the block's side information (ac3.uasm M_DONE), latched
+    // on the op's start
+    always_ff @(posedge clk)
+        if (vop_start && vop_op == 6'd25) begin
+            blk_blksw <= vop_args[4:0];      blk_dynrng <= vop_args[23:16];
+            blk_acmod <= vop_args[34:32];    blk_lfeon  <= vop_args[48];
+            blk_cmix  <= vop_args[65:64];    blk_surmix <= vop_args[81:80];
+        end
 
     // CNT's counter id is r8 (dts_isa.CNT_DMIX_IGNORED = 0)
     wire cnt_dmix = vop_start && (vop_op == 6'd8) && (vop_args[15:0] == 16'd0);

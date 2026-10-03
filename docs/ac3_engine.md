@@ -1,12 +1,14 @@
 # The AC-3 parse on the shared audio engine (scenario E)
 
-**Status (2026-10-02): ✅ A0, ✅ A1, ✅ A2a, ✅ A2b done; next A2c.** The model is
+**Status (2026-10-03): ✅ A0, ✅ A1, ✅ A2a, ✅ A2b, ✅ A2c done; next A2d (the fit).** The model is
 bit-exact against the RTL on 30 streams. The whole AC-3 parse runs as an engine
 program (`dvd/dts/ac3.uasm`, emulated by `tools/ac3_isa.py`) and is bit-exact against
 the model on every block of those 30 streams. The sequencer's AC-3 units are built
 (A2b) and trace-identical to the emulator on all of them, with the emulator charging
-their exact RTL cycle counts. The worst frame needs **37 % of real time** with the
-IMDCT in series. **Next: A2c**, the vector side of AC-3's ops in `dts_vec.sv`.
+their exact RTL cycle counts. **The whole engine decodes AC-3 (A2c):** every
+coefficient of every block it hands `imdct_512` equals dvd/ac3's own, on all 30
+streams. The worst frame needs **37 % of real time** with the IMDCT in series, on the
+RTL. **Next: A2d**, the standalone fit.
 ✅ **Decided (maintainer, 2026-10-02): next is the AC-3 engine's RTL and a standalone
 fit (A2), before MP2.** ALMs are the binding resource, and the AC-3 engine's ALM cost
 is scenario E's least certain number; the same fit prices the hardwired
@@ -411,7 +413,8 @@ channel loop.
   | a coordinate (`AQC`) | `0x700 + ch` | Q5.18, the phase applied |
 
   The vector engine does the scale (a shift), the dither and the recombine, and
-  aborts the op on a refusal's `err_valid` (A2b). The
+  finishes the op's in-flight and pending items on a refusal's `err_valid`, then ends it
+  without `done` (A2b, "the refusal contract"). The
   emulator traces these items as kind 2 and every op's record write as kind 3, in the
   units' issue order: that is what the sequencer bench will score. The
   bit-allocation units read `baptab` and `latab` through the constant ROM's port
@@ -448,9 +451,17 @@ reader, XQ's restoring divider and the record and constant ROM ports. `tools/ac3
     exponent, with ch1's phase applied.
 - **The record RAM has one write port:** the program's stores and the units' writes.
   The units' writes are traced as kind 3.
-- **⚠ The abort contract (for A2c):** a unit's refusal pulses `err_valid` mid-op, and
-  **the vector engine must abort an in-flight AQ / AQC on it**. The sequencer drains
-  the frame and restarts at FRAME. It also drops a pending item (`xq_valid`).
+- **⚠ The refusal contract:** a unit's refusal pulses `err_valid` mid-op. The
+  sequencer drains the frame and restarts at FRAME. **It keeps a pending item**
+  (`xq_valid`), and the vector engine finishes the item in flight and that pending one
+  before it ends the op, without `done`.
+  - **Why:** the emulator steps the dither LFSR for every bin *before* it emits the
+    bin's item. So every item the sequencer emitted has already moved the LFSR. Dropping
+    one would put every later dithered coefficient one step out.
+  - dvd/ac3 can't arbitrate this: it halts at a refusal. The emulator is the only
+    definition.
+  - The first A2b cut cleared `xq_valid` at the refusal, and the stub aborted at once.
+    Caught in review before the vector side existed.
 - **Gate `bench/dvd/run_ac3_seq.sh`** (shares `dts_seq_tb.sv` with DTS, `+codec=1`;
   goldens from `tools/ac3_golden.py`): **34 arms GREEN**, every event identical:
   - every gate stream at 4 frames, and each refusal window at 5, so the restart after
@@ -493,16 +504,75 @@ reader, XQ's restoring divider and the record and constant ROM ports. `tools/ac3
     vector ops still to add.
   - Not yet priced: the hardwired per-band bit-allocation op (the 2K-ROM decision), so
     the comparison waits for leg (b) complete.
-- **Next (A2c):** AC-3's ops in `dts_vec.sv`:
-  - the bin items: the scale shift, the dither LFSR × 23170 and the recombine, all on
-    the DSP;
-  - CZERO, REMAT, and the IMDCT handshake;
-  - X-buffer writes;
-  - the abort above;
-  - an X-buffer read port and the side-info outputs on `dts_top` for `imdct_512`.
+- Next: A2c, below.
 
-  Its gate is a whole-engine bench against `.gold` coefficient dumps. Then **A2d**,
-  fit leg (b) against 2,233 ALM / 39 M10K.
+## A2c: the vector side; the whole engine decodes AC-3 (2026-10-03)
+
+`dvd/dts/dts_vec.sv` gained AC-3's vector ops. The coefficients live in the X buffer
+at `{slot, bin}`: slots 0–4 are the full-bandwidth channels, slot 6 is LFE, each word
+24-bit Q1.23 sign-extended to 25. AQC's coordinates go to `0x700 + ch`, the address the
+sequencer's item already carries (slot 7 is otherwise unused).
+
+- **AQ.** Each bin item is one of three things:
+  - `(m16 << 8) >>> exp`, through the datapath's direct path (floor);
+  - a dither, 2 cycles: the LFSR stepped, then `round(ns × 23170 / 2^(7+exp))` on the
+    DSP, with 0 past exponent 23;
+  - 0.
+- **AQC.** It latches the channel set and writes the coordinates. Each bin is scaled
+  once, or dithered for each coupled, dithered channel in channel order. Then it is
+  recombined into every coupled channel, `sat24((c × co) >> 18)`, a coordinate read and
+  a multiply each.
+- **The dither LFSR** is a vector-engine register, power-up 1. Its 256-word table sits
+  in the IMDCT program ROM at 768. That ROM had 427 spare words, so the table costs no
+  M10K, and AC-3 never runs the program.
+- **CZERO** is a zero loop.
+- **REMAT** is BFLY's pattern with sat24. It reads L, reads R, then writes L+R and L−R,
+  so both originals are read before either is written. The per-bin band predicate
+  equals the model's band walk because `end ≤ 253`.
+- **IMDCT** raises `imdct_req` until `imdct_done`, and hands the X buffer's read port
+  to `coef_ra → coef_q`.
+- **The block's side information** is IMDCT's arguments. `ac3.uasm` M_DONE loads blksw
+  (a bit a channel), dynrng, acmod, lfeon, cmixlev and surmixlev into r8–r13, and
+  `dts_top` latches them on the op's start (`blk_*`). The emulator raises if the
+  arguments differ from the record. The program grew 13 words, to 792.
+- **The refusal contract, the engine's half:** after `abort` (`err_valid`) mid-AQ/AQC,
+  the engine finishes the item in flight and the pending one, then goes idle without
+  `done`.
+
+**Gate `bench/dvd/run_ac3.sh`** runs `ac3_top_tb.sv`, `dts_top` with `codec = 1`. At every
+IMDCT handshake the bench reads the block out and scores every coefficient of every
+channel, the LFE slot and the side information against STEM.coef. That is the
+emulator's blocks, which `ac3_golden.py --rtl-gold` checks against **dvd/ac3's own
+dump** up to the first refusal. So the engine is scored against today's RTL directly.
+
+- **35 arms GREEN:**
+  - all 30 streams, with the X buffer **filled with junk first** (`+xjunk`, what a DTS
+    track leaves), so a coefficient the engine fails to write in a block shows from
+    block 0;
+  - noise 5.1 under input stalls, the E_GROUP window under stalls, E_EXP, truncation;
+  - B1, the worst frame against the 60 % budget.
+- **Worst frame 37.3 % of real time** (noise 5.1, 323K cycles), with `imdct_512`'s
+  measured 13.5K a block in series. The emulator's figure is 37.4 %.
+- `--red`: **13 mutations, each caught by its own arm.** Each mutation's stream is
+  picked by the feature it needs: REMAT by the model's `remat` counter; the rematrix
+  band edge by a block whose flags differ across bin 25.
+- **⚠ Recorded rather than passed:**
+  - **"0 past exponent 23" is an equivalent mutant.** |ns × 23170| < 2^30, so rounding
+    at a shift of 31 gives 0 anyway. The rule is kept because the model states it.
+  - **GAP: the pending item at a refusal.** With today's timing the engine has always
+    finished bin k before the sequencer refuses bin k + 1, because a fresh grouped code
+    alone takes ≥ 15 cycles. So "V_AW ignores it after abort" survives. The contract is
+    for a slower engine. Its sequencer half, keeping `xq_valid`, is scored by
+    `run_ac3_seq.sh` X21. That needed a new arm, S3 (`+xstall=200`), so that an item is
+    still pending at the refusal, and the stub now counts every item taken against the
+    trace's.
+  - **CZERO's own value is seen only through `+xjunk`.** No gate stream's CZERO zeroes
+    a live coefficient in 4 frames (`Machine.czero_nz`): the tail is already zero from
+    reset. That is not so after a DTS track.
+- DTS's gates stay green: `run_dts_seq.sh` and `run_dts.sh` (41 arms). The sequencer gate
+  is `run_ac3_seq.sh --red`: 35 arms, 21 mutations.
+- **Next: A2d**, fit leg (b) complete, against 2,233 ALM / 39 M10K. Then the
+  comparison with today's AC-3 parse (−2,421 ALM measured, §4 of `dts_decoder.md`).
 
 ## Gate set
 

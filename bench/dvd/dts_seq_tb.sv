@@ -6,8 +6,9 @@
 // back-pressure (+xstall=N), and a stub vector engine: done 1-4 cycles after a start,
 // or after the op's last item is taken -- XQ 8 codes; AC-3's AQ hi - lo bins (r11 -
 // r10), AQC 1 + its coupled channels' coordinates + hi - lo bins (r10 - r9; the channel
-// count from the band's 0x7F0 item). A refusal (err_valid) aborts the op, the contract
-// the real vector engine keeps (docs/ac3_engine.md). The program never reads an
+// count from the band's 0x7F0 item). A refusal (err_valid) ends the op without done;
+// the one item still pending is taken and discarded, as the real vector engine
+// processes it (docs/ac3_engine.md). The program never reads an
 // engine's result and the codes' bits are read here, so the trace does not depend on
 // the engine. Every register write, store, item and unit record write is compared, in
 // order, against STEM.trace: kind, pc, register / address / index, value.
@@ -55,7 +56,7 @@ module dts_seq_tb;
     logic [7:0]  bytes [];
     logic [15:0] flen [];
     logic [49:0] exp [];                 // {kind 2, pc 11, addr 13, val 24}
-    int n_bytes, n_frames, n_ev, n_vops, n_pairs, n_err, n_ovr, n_len, n_dmix;
+    int n_bytes, n_frames, n_ev, n_vops, n_pairs, n_err, n_ovr, n_len, n_dmix, n_items;
     int bi, fi, ei, frames, errs, gap, fgap, busy, idle, last_ei, quiet, ovr, len, nlen, ncnt;
 
     initial begin
@@ -81,9 +82,11 @@ module dts_seq_tb;
         for (int i = 0; i < n_frames; i++) begin r = $fscanf(fd, "%h", v); flen[i] = v[15:0]; end
         $fclose(fd);
         fd = $fopen({stem, ".trace"}, "r");
+        n_items = 0;
         for (int i = 0; i < n_ev; i++) begin
             r = $fscanf(fd, "%h %h %h %h", k, pc, a, v);
             exp[i] = {k[1:0], pc[10:0], a[12:0], v[23:0]};
+            if (k == 2) n_items++;
         end
         $fclose(fd);
     end
@@ -120,8 +123,8 @@ module dts_seq_tb;
     end
 
     // the stub engine
-    int vcnt, xtaken, xgap, xneed, ncpl;
-    logic xq_op;
+    int vcnt, xtaken, xgap, xneed, ncpl, xtot;
+    logic xq_op, xab;
     wire [15:0] a9 = vop_args[16 +: 16], a10 = vop_args[32 +: 16], a11 = vop_args[48 +: 16];
     always_comb begin
         ncpl = 0;
@@ -131,9 +134,10 @@ module dts_seq_tb;
         vop_done <= 1'b0;
         if (!rst_n) begin
             vcnt <= 0; xq_op <= 1'b0; xtaken <= 0; xq_ready <= 1'b0; xgap <= 0; xneed <= 0;
+            xab <= 1'b0; xtot <= 0;
         end else begin
             if (vop_start) begin
-                xtaken <= 0;
+                xtaken <= 0; xab <= 1'b0;
                 case (vop_op)
                     6'd1:  xneed <= 8;
                     6'd21: xneed <= ($signed(a10) < $signed(a11)) ? a11 - a10 : 0;
@@ -148,10 +152,11 @@ module dts_seq_tb;
                 vcnt <= vcnt - 1;
                 if (vcnt == 1) vop_done <= 1'b1;
             end
-            if (err_valid) begin vcnt <= 0; xq_op <= 1'b0; end      // a refusal aborts the op
+            if (err_valid) begin vcnt <= 0; xq_op <= 1'b0; xab <= xq_op; end  // the op ends
             if (xq_valid && xq_ready) begin
-                if (!xq_op) $fatal(1, "FAIL [trace] an item (addr %03x) outside an op", xq_addr);
-                xtaken <= xtaken + 1;
+                if (!xq_op && !xab) $fatal(1, "FAIL [trace] an item (addr %03x) outside an op", xq_addr);
+                if (!xq_op) xab <= 1'b0;                       // the one pending item
+                xtaken <= xtaken + 1; xtot <= xtot + 1;
                 if (codec && xq_addr == 11'h7F0) xneed <= xneed + ncpl;
                 if (xtaken == xneed - 1 && !(codec && xq_addr == 11'h7F0)) begin
                     vcnt <= 1 + ($urandom % 4); xq_op <= 1'b0;
@@ -219,6 +224,11 @@ module dts_seq_tb;
                     $fatal(1, "FAIL [count] %0d CNT ops (dmix ignored), the golden %0d", ncnt, n_dmix);
                 if (bi != n_bytes)
                     $fatal(1, "FAIL [count] %0d of %0d bytes taken", bi, n_bytes);
+                // every code / item emitted is taken: none dropped (a refusal keeps the
+                // pending one for the engine, which processes it)
+                if (xtot != n_items)
+                    $fatal(1, "FAIL [count] the engine took %0d codes / items, the golden emitted %0d",
+                           xtot, n_items);
                 if ($test$plusargs("cyc")) begin
                     int fd, r, op;
                     longint c;

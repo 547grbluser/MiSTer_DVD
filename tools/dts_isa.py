@@ -791,7 +791,8 @@ def write_mems(check=False):
     files.update({
         os.path.join(VDIR, 'dts_vconst.mem'): [f'{w:06x}' for w in V.vconst_words()],
         os.path.join(VDIR, 'dts_win.mem'): [f'{w:06x}' for w in V.window_words()],
-        os.path.join(VDIR, 'dts_iprog.mem'): [f'{w:05x}' for w in V.prog_words()],
+        # the IMDCT program, then AC-3's dither-LFSR table at 768 (dts_vec IP_DITH)
+        os.path.join(VDIR, 'dts_iprog.mem'): [f'{w:05x}' for w in A.iprog_words(V.prog_words())],
         os.path.join(VDIR, 'dts_icoef.mem'): [f'{c & 0x7FFFFFF:07x}' for c in V.ICOEF],
         os.path.join(VDIR, 'dts_vec.svh'): V.vec_svh()})
     bad = []

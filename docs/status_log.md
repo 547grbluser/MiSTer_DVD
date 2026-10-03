@@ -22,7 +22,7 @@ predate later confirmations; the `CLAUDE.md` index carries the reconciled status
 
 ## Hardware status (THIS fork, verified 2026-06-21)
 
-- 🔧 **THE AC-3 PARSE ON THE SHARED AUDIO ENGINE (scenario E; 2026-10-02: A0–A2b done,
+- 🔧 **THE AC-3 PARSE ON THE SHARED AUDIO ENGINE (scenario E; 2026-10-03: A0–A2c done,
   not wired; branch `feature/ac3-engine` from `feature/dts-decode`, `CORE_VERSION
   dev-ac3engine`, not pushed).** Full record: `docs/ac3_engine.md`.
   - **Ask (maintainer):** measure whether moving the AC-3 parse (and later MP2) onto the
@@ -37,13 +37,17 @@ predate later confirmations; the `CLAUDE.md` index carries the reconciled status
     - A2a: one 2K microcode ROM for both programs (+6 ALM, +8 M10K, fit leg (a)
       2,233 / 39).
     - A2b: the sequencer's AC-3 units in `dts_seq.sv`, trace-identical to the emulator,
-      with exact cycle counts (`run_ac3_seq.sh --red`: 34 arms, 20 mutations).
+      with exact cycle counts (`run_ac3_seq.sh --red`: 35 arms, 21 mutations).
+    - A2c: the vector side; the whole engine hands `imdct_512` every coefficient equal to
+      dvd/ac3's own on all 30 streams (`run_ac3.sh --red`: 35 arms, 13 mutations).
+      Worst frame 37.3 % of real time on the RTL.
   - **Decided (maintainer):** the 2K ROM for now; invalid codes refused and counted;
     today's decoder keeps its delta-BA rule; the RTL and a standalone fit (A2) before MP2.
-  - **Next:** A2c, the vector side of AC-3's ops in `dts_vec.sv`, scored against the
-    RTL's coefficient dumps. Then A2d, fit leg (b) against 2,233 ALM / 39 M10K.
+  - **Next:** A2d, fit leg (b) complete, against 2,233 ALM / 39 M10K, and the comparison
+    with today's AC-3 parse.
   - **Known gaps:**
     - BAPZERO's write value: the only zero-SNR window codes exponent 0;
+    - the pending item at a refusal: today's timing never leaves one at the engine;
     - the latab/baptab clamps: no stream reaches them;
     - recombine saturation: no stream reaches it.
 
