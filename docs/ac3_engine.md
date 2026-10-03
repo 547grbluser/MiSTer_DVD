@@ -1,8 +1,9 @@
 # The AC-3 parse on the shared audio engine (scenario E)
 
-**Status (2026-10-02): 📝 started. The golden tap is built; the model, the emulator
-and any RTL are not.** Branch `feature/ac3-engine` (from `feature/dts-decode`,
-`CORE_VERSION dev-ac3engine`, not pushed).
+**Status (2026-10-02): A0 under way. The golden tap is built; the model
+(`tools/ac3_model.py`) is bit-exact against the RTL on all 13 stock streams. The
+emulator and any RTL are not built.** Branch `feature/ac3-engine` (from
+`feature/dts-decode`, `CORE_VERSION dev-ac3engine`, not pushed).
 
 **Why.** `docs/dts_decoder.md` §4 scenario E estimates that moving MP2 and the AC-3
 parse onto the microcoded engine built for DTS (P1, `dvd/dts/`) saves **−1,000 …
@@ -112,6 +113,42 @@ its 591 ALMs are genuinely reclaimable: scenario E's row stands.
   digits are emitted reversed.
 - The quantizer cache is **block-persistent across ops**: engine state, not an
   op's local.
+
+## A0 result so far: the model
+
+`tools/ac3_model.py` is the parse in the RTL's arithmetic, at vector-op granularity:
+- `ungroup_exps`, `bit_allocate` (liba52's loops), `Mantissas.m16` (the grouped
+  caches), `scale_coeff`, `dither_coeff`, `recombine`, `rematrix`;
+- `Decoder` holds the state that persists across blocks and frames;
+- the RTL's level, dither, bit-allocation and band tables are parsed out of
+  `dvd/ac3/*.svh`.
+
+**Gate `tools/test_ac3_model.py`:** it rebuilds the tap, regenerates every golden
+from the current RTL, and requires bit-exact output on every stream, plus RED
+mutations of the model.
+- ✅ All 13 stock streams are **bit-exact** (12 frames each): acmod 1–7, coupled stereo
+  and 5.1 with LFE, BBB's short blocks with ch0 uncoupled.
+- Five RED arms bite: dither rounding, the recombine's shift, rematrix off, grouped
+  digits low-first, the coupling-coordinate placement.
+- ⏳ **Two arms bite on no stream**, because no stock stream has the feature: the
+  recombine's **saturation** and the stereo **phase flags**. The library census
+  (below) decides whether disc windows cover them. If not, derived fixtures can:
+  rewriting fixed-width fields of real frames (zero coupling exponents give huge
+  coordinates that saturate the recombine) keeps every frame's length.
+
+⚠ **Finding: a latent RTL deviation from liba52 in delta bit allocation.**
+`audblk_parse.sv` resets `deltbae` to NONE at the **start of every block**, and
+`bit_allocation.sv` applies `deltba` only when the block says NEW. liba52 resets it
+**once a frame** (`a52_frame`) and keeps NEW, and REUSE, across blocks. On a stream
+that sends delta-BA in one block and not in a later block of the same frame (or says
+REUSE), the RTL allocates without the delta where liba52 applies it. The bit
+allocations differ, so the mantissa bit counts differ and the block desynchronises.
+- No stock stream uses delta-BA, so the cosim's "bap bit-exact" could not see this.
+- The model follows the RTL by default; `Decoder(liba52_deltba=True)` gives liba52's
+  rule.
+- `tools/ac3_scan.py` decodes every library window both ways and counts the blocks
+  that differ. That measures how often a real disc hits this.
+- Fixing it changes today's decoder, so it is the maintainer's call, not this branch's.
 
 ## Gate set
 
