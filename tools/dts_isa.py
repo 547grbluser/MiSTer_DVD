@@ -63,7 +63,7 @@ import dts_tables as T   # noqa: E402
 
 REPO = os.path.dirname(HERE)
 UASM = os.path.join(REPO, 'dvd', 'dts', 'dts.uasm')
-UMEM = os.path.join(REPO, 'dvd', 'dts', 'engine_ucode.mem')    # both programs (DTS, AC-3)
+UMEM = os.path.join(REPO, 'dvd', 'dts', 'engine_ucode.mem')    # the programs (DTS, AC-3, MP2)
 CMEM = os.path.join(REPO, 'dvd', 'dts', 'engine_const.mem')
 HMEM = os.path.join(REPO, 'dvd', 'dts', 'dts_huff_lo.mem')      # nodes 0..2047
 HMEM_HI = os.path.join(REPO, 'dvd', 'dts', 'dts_huff_hi.mem')   # nodes 2048..: see huff_mem_words
@@ -808,16 +808,19 @@ def cb_host_images():
 def write_mems(check=False):
     words, labels, _ = assemble(open(UASM).read())
     import ac3_isa as A                          # the second program in the same ROM
+    import mp2_isa as P                          # ... and the third (docs/mp2_engine.md)
     awords, alabels = A.load_program()
-    allw = words + awords[len(words):]
-    allc = CONST + A.CONST
+    pwords, plabels = P.load_program()
+    assert pwords[:len(awords)] == awords and awords[:len(words)] == words
+    allw = pwords
+    allc = CONST + A.CONST + P.CONST
     assert len(allw) <= ERR_BASE and len(allc) <= 1024
     files = {UMEM: [f'{w:010x}' for w in allw],
              CMEM: [f'{w:04x}' for w in allc],
              HMEM: [f'{w:05x}' for w in huff_mem_words()[:2048]],
              HMEM_HI: [f'{w:05x}' for w in huff_mem_words()[2048:]],
              RMEM: [f'{r:03x}' for r in HUFF_ROOTS],
-             USVH: ucode_svh(allw, labels, alabels, len(allc)) + A.svh_lines()}
+             USVH: ucode_svh(allw, labels, alabels, len(allc)) + A.svh_lines() + P.svh_lines(plabels)}
     import dts_vecrom as V                       # the vector engine's ROMs
     files.update({
         os.path.join(VDIR, 'dts_vconst.mem'): [f'{w:06x}' for w in V.vconst_words()],
@@ -846,7 +849,7 @@ def write_mems(check=False):
         else:
             os.makedirs(os.path.dirname(path), exist_ok=True)
             open(path, 'w').write(text)
-    print(f'dts_isa: {len(words)} DTS + {len(allw) - len(words)} AC-3 = {len(allw)} microcode '
+    print(f'dts_isa: {len(words)} DTS + {len(awords) - len(words)} AC-3 + {len(allw) - len(awords)} MP2 = {len(allw)} microcode '
           f'words; {len(allc)} constant words; '
           f'{len(HUFF_NODES)} Huffman nodes, {len(HUFF_ROOTS)} book roots')
     if check:

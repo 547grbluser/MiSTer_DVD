@@ -22,6 +22,25 @@ predate later confirmations; the `CLAUDE.md` index carries the reconciled status
 
 ## Hardware status (THIS fork, verified 2026-06-21)
 
+- 🔧 **MP2 ON THE SHARED AUDIO ENGINE (2026-10-03: M0 + M1 done; branch
+  `feature/mp2-engine` from `feature/ac3-engine`, `CORE_VERSION dev-mp2engine`, not
+  pushed).** Full record: `docs/mp2_engine.md`.
+  - **Why:** `mp2_decode` is the last hardwired decoder: 839 ALM, 37 M10K and 5 DSP in
+    core. The estimate for the move is −400 … −600 ALM, as headroom. The risk is VCD,
+    whose audio is all MP2, so the bar is bit identity with `mp2_decode`, A/B.
+  - **M0:** a gate corpus of 17 real windows (three DVDs, three VCDs) and 72 synthetic
+    `twolame` streams covering every rate, mode, table and CRC case. `mp2_ref.py` ==
+    `mp2_decode` on all 89 (`bench/dvd/run_mp2_model.sh`).
+  - **M1:** `dvd/dts/mp2.uasm` (236 words) and `tools/mp2_isa.py`, bit-exact on all 89.
+    MDQ and MSYN are each computed the RTL's way and the model's way, so the
+    decomposition is proved on every op. Both saturations are provably dead. The
+    window splits V (31 bits) into two passes joined through DTS's carried-sum buffer,
+    so no product shift is needed. The worst frame is 54 % of real time, including 1.25×
+    headroom on the modelled ops. Gate: `tools/test_mp2_isa.py`, with 9 RED arms that
+    all bite and 6 refusal cases.
+  - **Next:** M2, the RTL. `codec` becomes 2 bits, DTS's RESET also clears the ring, X
+    widens to 27 bits, and the ring becomes 2,048 × 32. Then an A/B bench against
+    `mp2_decode`.
 - 🔧 **THE AC-3 PARSE ON THE SHARED AUDIO ENGINE (scenario E; 2026-10-03: A0–A2d done,
   not wired; branch `feature/ac3-engine` from `feature/dts-decode`, `CORE_VERSION
   dev-ac3engine`, not pushed).** Full record: `docs/ac3_engine.md`.

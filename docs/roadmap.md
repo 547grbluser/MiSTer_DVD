@@ -469,7 +469,12 @@ finds the main feature, navigates to it, and plays from start.
 > **The AC-3 parse on the same engine (scenario E)** is being measured first:
 > **`docs/ac3_engine.md`**. A0–A2d are done, and **W1 has wired it in:** the engine
 > is now the core's AC-3 front end, bit-identical to the decoder it replaced and ~290 ALM
-> smaller in core. ⏳ Next: DTS P2 (codebooks in DDR3) and P3 (the `T_DTS` arm). Branch `feature/ac3-engine`.
+> smaller in core. DTS P2 and P3 are done on the same branch, `feature/ac3-engine`.
+>
+> **MP2 on the same engine** (the rest of scenario E): **`docs/mp2_engine.md`**. M0 (the
+> gate corpus, with `mp2_ref.py` == `mp2_decode` on all 89 streams) and M1 (the program
+> and its emulator, bit-exact on all 89) are done. ⏳ Next: M2, the RTL and an A/B bench
+> against `mp2_decode`. Branch `feature/mp2-engine`.
 
 **Goal:** make DTS (and AC-3) tracks audible on an AV receiver.
 

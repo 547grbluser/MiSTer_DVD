@@ -2,8 +2,8 @@
 // The engine's sizes, both programs' entry points (DTS at 0, AC-3 after it, in
 // one ROM), and XQ's code-reader tables (packed: element i at [w*i +: w];
 // index abits - 1).
-localparam int UC_WORDS    = 1292;
-localparam int CONST_WORDS = 827;
+localparam int UC_WORDS    = 1528;
+localparam int CONST_WORDS = 997;
 localparam int HUFF_NODES  = 2647;
 localparam int HUFF_BOOKS  = 62;
 localparam [10:0] UC_DTS_RESET = 11'd0;
@@ -37,3 +37,9 @@ localparam [5:0]  V_AQC     = 6'd22;
 localparam [5:0]  V_CZERO   = 6'd23;
 localparam [5:0]  V_REMAT   = 6'd24;
 localparam [5:0]  V_IMDCT   = 6'd25;
+// MP2 (docs/mp2_engine.md): the entry points and op numbers
+localparam [10:0] UC_MP2_RESET = 11'd1292;
+localparam [10:0] UC_MP2_FRAME = 11'd1293;
+localparam [5:0]  V_MDQ     = 6'd26;
+localparam [5:0]  V_MSYN    = 6'd27;
+localparam [5:0]  V_RCLR    = 6'd28;
