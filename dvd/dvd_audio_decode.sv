@@ -10,6 +10,8 @@
 //      AC-3   -> audio_engine (the microcoded engine's AC-3 program + imdct_512:
 //                decode + 5.1->stereo downmix) -> pcm_out (Q8.23->s16)
 //      LPCM   -> lpcm_unpack (BE->LE 16-bit, L/R interleave)
+//      MP2    -> audio_engine (the engine's MP2 program; docs/mp2_engine.md M3), its
+//                pairs serialised into lpcm_unpack's FIFO, as DTS's
 //      DTS    -> discarded (no fabric DTS decoder yet; future: IEC 61937 to the
 //                Digital I/O board). unknown -> discarded.
 //
@@ -268,8 +270,7 @@ module dvd_audio_decode #(
     // fs coding matches the MP2 header: 0 = 44.1 k, 1 = 48 k (reset), 2 = 32 k.
     // nco_fs is latched in the drain-gate controller at the end of this file
     // (where `draining`/`cur_codec` are in scope — declaration-before-use).
-    wire [1:0] mp2_fs;
-    wire       mp2_synced;
+    wire [1:0] mp2_fs;                       // the engine's (MFS: the MP2 header's rate)
     logic [1:0] nco_fs;
 
     // Effective increment = nominal + av_sync trim (signed, ±0.5% so always > 0).
@@ -558,16 +559,16 @@ module dvd_audio_decode #(
     // its codebooks are in DDR3 (dts_tables_ok); before that, or if the copy's checksum
     // failed, it is discarded as before. eng_frame: the current frame is the engine's.
     wire         dts_ok_frame = (cur_type == T_DTS) && dts_tables_ok;
-    wire         eng_frame    = (cur_type == T_AC3) || dts_ok_frame;
+    // MP2 (docs/mp2_engine.md M3) is the engine's too: mp2_decode is gone, bit-identical
+    // pair for pair (bench/dvd/run_mp2_ab.sh)
+    wire         eng_frame    = (cur_type == T_AC3) || dts_ok_frame || (cur_type == T_MP2);
 
     // codec sink readiness for the byte currently offered
     logic        ac3_full;
     logic        lpcm_full;
-    logic        mp2_full;
     wire         sink_ready = discard_cur         ? 1'b1 :   // stale: null sink
-                              eng_frame            ? ~ac3_full  :   // AC-3, DTS
+                              eng_frame            ? ~ac3_full  :   // AC-3, DTS, MP2
                               (cur_type == T_LPCM) ? ~lpcm_full :
-                              (cur_type == T_MP2)  ? ~mp2_full  :
                               1'b1;                       // DTS without tables: discard
 
     // consume a byte this cycle?
@@ -660,8 +661,9 @@ module dvd_audio_decode #(
     always_ff @(posedge clk) begin
         if (rst) cur_codec <= T_AC3;
         else if ((state == S_POP) && !discard_cur) begin
-            if (cur_type != T_DTS) cur_codec <= cur_type;
-            // DTS plays out of the LPCM FIFO (the engine's pairs are fed into it)
+            // DTS and MP2 play out of the LPCM FIFO (the engine's pairs are fed into it)
+            if (cur_type == T_MP2) cur_codec <= T_LPCM;
+            else if (cur_type != T_DTS) cur_codec <= cur_type;
             else if (dts_tables_ok) cur_codec <= T_LPCM;
             // DTS without tables: discarded; keep the previous playable codec selected
         end
@@ -689,12 +691,14 @@ module dvd_audio_decode #(
     logic        ac3_desc_v;
     logic [15:0] ac3_desc_len;
     wire         ac3_fr_ready, ac3_in_ready, eng_codec_busy, eng_frame_ok;
-    // the program the engine runs: 1 AC-3, 0 DTS, chosen by the frame popped (a change
-    // waits for the engine to idle, then resets it; the descriptor waits meanwhile)
-    logic        eng_codec_req;
-    // the last frame the dispatcher played was DTS: the stall watchdog then watches the
-    // engine's DTS frames (cur_codec reads LPCM, the FIFO DTS plays out of)
-    logic        dts_active;
+    // the program the engine runs: 1 AC-3, 0 DTS, 2 MP2, chosen by the frame popped (a
+    // change waits for the engine to idle, then resets it; the descriptor waits)
+    logic  [1:0] eng_codec_req;
+    // the last frame the dispatcher played was DTS / MP2: the stall watchdog then watches
+    // the engine's frames (cur_codec reads LPCM, the FIFO both play out of), the LPCM
+    // unpacker takes the serialised pairs as 16-bit, and MP2's rate drives the NCO
+    logic        dts_active, mp2_active;
+    wire         eng_pcm = dts_active || mp2_active;
     assign dbg_dts_active = dts_active;
     // DTS's PCM pairs from the engine (serialised into the LPCM FIFO further down)
     wire [15:0]  dts_l, dts_r;
@@ -702,10 +706,11 @@ module dvd_audio_decode #(
     logic        ser_v;
     wire         dts_ready = !ser_v;
     always_ff @(posedge clk) begin
-        if (rst) begin eng_codec_req <= 1'b1; dts_active <= 1'b0; end
+        if (rst) begin eng_codec_req <= 2'd1; dts_active <= 1'b0; mp2_active <= 1'b0; end
         else if ((state == S_POP) && !discard_cur) begin
-            if (eng_frame) eng_codec_req <= (cur_type == T_AC3);
+            if (eng_frame) eng_codec_req <= (cur_type == T_AC3) ? 2'd1 : (cur_type == T_MP2) ? 2'd2 : 2'd0;
             dts_active <= dts_ok_frame;
+            mp2_active <= (cur_type == T_MP2);
         end
     end
     always_ff @(posedge clk) begin
@@ -773,11 +778,11 @@ module dvd_audio_decode #(
             // the decoder is then OUTPUT-blocked on the full pcm fifo by design —
             // not stuck — and a self-heal reset would dump the very bytes queued
             // for the scheduled playback start.
-            if (imdct_done || eng_frame_ok || !((cur_codec == T_AC3) || dts_active) || !drain_en)
+            if (imdct_done || eng_frame_ok || !((cur_codec == T_AC3) || eng_pcm) || !drain_en)
                 ac3_wdog <= '0;
             else                           ac3_wdog <= ac3_wdog + 1'b1;
             // input-activity tracker: cleared on decode progress, set when a byte is fed
-            if (imdct_done || eng_frame_ok || !((cur_codec == T_AC3) || dts_active))
+            if (imdct_done || eng_frame_ok || !((cur_codec == T_AC3) || eng_pcm))
                 ac3_fed_since_prog <= 1'b0;
             else if (ac3_wr)               ac3_fed_since_prog <= 1'b1;
             // start a reset pulse on a fresh error, or a stall timeout WHILE FED
@@ -832,6 +837,8 @@ module dvd_audio_decode #(
         .dts_r       (dts_r),
         .dts_valid   (dts_valid),
         .dts_ready   (dts_ready),
+        .mp2_fs      (mp2_fs),
+        .n_ignored   (),
         .cb_req      (cb_req),
         .cb_sel      (cb_sel),
         .cb_addr     (cb_addr),
@@ -906,7 +913,7 @@ module dvd_audio_decode #(
     lpcm_unpack #(.FIFO_AW(12), .CB_INIT(LPCM_INIT)) lpcm_unpack_inst (
         .clk      (clk),
         .rst      (rst | (cdda_mode & cdda_flush)),
-        .quant    ((cdda_mode || dts_active) ? 2'd0 : lpcm_quant),
+        .quant    ((cdda_mode || eng_pcm) ? 2'd0 : lpcm_quant),
         .le       (cdda_mode),
         .wr_en    ((cdda_mode ? cdda_wr_en : (lpcm_wr || ser_wr)) && !cb_cp_mode),
         .wr_data  (cdda_mode ? cdda_wr_data : lpcm_wr ? ring_byte : ser_byte),
@@ -922,63 +929,20 @@ module dvd_audio_decode #(
     assign cb_lpcm_q = {lpcm_l, lpcm_r};
 
     // ---------------------------------------------------------------------
-    // MP2 (MPEG-1 Layer II) decoder — the DVD-spec "MPEG audio" format
-    // (stream_id 0xC0+n, T_MP2 = 2'd3). Bit-exact vs tools/mp2_ref.py; see
-    // dvd/mp2/mp2_decode.sv. Internal ~85 ms PCM FIFO (PCM_AW=12), same
-    // elastic-buffer sizing rationale as lpcm_unpack.
+    // MP2 (MPEG-1 Layer II) decodes on the audio engine (docs/mp2_engine.md M3; above):
+    // mp2_decode, its own FIFO and its self-heal are gone. A frame the engine cannot
+    // decode is refused and drained (no reset), as AC-3 and DTS. What stays is the
+    // half of the DTS ADPCM codebook its PCM FIFO carried at power-up (D4): the same
+    // 4096 x 32 words, read out once by dts_cb_mem (dvd/dts/cb_host_ram.sv).
     // ---------------------------------------------------------------------
-    wire        mp2_wr = consume && (cur_type == T_MP2) && !discard_cur;
-    wire signed [15:0] mp2_l, mp2_r;
-    wire        mp2_aud_valid;
-    wire        mp2_err;
-
-    // MP2 self-heal, mirroring the AC-3 pattern above: sticky err_unsupported
-    // (free-format / corrupt header after sync) or a fed-but-stuck stall pulses
-    // a local reset so the decoder re-syncs; starvation (no bytes) never resets
-    // (the pop lesson). Progress signal = mp2_aud_valid (a popped pair proves
-    // the whole decode path is moving); held clear while the drain gate blocks
-    // output, exactly like the AC-3 watchdog.
-    wire        mp2_core_rst;
-    logic [4:0]  mp2_rsthold;
-    logic [23:0] mp2_wdog;
-    logic        mp2_fed_since_prog;
-    wire         mp2_stall_rst = (&mp2_wdog) && mp2_fed_since_prog;
-    always_ff @(posedge clk) begin
-        if (rst) begin
-            mp2_rsthold        <= '0;
-            mp2_wdog           <= '0;
-            mp2_fed_since_prog <= 1'b0;
-        end else begin
-            if (mp2_aud_valid || (cur_codec != T_MP2) || !drain_en) mp2_wdog <= '0;
-            else                                                    mp2_wdog <= mp2_wdog + 1'b1;
-            if (mp2_aud_valid || (cur_codec != T_MP2)) mp2_fed_since_prog <= 1'b0;
-            else if (mp2_wr)                           mp2_fed_since_prog <= 1'b1;
-            if (mp2_rsthold != 0)
-                mp2_rsthold <= mp2_rsthold - 1'b1;
-            else if (mp2_err || mp2_stall_rst)
-                mp2_rsthold <= 5'd31;
-        end
-    end
-    assign mp2_core_rst = rst | (mp2_rsthold != 0);
-
-    mp2_decode #(.PCM_AW(12), .CB_INIT(MP2_INIT)) mp2_decode_inst (
-        .clk            (clk),
-        .rst            (mp2_core_rst),
-        .wr_en          (mp2_wr),
-        .wr_data        (ring_byte),
-        .full           (mp2_full),
-        .aud_ce         (aud_ce_play),
-        .audio_l        (mp2_l),
-        .audio_r        (mp2_r),
-        .aud_valid      (mp2_aud_valid),
-        .synced         (mp2_synced),
-        .err_unsupported(mp2_err),
-        .fs_o           (mp2_fs),
-        .dbg_s_nz       (dbg_mp2_s_nz),
-        .dbg_pcm_nz     (dbg_mp2_pcm_nz),
-        .cp_step        (cb_mp2_step),      // D4 codebook copy
-        .cp_q           (cb_mp2_q)
+    cb_host_ram #(.AW(12), .CB_INIT(MP2_INIT)) cb_host_mp2_inst (
+        .clk     (clk),
+        .rst     (rst),
+        .cp_step (cb_mp2_step),             // D4 codebook copy
+        .cp_q    (cb_mp2_q)
     );
+    assign dbg_mp2_s_nz   = 1'b0;           // (MP2_TONE_PROBE: mp2_decode's taps)
+    assign dbg_mp2_pcm_nz = mp2_active && dts_valid && ((dts_l != 16'd0) || (dts_r != 16'd0));
 
     // ---------------------------------------------------------------------
     // Target mux: pick the active codec and latch each new sample into
@@ -1009,8 +973,6 @@ module dvd_audio_decode #(
             tgt_nr = '0;
         end else if (eff_codec == T_LPCM) begin
             if (lpcm_aud_valid) begin tgt_nl = lpcm_l; tgt_nr = lpcm_r; end
-        end else if (eff_codec == T_MP2) begin
-            if (mp2_aud_valid)  begin tgt_nl = mp2_l;  tgt_nr = mp2_r;  end
         end else begin
             if (ac3_aud_valid)  begin tgt_nl = ac3_l;  tgt_nr = ac3_r;  end
         end
@@ -1059,8 +1021,7 @@ module dvd_audio_decode #(
 
     // the target mux's own "a new sample was latched" condition, verbatim
     wire tgt_upd = !rst && enable &&
-                   ((eff_codec == T_LPCM) ? lpcm_aud_valid :
-                    (eff_codec == T_MP2)  ? mp2_aud_valid  : ac3_aud_valid);
+                   ((eff_codec == T_LPCM) ? lpcm_aud_valid : ac3_aud_valid);
 
     reg [16:0] declick_win = 17'd0;
     reg        soft_arm    = 1'b0;
@@ -1155,11 +1116,10 @@ module dvd_audio_decode #(
     assign dbg_skip_run       = skip_run;
     assign dbg_play_pts       = play_pts;
 
-    wire active_avalid = (cur_codec == T_LPCM) ? lpcm_aud_valid :
-                         (cur_codec == T_MP2)  ? mp2_aud_valid  : ac3_aud_valid;
+    wire active_avalid = (cur_codec == T_LPCM) ? lpcm_aud_valid : ac3_aud_valid;
 
     assign dbg_cur_codec  = cur_codec;
-    assign dbg_mp2_avalid = mp2_aud_valid;
+    assign dbg_mp2_avalid = mp2_active && lpcm_aud_valid;
     // start when stc - play_pts - av_ofs >= 0 (35-bit signed headroom)
     wire signed [34:0] start_delta =
         $signed({2'b0, stc}) - $signed({2'b0, play_pts}) - 35'($signed(av_ofs));
@@ -1231,7 +1191,7 @@ module dvd_audio_decode #(
             if (cdda_mode)
                 nco_fs <= cdda_fs;
             else if (!draining)
-                nco_fs <= (cur_codec == T_MP2 && mp2_synced) ? mp2_fs : 2'd1;
+                nco_fs <= mp2_active ? mp2_fs : 2'd1;     // the engine's MFS (the header's)
 
             // latch the phase reference: first PTS-tagged dispatch while armed
             if (!draining && !play_pts_valid && dispatch_pts_valid) begin

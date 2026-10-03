@@ -17,6 +17,8 @@
 #   S2  mono with heavy back-pressure (the duplicated emit)
 #   R1  frame 1 delivered one byte short: refused (E_LEN) before any of its PCM; the
 #       frames after it prove nothing of it was taken
+#   L1  frame 1 followed by 37 junk bytes in its descriptor (what mp2_reframer passes
+#       when no sync follows a frame): decoded, the junk drained, counted (CNT 0)
 #   D1  the ring and the carried sums start as garbage (+dirty): RESET's RCLR clears them
 #
 # --red [MUTS="M1 M4" to run only those]: mutations on a COPY of the RTL, each caught
@@ -56,6 +58,7 @@ ARMS+=("S1|$SY/tw_48000_d_384k.mp2|--frames 3|+stall=20 +ostall=600|0")
 ARMS+=("S2|$SY/tw_48000_m_64k.mp2|--frames 2|+ostall=1500|0")
 ARMS+=("R1|$SY/tw_44100_j_128k.mp2|--frames 3 --short 1||0")
 ARMS+=("D1|$SY/tw_32000_s_128k.mp2|--frames 2|+dirty|0")
+ARMS+=("L1|$SY/tw_48000_s_128k.mp2|--frames 3 --long 1:37||0")
 declare -A STEM SIMARGS TIMED
 
 echo "== GREEN: goldens (${#ARMS[@]} arms) =="
@@ -167,7 +170,7 @@ PYEOF
   mut M9 $ST "if (side) off1 <= off1 - 10'd64; else off0 <= off0 - 10'd64;" "if (side) off1 <= off1 - 10'd32; else off0 <= off0 - 10'd32;" '\[vop\]' &
   mut M10 S2 "pb_r = ((st == V_EMITL) || (st == V_EMITW)) && !m_mono;" "pb_r = ((st == V_EMITL) || (st == V_EMITW));" '\[pcm\]' &
   mut M11 D1 "b2_we = (k_d < 12'd64); b2_wa = k_d[5:0];" "b2_we = 1'b0; b2_wa = k_d[5:0];" '\[vop\]' &
-  mut M12 $F32 "else if (vop_start && vop_op == 6'd27) mp2_fs <= vop_args[33:32];" "else if (vop_start && vop_op == 6'd27) mp2_fs <= vop_args[17:16];" '\[count\]' &
+  mut M12 $F32 "else if (vop_start && vop_op == 6'd29) mp2_fs <= vop_args[1:0];" "else if (vop_start && vop_op == 6'd29) mp2_fs <= 2'd1;" '\[count\]' &
   wait
   mut M13 $ST "ma = {{11{a1[15]}}, a1}; mb = {10'd0, ic_q[16:0]}; acc_en = 1'b1;" "ma = {11'd0, a1}; mb = {10'd0, ic_q[16:0]}; acc_en = 1'b1;" '\[vop\]' &
   mut M14 $ST "if (!mwd_p) begin rsh = 6'd16; b2_we = 1'b1;" "if (!mwd_p) begin rsh = 6'd15; b2_we = 1'b1;" '\[vop\]' &

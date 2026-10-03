@@ -28,7 +28,7 @@ python3 tools/dts_golden.py "$T2" --out "$GEN/r1" --frames 3 --refuse 1 > "$GEN/
 python3 tools/dts_golden.py "$SHA" --out "$GEN/sh" --frames 3 > "$GEN/sh.glog" || { cat "$GEN/sh.glog"; exit 1; }
 python3 tools/ac3_golden.py tools/streams/tone_5p1_48k_192k.ac3 --out "$GEN/ac3" --frames 3 > "$GEN/ac3.glog" || { cat "$GEN/ac3.glog"; exit 1; }
 SRC="dvd/ac3/*.sv dvd/dts/dts_seq.sv dvd/dts/dts_vec.sv dvd/dts/dts_top.sv dvd/audio_engine.sv
-     dvd/lpcm_unpack.sv dvd/mp2/mp2_decode.sv dvd/dvd_audio_decode.sv"
+     dvd/lpcm_unpack.sv dvd/dts/cb_host_ram.sv dvd/dvd_audio_decode.sv"
 TB=bench/dvd/dts_dec_tb.sv
 ARMS=("T2|+stem=$ROOT/$GEN/t2" "L150|+stem=$ROOT/$GEN/t2 +cblat=150" "SH|+stem=$ROOT/$GEN/sh"
       "R1|+stem=$ROOT/$GEN/r1" "SW|+stem=$ROOT/$GEN/t2 +ac3=$ROOT/$GEN/ac3" "OFF|+stem=$ROOT/$GEN/t2 +notables")

@@ -41,12 +41,13 @@
 // neither ever saturates (proved there), so neither op clips.
 //   op 26 MDQ    a0 X address, a1 x16, a2 d16, a3 class, a4 scalefactor index:
 //                S = floor(floor((x16 C + d16 C) / 2^7) SCF / 2^20), C and SCF from icoef
-//   op 27 MSYN   a0 k, a1 mono, a2 fs (dts_top latches it): per channel (channel 0 only
+//   op 27 MSYN   a0 k, a1 mono: per channel (channel 0 only
 //                if mono) the offset -= 64; the matrix, 2,048 MACs, V = floor(sum / 2^14)
 //                into the ring; the window in two passes of 512 (V is 31 bits): the low
 //                halves into b2 as floor(sum / 2^16), then the high halves on top of it,
 //                floor(sum / 2), clip24, the PCM stage; then 32 pairs out (mono: L twice)
 //   op 28 RCLR   zero the ring and b2 (DTS's and MP2's RESET: the two share them)
+//   op 29 MFS    no vector work (as CNT): dts_top latches a0, the stream's rate
 // A refusal mid-AQ / AQC (abort, the sequencer's err_valid) ends the op WITHOUT done,
 // after the item in flight and the one still pending: the emulator stepped the dither
 // LFSR for every item the sequencer emitted. The LFSR (power-up 1) lives here; its

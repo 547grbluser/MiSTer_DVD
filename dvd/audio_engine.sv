@@ -27,7 +27,8 @@
 //  like mantissa_dequant's coeff_mem; the engine holds X until imdct_done.
 //
 //  DTS (docs/dts_decoder.md P3): the same engine runs dvd/dts/dts.uasm when codec_req
-//  is 0. A change of program waits until the engine is idle at FRAME (no frame in
+//  is 0, and MP2 (docs/mp2_engine.md M3) dvd/dts/mp2.uasm when it is 2: both leave
+//  stereo pairs on dts_l/dts_r/dts_valid, and MP2's sampling frequency on mp2_fs. A change of program waits until the engine is idle at FRAME (no frame in
 //  flight, no IMDCT pending), then holds it in reset for a few cycles with the new
 //  codec: codec_busy is high from the request until then, and the caller must not
 //  present a descriptor meanwhile (the old program would take it). DTS's stereo PCM
@@ -43,7 +44,7 @@
 module audio_engine (
     input  wire         clk,
     input  wire         rst,
-    input  wire         codec_req,           // 1 AC-3, 0 DTS: the program to run
+    input  wire   [1:0] codec_req,           // 1 AC-3, 0 DTS, 2 MP2: the program to run
     output logic        codec_busy,          // a change of program is pending: hold
                                              // the descriptor
 
@@ -67,6 +68,9 @@ module audio_engine (
     output logic [15:0] dts_l,
     output logic [15:0] dts_r,
     output logic        dts_valid,
+    output logic  [1:0] mp2_fs,              // MP2: the stream's rate (0 44.1, 1 48, 2 32 kHz)
+    output logic [15:0] n_ignored,           // CNT 0: DTS downmixes ignored, MP2 frames
+                                             // longer than their header
     input  wire         dts_ready,
     output logic        cb_req,
     output logic        cb_sel,
@@ -102,13 +106,13 @@ module audio_engine (
     logic  [5:0] vop_op;
     logic        im_busy;                    // this request's transform is running/done
     // the program: a change waits for the engine to idle at FRAME, then resets it
-    logic        eng_codec;
+    logic  [1:0] eng_codec;
     logic  [2:0] sw_cnt;
     logic        e_fr_ready;
     wire         idle_at_frame = e_fr_ready && !imdct_req && !im_busy;
     always_ff @(posedge clk) begin
         if (rst) begin
-            eng_codec <= 1'b1; sw_cnt <= 3'd0;
+            eng_codec <= 2'd1; sw_cnt <= 3'd0;
         end else if (sw_cnt != 3'd0) sw_cnt <= sw_cnt - 3'd1;
         else if (codec_req != eng_codec && idle_at_frame) begin
             eng_codec <= codec_req; sw_cnt <= 3'd7;
@@ -121,12 +125,12 @@ module audio_engine (
     assign fr_ready = e_fr_ready && !codec_busy;
 
     dts_top u_eng (
-        .clk, .rst_n(e_rst_n), .codec({1'b0, eng_codec}),
+        .clk, .rst_n(e_rst_n), .codec(eng_codec), .mp2_fs,
         .fr_len, .fr_valid(e_fr_valid), .fr_ready(e_fr_ready), .in_byte, .in_valid, .in_ready,
         .cb_req, .cb_sel, .cb_addr, .cb_valid, .cb_data,
         .pcm_l(dts_l), .pcm_r(dts_r), .pcm_valid(dts_valid), .pcm_ready(dts_ready),
         .frames(e_frames), .refused(e_refused), .last_err(e_last_err), .err_seen(err_seen),
-        .overrun_bits(e_ovr), .lenient_codes(), .dmix_ignored(),
+        .overrun_bits(e_ovr), .lenient_codes(), .dmix_ignored(n_ignored),
         .frame_end(e_fend), .refuse(e_ref), .refuse_code(e_rcode),
         .imdct_req, .imdct_done(e_imdct_done), .coef_ra, .coef_q,
         .blk_blksw, .blk_dynrng, .blk_acmod, .blk_lfeon, .blk_cmix, .blk_surmix,

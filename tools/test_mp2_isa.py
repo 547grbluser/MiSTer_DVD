@@ -10,8 +10,10 @@ Claims:
   [2] every frame fits BUDGET of real time (1152 / fs at 27 MHz): the sequencer at the
       RTL's own cycle counts, the three new vector ops MODELLED, with CYC_HEADROOM;
   [3] the generated images match the programs (dts_isa.py --asm --check);
-  [4] a frame whose descriptor length is not the header's is refused (E_LEN), and so
-      are a bad sync, Layer I/III, free format and the reserved rate.
+  [4] a frame shorter than its header's length is refused (E_LEN), and so are a bad
+      sync, Layer I/III, free format and the reserved rate; one LONGER than its header
+      (mp2_reframer appends what follows a frame until the next sync) is decoded, the
+      rest drained and counted (CNT counter 0).
 RED arms: microcode mutations (`;MUT name:` lines in mp2.uasm), each tied to the
 stream feature it needs; one that bites on no stream with the feature is a FAIL, one
 whose feature no stream has is a GAP.
@@ -118,6 +120,20 @@ def refusals():
         good = m.errors == {code: 1} and not m.pcm[0]
         ok &= good
         print(f'[4] {"PASS" if good else "FAIL"} {name}: errors {m.errors}, {len(m.pcm[0])} pairs')
+    for mut in (None, 'lenexact'):            # a long frame: decoded, counted (and RED:
+        w, lb = P.load_program(mut)           # an exact-length check refuses it)
+        m = P.Machine(w, lb)
+        m.feed(bytes(fr) + b'\x12\x34\xff\xf0\x00')
+        m.feed(bytes(fr))
+        m.run()
+        good = not m.errors and len(m.pcm[0]) == 2304 and m.counters == {0: 1}
+        if mut:
+            ok &= not good
+            print(f'    RED {mut:8s} ' + ('bites on the long frame' if not good else 'BLIND: FAIL'))
+        else:
+            ok &= good
+            print(f'[4] {"PASS" if good else "FAIL"} a frame 5 bytes long: {len(m.pcm[0])} pairs, '
+                  f'counters {m.counters}, errors {m.errors}')
     m = P.Machine(words, labels)              # and a good frame after a refused one decodes
     m.feed(bytes(fr[:-1]))
     m.feed(bytes(fr))

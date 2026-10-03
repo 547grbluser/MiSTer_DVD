@@ -1,7 +1,7 @@
 // vcd_chain_tb.sv — full-chain VCD test: a REAL deblocked VCD slice (MPEG-1
 // system stream, MP2 44.1 kHz audio on stream_id 0xC0) through the pipeline
 //     ps_demux -> ac3_reframer -> dts_reframer -> mp2_reframer -> audio_ring
-//     -> dvd_audio_decode (mp2_decode inside)
+//     -> dvd_audio_decode (MP2 on the audio engine, out of the LPCM FIFO)
 // with the PCM output compared BIT-EXACT against tools/mp2_ref.py's decode of
 // the same audio ES, plus the 44.1 kHz NCO rate checks:
 //   [1] once MP2 sync is up, dvd_audio_decode.nco_fs selects 44.1 kHz (2'd0)
@@ -171,7 +171,8 @@ module vcd_chain_tb;
     );
 
     // ---- PCM capture (mp2 core aud_valid -> output latch, next cycle) ----
-    wire mp2_avalid = dut.mp2_aud_valid;
+    // MP2 decodes on the audio engine and plays out of the LPCM FIFO (docs/mp2_engine.md M3)
+    wire mp2_avalid = dut.lpcm_aud_valid;
     logic mp2_avalid_d;
     always @(posedge clk) mp2_avalid_d <= mp2_avalid;
 

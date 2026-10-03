@@ -22,8 +22,7 @@ The ops (numbered after AC-3's: one engine, one op space; XCLR is DTS's):
             accumulator (no 17-bit adder), floors by 7, then multiplies by SCF.
             C (17 bits) and SCF (22 bits) are ROM words in the vector engine.
             The model's sat27 can never act: |S| <= 33,553,920 < 2^25 (asserted).
-  MSYN (27) a0 k, a1 mono, a2 the sampling-frequency index (the rate the core plays the
-            pairs at): per channel (channel 0 only if mono, its PCM duplicated, as
+  MSYN (27) a0 k, a1 mono: per channel (channel 0 only if mono, its PCM duplicated, as
             mp2_decode), voff -= 64, the matrix V[i] = floor(sum_k N[i][k] S[k] / 2^14)
             into the ring (the model's sat32 can never act: |V| <= 2^30, asserted),
             then the window in two passes, because V is 31 bits and the multiplier
@@ -36,6 +35,9 @@ The ops (numbered after AC-3's: one engine, one op space; XCLR is DTS's):
             2^7) / 2^8) = floor((T + 2^24) / 2^25). Then the 32 pairs out.
   RCLR (28) zero the V ring (2 x 1,024) and the carried sums: the program's RESET,
             as mp2_decode clears V after every reset.
+  MFS  (29) a0 the sampling-frequency index: no vector work; dts_top latches it for the
+            output NCO. Issued once the header is accepted, before the frame's PCM.
+  CNT  (8)  a0 0: a frame longer than its header (decoded, the rest drained).
 
 Cycles: the sequencer's are the RTL's (dts_isa's calibrated model); the three new ops
 are MODELLED until M2 builds them (CYC below), and the budget applies CYC_HEADROOM to
@@ -57,7 +59,7 @@ import mp2_ref as R     # noqa: E402
 REPO = os.path.dirname(HERE)
 UASM = os.path.join(REPO, 'dvd', 'dts', 'mp2.uasm')
 
-VOPS = {'xclr': 0, 'cnt': 8, 'mdq': 26, 'msyn': 27, 'rclr': 28}
+VOPS = {'xclr': 0, 'cnt': 8, 'mdq': 26, 'msyn': 27, 'rclr': 28, 'mfs': 29}
 VOP_NAME = {v: k for k, v in VOPS.items()}
 CYC_HEADROOM = 1.25
 # MODELLED (M2 calibrates): MDQ = C read, two issues, the floor's landing, the SCF
@@ -161,8 +163,11 @@ class Machine(D.Machine):
             t = CYC['mdq']
             self.vec_model += t
         elif name == 'msyn':
-            t = self.msyn(a[0], a[1] != 0, a[2])
+            t = self.msyn(a[0], a[1] != 0)
             self.vec_model += t
+        elif name == 'mfs':
+            self.fs = a[0] & 3
+            t = D.CYC['cnt']
         else:
             raise D.EngineError(f'unknown op {op} at pc {self.pc}')
         self.cycles = c0 + D.CYC['vop'] - D.CYC['instr'] + t
@@ -191,9 +196,8 @@ class Machine(D.Machine):
         self.dq_class.add(n)
         return s
 
-    def msyn(self, k, mono, fs):
+    def msyn(self, k, mono):
         """MSYN, the engine's way, checked slot by slot against the model's synth."""
-        self.fs = fs
         nch = 1 if mono else 2
         out = []
         for ch in range(nch):

@@ -5,7 +5,8 @@
 ; allocation, scfsi and scalefactors into the record, then 12 granules. A granule's
 ; codes are read here (grouped codes split by subtraction, the low digit first, as the
 ; model and mp2_decode take them), each sample dequantised and scaled into X by one
-; MDQ, then three MSYN: the matrix, the window and 32 PCM pairs per slot.
+; MDQ, then three MSYN: the matrix, the window and 32 PCM pairs per slot. MFS hands the
+; header's sampling frequency to dts_top (the output NCO) before any of the frame's PCM.
 ;
 ; Assembled by tools/mp2_isa.py (after DTS's and AC-3's programs, in one ROM).
 ; Registers: r1-r7 scratch, r8-r15 op arguments.
@@ -15,7 +16,7 @@
 .equ E_ID        2                 ; not MPEG-1 Layer II
 .equ E_BRATE     3                 ; free format or the forbidden index 15
 .equ E_SRATE     4                 ; the reserved sampling frequency
-.equ E_LEN       5                 ; the descriptor's length is not the header's
+.equ E_LEN       5                 ; the descriptor is shorter than the header's length
 
 ; ---------------------------------------------------------------- record RAM
 .equ F_NCH       0x000             ; 1 (mono) or 2
@@ -23,7 +24,7 @@
 .equ F_BOUND     0x002             ; the first intensity-coded subband (sblimit if none)
 .equ F_SBLIM     0x003
 .equ F_TSET      0x004             ; 0: tables B.2a / B.2b, 1: B.2c / B.2d
-.equ F_SR        0x005             ; the sampling-frequency index (MSYN exports it)
+.equ F_SR        0x005             ; the sampling-frequency index (MFS exports it)
 .equ F_GR        0x006             ; the granule (0..11)
 .equ F_SCFP      0x007             ; SCF + 64 x the granule's part
 .equ T_X         0x008             ; [k] the codes as x16, ch 0's reused by ch 1 above the bound
@@ -51,11 +52,17 @@ FRAME:
         beqi    r3, 3, ESRATE
         st      r3, F_SR
         get     r4, 1                   ; padding
-        shli    r5, r3, 4               ; 144000 x bitrate / fs + padding must be fr_len
+        shli    r5, r3, 4               ; the header's length, 144000 x bitrate / fs + padding
         add     r5, r5, r2
         ld      r5, C_MP2LEN[r5]
         add     r5, r5, r4
-        bne     r5, r1, ELEN
+        blt     r1, r5, ELEN            ; shorter (truncated): refused  ;MUT lenexact: bne r1, r5, ELEN
+        beq     r1, r5, H_LEN
+        li      r8, CNT_DMIX_IGNORED    ; longer: mp2_reframer appends what follows a frame
+        vop     CNT                     ; until the next sync; decoded, the rest drained (FEND)
+H_LEN:                                  ; and counted, as mp2_decode hunts past it
+        mov     r8, r3                  ; the rate, to the NCO: before the frame's PCM, so the
+        vop     MFS                     ; drain gate never opens on a stale one
         get     r4, 1                   ; private
         get     r4, 2                   ; mode
         get     r5, 2                   ; mode_extension
@@ -252,9 +259,8 @@ GS_NX:  addi    r2, r2, 1
         addi    r1, r1, 1
         ld      r5, F_SBLIM
         blt     r1, r5, GS_SB
-        li      r8, 0                   ; the three slots: a0 k, a1 mono, a2 fs
+        li      r8, 0                   ; the three slots: a0 k, a1 mono
         ld      r9, F_MONO
-        ld      r10, F_SR
         vop     MSYN
         li      r8, 1
         vop     MSYN

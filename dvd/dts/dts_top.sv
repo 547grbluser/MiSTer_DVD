@@ -16,7 +16,7 @@
 // to 25) and pulses imdct_done.
 //
 // MP2 (codec 2, docs/mp2_engine.md): PCM pairs out as DTS's, at the stream's own rate,
-// which mp2_fs carries (latched as each 32-pair slot starts).
+// which mp2_fs carries (MFS, op 29: no vector work, latched here).
 //
 // Telemetry (16-bit counters, saturating): frames decoded; frames refused, with the
 // last refusal's code (dts.uasm E_*) and a sticky mask of every code seen; bits read
@@ -71,8 +71,8 @@ module dts_top (
     output logic   [1:0] blk_cmix,
     output logic   [1:0] blk_surmix,
 
-    // MP2: the sampling-frequency index of the pairs being played (MSYN's a2, latched
-    // as each slot starts: 0 44.1 kHz, 1 48, 2 32), for the output NCO
+    // MP2: the sampling-frequency index of the stream (MFS's a0, latched as each
+    // frame's header is accepted: 0 44.1 kHz, 1 48, 2 32), for the output NCO
     output logic   [1:0] mp2_fs,
 
     // benches
@@ -115,10 +115,11 @@ module dts_top (
             blk_cmix  <= vop_args[65:64];    blk_surmix <= vop_args[81:80];
         end
 
-    // MP2: MSYN's a2, the stream's sampling frequency
+    // MP2: MFS's a0, the stream's sampling frequency (mp2.uasm issues it as each header
+    // is accepted, before the frame's PCM)
     always_ff @(posedge clk)
         if (!rst_n) mp2_fs <= 2'd1;
-        else if (vop_start && vop_op == 6'd27) mp2_fs <= vop_args[33:32];
+        else if (vop_start && vop_op == 6'd29) mp2_fs <= vop_args[1:0];
 
     assign frame_end = frame_done;
     assign refuse = err_valid;

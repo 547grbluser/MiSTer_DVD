@@ -1,6 +1,6 @@
 # MP2 on the shared audio engine (the rest of scenario E)
 
-**Status (2026-10-03): ✅ M0 done (the model is the RTL's contract on all 89 gate streams); ✅ M1 done (the program and its emulator, bit-exact on all 89, every op's decomposition proved); ✅ M2 done (the RTL, bit-exact op for op and pair for pair on all 89; A/B against `mp2_decode`); 🔧 M3 (wire in) next.** Branch `feature/mp2-engine` (from
+**Status (2026-10-03): ✅ M0 done (the model is the RTL's contract on all 89 gate streams); ✅ M1 done (the program and its emulator, bit-exact on all 89, every op's decomposition proved); ✅ M2 done (the RTL, bit-exact op for op and pair for pair on all 89; A/B against `mp2_decode`); 🔧 M3 wired in (sim: the DVD and VCD chains bit-exact), ⏳ M4 fit and HIL.** Branch `feature/mp2-engine` (from
 `feature/ac3-engine`, `CORE_VERSION dev-mp2engine`, not pushed).
 
 **Why.** The engine built for DTS already runs AC-3 (`docs/ac3_engine.md` W1) and DTS
@@ -209,3 +209,35 @@ and two new ROMs, N 2,048 × 16 and D 512 × 18). `dts_seq` and `dts_top` take a
 - **MDQ's floor by 7 bites only when nb ≥ 10.** `x16 + d16` is a multiple of
   2^(16 − nb), so for nb ≤ 9 the floor is exact. Mutation M2 therefore runs on a stream
   that uses a 1,023-level class or finer; on others it survives harmlessly.
+
+## M3: wired in (2026-10-03)
+
+- **`dvd_audio_decode`:** an MP2 frame is an engine frame (`eng_frame`). `eng_codec_req`
+  is now 2 bits (1 AC-3, 0 DTS, 2 MP2), and `audio_engine` carries them through. The
+  engine's pairs go through DTS's serialiser into `lpcm_unpack`'s FIFO (`cur_codec` ←
+  T_LPCM, `quant` forced to 16-bit while `eng_pcm`). The stall watchdog watches MP2 as
+  it watches DTS. `mp2_decode` is gone, with its own FIFO, byte FIFO, bit reader and
+  self-heal. A frame the engine cannot decode is refused and drained, with no reset.
+- **D4:** the half of the DTS ADPCM codebook that `mp2_decode`'s PCM FIFO carried at
+  power-up now lives in `dvd/dts/cb_host_ram.sv`. That is the same 4096 × 32 words,
+  read-only, with the copier's host contract unchanged. `check_dts_wiring.py` and
+  `cb_copy_tb` point at it, and `run_cb_copy.sh` M3 mutates its step.
+- **The rate:** a new op, **MFS** (29), carries the header's sampling frequency as soon
+  as the header is accepted. That is before any of the frame's PCM, so the drain gate
+  never opens on a stale rate, which it could have done had the rate waited for the
+  first MSYN, ~5K cycles later. `dts_top` latches it (`mp2_fs`), and `nco_fs` takes it
+  while `mp2_active`.
+- **The frame contract, revised:** `mp2_reframer` cuts at a sync only once the header's
+  length has passed. So junk after a frame (no sync follows) is appended to that frame,
+  and `mp2_decode` plays such a frame and hunts past the junk. The program now refuses
+  only a frame **shorter** than its header (`E_LEN`). A longer one is decoded, the rest
+  is drained, and CNT counter 0 counts it, so the drop is visible. `test_mp2_isa.py` [4]
+  checks both, and the RED `lenexact` arm shows an exact-length check would refuse it.
+  `run_mp2_eng.sh` L1 runs it in RTL.
+- **Benches:** every audio-chain compile list names `cb_host_ram.sv` in place of
+  `mp2_decode.sv`. `mp2_chain_tb` and `vcd_chain_tb` snoop `lpcm_aud_valid`. `DVD.qsf`
+  drops `mp2_decode`, `bit_fifo` and `bit_reader` and adds `cb_host_ram`.
+- **Results so far:** `run_mp2.sh`, including the full chain (VOB → `ps_demux` →
+  reframers → ring → `dvd_audio_decode`: 13,824 pairs bit-exact against the model),
+  `run_vcd.sh` and `run_wav.sh` pass, as do `check_dts_wiring.py` and
+  `test_mp2_isa.py`. The rest of the regression set is running.

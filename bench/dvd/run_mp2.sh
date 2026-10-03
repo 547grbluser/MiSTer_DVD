@@ -93,7 +93,7 @@ PYEOF
 iverilog -g2012 -I dvd/ac3 -o bench/dvd/mp2_chain_sim \
     dvd/ps_demux.sv dvd/ac3_reframer.sv dvd/dts_reframer.sv dvd/mp2_reframer.sv \
     dvd/audio_ring.sv dvd/dvd_audio_decode.sv dvd/lpcm_unpack.sv \
-    dvd/mp2/mp2_decode.sv dvd/ac3/*.sv dvd/dts/dts_seq.sv dvd/dts/dts_vec.sv dvd/dts/dts_top.sv dvd/audio_engine.sv bench/dvd/mp2_chain_tb.sv
+    dvd/dts/cb_host_ram.sv dvd/ac3/*.sv dvd/dts/dts_seq.sv dvd/dts/dts_vec.sv dvd/dts/dts_top.sv dvd/audio_engine.sv bench/dvd/mp2_chain_tb.sv
 vvp bench/dvd/mp2_chain_sim || rc=1
 
 echo "== reframer =="

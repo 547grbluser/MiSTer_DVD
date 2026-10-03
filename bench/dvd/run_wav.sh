@@ -36,7 +36,7 @@ vvp bench/dvd/wav_probe_sim | tail -18 || rc=1
 echo "== 2. end-to-end PCM chain (reader -> dvd_audio_decode -> AUDIO_L/R) =="
 iverilog -g2012 -I dvd/ac3 -o bench/dvd/cdda_audio_sim \
     dvd/dvd_iso_reader.sv dvd/bcd_time_add.sv dvd/dvd_audio_decode.sv \
-    dvd/lpcm_unpack.sv dvd/mp2/mp2_decode.sv dvd/ac3/*.sv dvd/dts/dts_seq.sv dvd/dts/dts_vec.sv dvd/dts/dts_top.sv dvd/audio_engine.sv \
+    dvd/lpcm_unpack.sv dvd/dts/cb_host_ram.sv dvd/ac3/*.sv dvd/dts/dts_seq.sv dvd/dts/dts_vec.sv dvd/dts/dts_top.sv dvd/audio_engine.sv \
     bench/dvd/cdda_audio_tb.sv 2>/dev/null
 vvp bench/dvd/cdda_audio_sim | tail -12 || rc=1
 
@@ -47,7 +47,7 @@ vvp bench/dvd/lpcm_sim | tail -2 || rc=1
 
 echo "== 3b. regression: dvd_audio_decode (AC-3 + LPCM + drain gate) =="
 iverilog -g2012 -I dvd/ac3 -o bench/dvd/dad_sim \
-    dvd/dvd_audio_decode.sv dvd/lpcm_unpack.sv dvd/mp2/mp2_decode.sv \
+    dvd/dvd_audio_decode.sv dvd/lpcm_unpack.sv dvd/dts/cb_host_ram.sv \
     dvd/ac3/*.sv dvd/dts/dts_seq.sv dvd/dts/dts_vec.sv dvd/dts/dts_top.sv dvd/audio_engine.sv bench/dvd/dvd_audio_decode_tb.sv 2>/dev/null
 vvp bench/dvd/dad_sim | tail -2 || rc=1
 
