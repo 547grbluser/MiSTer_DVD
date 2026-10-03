@@ -80,6 +80,9 @@ def build_const():
     put('BAPTAB', M.BAPTAB)
     put('LATAB', M.LATAB)                 # (read by the BAPSD unit through this ROM's port)
     put('BINBASE', BINBASE)
+    # the mantissa unit's level tables, one block (read through this ROM's port):
+    # 3-level at +0, 5-level +3, 7-level (bap 3) +8, 11-level +16, 15-level (bap 4) +27
+    put('MLEV', M.Q1LEV + M.Q2LEV + M.Q3LEV + M.Q4LEV + M.Q5LEV)
     return words, base
 
 
@@ -357,6 +360,28 @@ def emulate(path, nframes=0, mutate=None):
             first = first or f'frame {k}: {len(m.blocks) - n0} blocks, the model {len(gblocks)}'
         nf += 1
     return m, nf, bad, first
+
+
+MLEV_OFF = {-1: 0, -2: 3, 3: 8, -3: 16, 4: 27}
+
+
+def svh_lines():
+    """AC-3's part of dvd/dts/dts_ucode.svh: the constant-ROM tables its sequencer
+    units read (word offsets in that ROM), the record words they touch, the op numbers
+    and the refusal codes."""
+    c = {k: v - D.MEM_CONST for k, v in CBASE.items()}
+    return [
+        '// AC-3 (docs/ac3_engine.md A2): the units\' constant-ROM tables (word offsets),',
+        '// record words, op numbers and refusal codes',
+        f"localparam [9:0]  AC_LATAB   = 10'd{c['LATAB']};",
+        f"localparam [9:0]  AC_BAPTAB  = 10'd{c['BAPTAB']};",
+        f"localparam [9:0]  AC_MLEV    = 10'd{c['MLEV']};       // + 0 / 3 / 8 / 16 / 27",
+        f"localparam [10:0] AC_CPLBASE = 11'd{BINBASE[5]};",
+        f"localparam [10:0] AC_F_PSD   = 11'd{F_PSD};",
+        f"localparam [4:0]  AC_E_EXP   = 5'd{E_EXP};",
+        f"localparam [4:0]  AC_E_GROUP = 5'd{E_GROUP};",
+    ] + [f"localparam [5:0]  V_{k.upper():8s}= 6'd{v};" for k, v in sorted(VOPS.items(), key=lambda kv: kv[1])
+         if k != 'cnt']
 
 
 def write_mems(check=False):

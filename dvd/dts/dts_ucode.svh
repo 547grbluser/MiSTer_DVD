@@ -3,7 +3,7 @@
 // one ROM), and XQ's code-reader tables (packed: element i at [w*i +: w];
 // index abits - 1).
 localparam int UC_WORDS    = 1279;
-localparam int CONST_WORDS = 784;
+localparam int CONST_WORDS = 827;
 localparam int HUFF_NODES  = 2647;
 localparam int HUFF_BOOKS  = 62;
 localparam [10:0] UC_DTS_RESET = 11'd0;
@@ -18,3 +18,22 @@ localparam [39:0] XQ_GSIZE  = 40'h7777733331;
 // block codes (abits 1..7): bits a code, and the levels (the divisor)
 localparam [34:0] XQ_BNBITS = 35'h4e2f6b147;
 localparam [34:0] XQ_LEVELS = 35'h662d49ca3;
+// AC-3 (docs/ac3_engine.md A2): the units' constant-ROM tables (word offsets),
+// record words, op numbers and refusal codes
+localparam [9:0]  AC_LATAB   = 10'd521;
+localparam [9:0]  AC_BAPTAB  = 10'd216;
+localparam [9:0]  AC_MLEV    = 10'd784;       // + 0 / 3 / 8 / 16 / 27
+localparam [10:0] AC_CPLBASE = 11'd1499;
+localparam [10:0] AC_F_PSD   = 11'd25;
+localparam [4:0]  AC_E_EXP   = 5'd9;
+localparam [4:0]  AC_E_GROUP = 5'd10;
+localparam [5:0]  V_EXPD    = 6'd16;
+localparam [5:0]  V_BAPSD   = 6'd17;
+localparam [5:0]  V_BAPFILL = 6'd18;
+localparam [5:0]  V_BAPZERO = 6'd19;
+localparam [5:0]  V_QRST    = 6'd20;
+localparam [5:0]  V_AQ      = 6'd21;
+localparam [5:0]  V_AQC     = 6'd22;
+localparam [5:0]  V_CZERO   = 6'd23;
+localparam [5:0]  V_REMAT   = 6'd24;
+localparam [5:0]  V_IMDCT   = 6'd25;

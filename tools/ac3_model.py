@@ -174,16 +174,17 @@ def ba_band_psd(exp, j, endband):
         if -6 <= sw <= -2:
             psd = nxt
         elif sw == -1:
-            psd = nxt + LATAB[(-delta) >> 1]
+            psd = nxt + LATAB[min((-delta) >> 1, 255)]       # the RTL's la_addr clamp
         elif sw == 0:
-            psd += LATAB[delta >> 1]
+            psd += LATAB[min(delta >> 1, 255)]
     return psd
 
 
 def ba_bap_fill(mask, exp, j, endband):
     """bap[k] = baptab[156 + mask + 4 exp[k]] for k in [j, endband) (the engine's
     bap-lookup op)."""
-    return {k: BAPTAB[156 + mask + 4 * exp[k]] for k in range(j, endband)}
+    return {k: BAPTAB[min(max(156 + mask + 4 * exp[k], 0), 304)]     # the RTL's bl_addr clamp
+            for k in range(j, endband)}
 
 
 def bit_allocate(g, bai_ch, deltba, bndstart, start, end, fastleak, slowleak, exp):

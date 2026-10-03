@@ -786,7 +786,7 @@ def write_mems(check=False):
              HMEM: [f'{w:05x}' for w in huff_mem_words()[:2048]],
              HMEM_HI: [f'{w:05x}' for w in huff_mem_words()[2048:]],
              RMEM: [f'{r:03x}' for r in HUFF_ROOTS],
-             USVH: ucode_svh(allw, labels, alabels, len(allc))}
+             USVH: ucode_svh(allw, labels, alabels, len(allc)) + A.svh_lines()}
     import dts_vecrom as V                       # the vector engine's ROMs
     files.update({
         os.path.join(VDIR, 'dts_vconst.mem'): [f'{w:06x}' for w in V.vconst_words()],

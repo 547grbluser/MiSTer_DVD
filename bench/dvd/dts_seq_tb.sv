@@ -1,14 +1,22 @@
-// bench/dvd/dts_seq_tb.sv -- the DTS sequencer against its emulator
+// bench/dvd/dts_seq_tb.sv -- the engine's sequencer against its emulator (both programs)
 //
-// Feeds STEM.frames (descriptors) and STEM.bytes (tools/dts_golden.py) into dts_seq,
-// with optional input stalls (+stall=N: a gap of up to N cycles before a byte or a
-// descriptor) and XQ back-pressure (+xstall=N), and a stub vector engine: done 1-4
-// cycles after a start, or for XQ after its 8 codes are taken. The program never reads
-// an engine's result and XQ's bits are read here, so the trace does not depend on the
-// engine. Every register write, store and XQ code is compared, in order, against
-// STEM.trace: kind, pc, register / address / index, value.
+// Feeds STEM.frames (descriptors) and STEM.bytes (tools/dts_golden.py, or
+// tools/ac3_golden.py with +codec=1) into dts_seq, with optional input stalls
+// (+stall=N: a gap of up to N cycles before a byte or a descriptor) and XQ
+// back-pressure (+xstall=N), and a stub vector engine: done 1-4 cycles after a start,
+// or after the op's last item is taken -- XQ 8 codes; AC-3's AQ hi - lo bins (r11 -
+// r10), AQC 1 + its coupled channels' coordinates + hi - lo bins (r10 - r9; the channel
+// count from the band's 0x7F0 item). A refusal (err_valid) aborts the op, the contract
+// the real vector engine keeps (docs/ac3_engine.md). The program never reads an
+// engine's result and the codes' bits are read here, so the trace does not depend on
+// the engine. Every register write, store, item and unit record write is compared, in
+// order, against STEM.trace: kind, pc, register / address / index, value.
+// With +cyc (an arm with no stalls), the cycles each AC-3 op spends in its own states
+// (not the vector engine's: S_VOP, S_XQ_W) are compared with STEM.cyc, the emulator's
+// RTL-exact charge (tools/ac3_isa.py UNIT_CYCLES).
 // Arms: [trace] an event differs; [count] too few / too many events, frames,
-// refusals, overrun bits, lenient block codes (D5) or CNT ops; [hang] no progress.
+// refusals, overrun bits, lenient block codes (D5) or CNT ops; [cycles] an op's unit
+// cycles differ from the emulator's; [hang] no progress.
 
 `default_nettype none
 `timescale 1ns/1ps
@@ -25,7 +33,9 @@ module dts_seq_tb;
     logic [5:0]   vop_op;
     logic [127:0] vop_args;
     logic [23:0]  xq_code;
+    logic [10:0]  xq_addr;
     logic         xq_valid, xq_ready;
+    logic         codec;
     logic         err_valid, frame_done, overrun_bit, lenient;
     logic [4:0]   err_code;
     logic         tr_valid;
@@ -35,8 +45,8 @@ module dts_seq_tb;
     logic [23:0]  tr_val;
 
     dts_seq dut (
-        .clk, .rst_n, .codec(1'b0), .fr_len, .fr_valid, .fr_ready, .in_byte, .in_valid, .in_ready,
-        .vop_start, .vop_op, .vop_args, .vop_done, .xq_code, .xq_valid, .xq_ready,
+        .clk, .rst_n, .codec, .fr_len, .fr_valid, .fr_ready, .in_byte, .in_valid, .in_ready,
+        .vop_start, .vop_op, .vop_args, .vop_done, .xq_code, .xq_addr, .xq_valid, .xq_ready,
         .err_valid, .err_code, .frame_done, .overrun_bit, .lenient,
         .tr_valid, .tr_pc, .tr_kind, .tr_addr, .tr_val);
 
@@ -54,6 +64,8 @@ module dts_seq_tb;
         if (!$value$plusargs("stem=%s", stem)) $fatal(1, "FAIL [setup] no +stem");
         if (!$value$plusargs("stall=%d", stall)) stall = 0;
         if (!$value$plusargs("xstall=%d", xstall)) xstall = 0;
+        if (!$value$plusargs("codec=%d", r)) r = 0;
+        codec = r[0];
         fd = $fopen({stem, ".meta"}, "r");
         if (fd == 0) $fatal(1, "FAIL [setup] no %s.meta", stem);
         r = $fscanf(fd, "%d %d %d %d %d %d %d %d %d", n_bytes, n_frames, n_ev, n_vops, n_pairs,
@@ -108,29 +120,56 @@ module dts_seq_tb;
     end
 
     // the stub engine
-    int vcnt, xtaken, xgap;
+    int vcnt, xtaken, xgap, xneed, ncpl;
     logic xq_op;
-    always_ff @(posedge clk) begin
+    wire [15:0] a9 = vop_args[16 +: 16], a10 = vop_args[32 +: 16], a11 = vop_args[48 +: 16];
+    always_comb begin
+        ncpl = 0;
+        for (int c = 0; c < 5; c++) if (c < xq_code[12:10] && xq_code[5 + c]) ncpl++;
+    end
+    always @(posedge clk) begin
         vop_done <= 1'b0;
         if (!rst_n) begin
-            vcnt <= 0; xq_op <= 1'b0; xtaken <= 0; xq_ready <= 1'b0; xgap <= 0;
+            vcnt <= 0; xq_op <= 1'b0; xtaken <= 0; xq_ready <= 1'b0; xgap <= 0; xneed <= 0;
         end else begin
             if (vop_start) begin
-                xq_op <= (vop_op == 6'd1);
                 xtaken <= 0;
-                vcnt <= (vop_op == 6'd1) ? 0 : 1 + ($urandom % 4);
+                case (vop_op)
+                    6'd1:  xneed <= 8;
+                    6'd21: xneed <= ($signed(a10) < $signed(a11)) ? a11 - a10 : 0;
+                    6'd22: xneed <= 1 + a10 - a9;
+                    default: xneed <= 0;
+                endcase
+                xq_op <= (vop_op == 6'd1) || (vop_op == 6'd22) ||
+                         (vop_op == 6'd21 && $signed(a10) < $signed(a11));
+                vcnt <= ((vop_op == 6'd1) || (vop_op == 6'd22) ||
+                         (vop_op == 6'd21 && $signed(a10) < $signed(a11))) ? 0 : 1 + ($urandom % 4);
             end else if (vcnt > 0) begin
                 vcnt <= vcnt - 1;
                 if (vcnt == 1) vop_done <= 1'b1;
             end
+            if (err_valid) begin vcnt <= 0; xq_op <= 1'b0; end      // a refusal aborts the op
             if (xq_valid && xq_ready) begin
+                if (!xq_op) $fatal(1, "FAIL [trace] an item (addr %03x) outside an op", xq_addr);
                 xtaken <= xtaken + 1;
-                if (xtaken == 7) begin vcnt <= 1 + ($urandom % 4); xq_op <= 1'b0; end
+                if (codec && xq_addr == 11'h7F0) xneed <= xneed + ncpl;
+                if (xtaken == xneed - 1 && !(codec && xq_addr == 11'h7F0)) begin
+                    vcnt <= 1 + ($urandom % 4); xq_op <= 1'b0;
+                end
                 xgap <= (xstall > 0) ? ($urandom % (xstall + 1)) : 0;
                 xq_ready <= (xstall == 0);
             end else if (xgap > 0) begin xgap <= xgap - 1; xq_ready <= 1'b0; end
             else xq_ready <= 1'b1;
         end
+    end
+
+    // cycles in each op's own states (XQ's reader; AC-3's units), by op
+    longint ucyc [0:63];
+    int st;
+    initial for (int i = 0; i < 64; i++) ucyc[i] = 0;
+    always @(posedge clk) if (rst_n) begin
+        st = dut.state;
+        if ((st >= 10 && st <= 13) || st >= 15) ucyc[dut.u_op] = ucyc[dut.u_op] + 1;
     end
 
     // the scoreboard
@@ -180,8 +219,22 @@ module dts_seq_tb;
                     $fatal(1, "FAIL [count] %0d CNT ops (dmix ignored), the golden %0d", ncnt, n_dmix);
                 if (bi != n_bytes)
                     $fatal(1, "FAIL [count] %0d of %0d bytes taken", bi, n_bytes);
+                if ($test$plusargs("cyc")) begin
+                    int fd, r, op;
+                    longint c;
+                    fd = $fopen({stem, ".cyc"}, "r");
+                    if (fd == 0) $fatal(1, "FAIL [setup] no %s.cyc", stem);
+                    while ($fscanf(fd, "%d %d", op, c) == 2)
+                        if (ucyc[op] != c)
+                            $fatal(1, "FAIL [cycles] op %0d: %0d cycles in its states, the emulator %0d",
+                                   op, ucyc[op], c);
+                    $fclose(fd);
+                end
                 $display("dts_seq_tb: %0d bytes, %0d events, %0d frames, %0d refusals, %0d overrun bits, %0d lenient, %0d dmix, %0d cycles (%0d a frame)",
                          n_bytes, ei, frames, errs, ovr, nlen, ncnt, busy, busy / n_frames);
+                $write("dts_seq_tb: unit cycles by op:");
+                for (int i = 0; i < 64; i++) if (ucyc[i] != 0) $write(" %0d:%0d", i, ucyc[i]);
+                $write("\n");
                 $display("PASS: dts_seq_tb");
                 $finish;
             end
