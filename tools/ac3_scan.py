@@ -32,7 +32,12 @@ from dvd_vm_ref import IsoNav                                   # noqa: E402
 from nav_extract import parse_vts_attr                          # noqa: E402
 
 FMT_AC3 = 0                       # VTS audio attribute coding mode
-WANT = ('deviation', 'deltba_new', 'dynrnge', 'short', 'cpl', 'remat', 'dith', 'skip')
+WANT = ('deviation', 'deltba_new', 'deltba_reuse', 'deltbaie_off_after_new', 'dynrnge', 'short',
+        'cpl', 'remat', 'dith', 'skip', 'phsflg', 'recomb_sat', 'remat_sat', 'cpl_ch0_uncoupled',
+        'zero_snr')
+# extracted by default: the rare ones, and any window where decoding stopped
+RARE = ('deviation', 'deltba_new', 'deltba_reuse', 'deltbaie_off_after_new', 'short', 'phsflg',
+        'recomb_sat', 'remat_sat', 'cpl_ch0_uncoupled', 'error')
 
 
 def ac3_streams(f, start, n):
@@ -74,16 +79,31 @@ def scan_stream(windows):
     for wi, data in enumerate(windows):
         rtl, lib = M.Decoder(), M.Decoder(liba52_deltba=True)
         w_stats = dict.fromkeys(WANT, 0)
-        for _, fr in M.frames(bytes(data)):
+        w_first = {}                         # feature -> the first frame that used it
+        prev = {}
+        for fk, (_, fr) in enumerate(M.frames(bytes(data))):
             try:
                 hdr, blocks = rtl.frame(fr)
             except M.Ac3Error as e:
                 row['errors'][e.code] = row['errors'].get(e.code, 0) + 1
+                row.setdefault('error_detail', str(e))
+                row.setdefault('error_window', wi)
+                row.setdefault('error_frame', fk)
                 break                                   # the RTL halts at a refusal
+            except Exception as e:                      # a model defect: record, go on
+                row['errors']['CRASH'] = row['errors'].get('CRASH', 0) + 1
+                row.setdefault('error_detail', repr(e))
+                row.setdefault('error_window', wi)
+                row.setdefault('error_frame', fk)
+                break
             try:
                 _, lblocks = lib.frame(fr)
             except M.Ac3Error:
                 lblocks = None
+            for k in RARE:
+                if k in rtl.stats and rtl.stats[k] > prev.get(k, 0) and k not in w_first:
+                    w_first[k] = fk
+            prev = dict(rtl.stats)
             row['frames'] += 1
             row['acmods'][hdr['acmod']] = row['acmods'].get(hdr['acmod'], 0) + 1
             row['lfe'] |= hdr['lfeon']
@@ -100,7 +120,11 @@ def scan_stream(windows):
         for k, v in w_stats.items():
             if v and v > best.get(k, (0, -1))[0]:
                 best[k] = (v, wi)
+                if k in w_first:
+                    row.setdefault('first_frame', {})[k] = w_first[k]
     row['best_window'] = {k: wi for k, (_, wi) in best.items()}
+    if 'error_window' in row:
+        row['best_window']['error'] = row['error_window']
     return row
 
 
@@ -140,10 +164,20 @@ def scan_iso(args_path):
                 if args.extract:
                     stem = os.path.splitext(os.path.basename(path))[0]
                     for feat, wi in s['best_window'].items():
+                        if feat not in args.want:
+                            continue
                         out = os.path.join(args.extract, f'{stem}_vts{vn:02d}_{ssid:02x}_{feat}.ac3')
                         if not os.path.exists(out):
                             os.makedirs(args.extract, exist_ok=True)
-                            fr = list(M.frames(bytes(wins[wi])))[:args.extract_frames]
+                            fr = list(M.frames(bytes(wins[wi])))
+                            if feat == 'error':             # the frames AROUND the stop
+                                ef = s['error_frame']
+                                fr = fr[max(0, ef - 3):ef + 2]
+                            elif feat in s.get('first_frame', {}):   # around a rare event
+                                ef = s['first_frame'][feat]
+                                stop = s.get('error_frame') if s.get('error_window') == wi else None
+                                fr = fr[max(0, ef - 3):(stop if stop is not None else len(fr))]
+                            fr = fr[:args.extract_frames]
                             with open(out, 'wb') as fo:
                                 fo.write(b''.join(f for _, f in fr))
     finally:
@@ -161,7 +195,10 @@ def main():
     ap.add_argument('--json')
     ap.add_argument('--extract')
     ap.add_argument('--extract-frames', type=int, default=20)
+    ap.add_argument('--want', default=','.join(RARE),
+                    help='features to extract windows for (default: the rare ones + errors)')
     a = ap.parse_args()
+    a.want = set(a.want.split(','))
     images = a.images
     if not images:
         root = os.environ.get('DVD_ISO_DIR')

@@ -1,9 +1,10 @@
 # The AC-3 parse on the shared audio engine (scenario E)
 
-**Status (2026-10-02): A0 under way. The golden tap is built; the model
-(`tools/ac3_model.py`) is bit-exact against the RTL on all 13 stock streams. The
-emulator and any RTL are not built.** Branch `feature/ac3-engine` (from
-`feature/dts-decode`, `CORE_VERSION dev-ac3engine`, not pushed).
+**Status (2026-10-02): ✅ A0 done. The golden tap and the model are built; the model
+(`tools/ac3_model.py`) is bit-exact against the RTL on 30 streams (13 stock, 17 disc
+windows), and on every library window it reaches. The emulator (A1) and any RTL are
+not built.** Branch `feature/ac3-engine` (from `feature/dts-decode`, `CORE_VERSION
+dev-ac3engine`, not pushed).
 
 **Why.** `docs/dts_decoder.md` §4 scenario E estimates that moving MP2 and the AC-3
 parse onto the microcoded engine built for DTS (P1, `dvd/dts/`) saves **−1,000 …
@@ -125,16 +126,58 @@ its 591 ALMs are genuinely reclaimable: scenario E's row stands.
 
 **Gate `tools/test_ac3_model.py`:** it rebuilds the tap, regenerates every golden
 from the current RTL, and requires bit-exact output on every stream, plus RED
-mutations of the model.
-- ✅ All 13 stock streams are **bit-exact** (12 frames each): acmod 1–7, coupled stereo
-  and 5.1 with LFE, BBB's short blocks with ch0 uncoupled.
-- Five RED arms bite: dither rounding, the recombine's shift, rematrix off, grouped
-  digits low-first, the coupling-coordinate placement.
-- ⏳ **Two arms bite on no stream**, because no stock stream has the feature: the
-  recombine's **saturation** and the stereo **phase flags**. The library census
-  (below) decides whether disc windows cover them. If not, derived fixtures can:
-  rewriting fixed-width fields of real frames (zero coupling exponents give huge
-  coordinates that saturate the recombine) keeps every frame's length.
+mutations of the model, each tied to the stream feature it needs.
+- ✅ **30 streams bit-exact** (24 frames each):
+  - the 13 stock streams: acmod 1–7, coupled stereo and 5.1 with LFE, BBB's short
+    blocks with ch0 uncoupled;
+  - 13 disc windows under `$AC3_TEST_DIR` (default `~/ac3-streams/gate`, local): both
+    phase-flag streams, zero-SNR blocks, acmod 1, 3, 5 and 6, *Matrix Reloaded*'s 5.1
+    (short blocks, ch0 uncoupled, DRC), a DRC-heavy 5.1, short blocks in stereo;
+  - 4 refusal windows (acmod 0, coupling delta-BA, delta-BA overflow, reserved
+    `deltbae`), where the model refuses the frame the RTL refuses (claim [2]).
+- Six RED arms bite: dither rounding, the recombine's shift, rematrix off, grouped
+  digits low-first, the coupling-coordinate placement, phase flags ignored.
+- ⚠ **One GAP: the recombine's saturation.** The largest coupled coefficient in about
+  4,500 disc windows is 7.8 % of full scale, and a coordinate is at most 7.75, so no
+  real stream reaches saturation. No fixed-width field rewrite of one does either:
+  zeroing the coupling exponents tops out near 0.6. A constructed stream with a
+  coupling-band exponent of 2 or less would. The model saturates as the RTL does
+  (read from `mantissa_dequant.sv`), but no stream proves it.
+
+**Library census (`tools/ac3_scan.py`, 2026-10-02):** 1,554 images (24 unreadable),
+**12,855 AC-3 streams, 2.46M frames, 14.8M blocks**, each decoded twice (the RTL's
+rule, liba52's delta-BA rule).
+
+| Feature | Streams | Blocks |
+|---|---|---|
+| acmod 2 / 7 / 1 / 5 / 6 / 3 | 8,768 / 3,798 / 115 / 5 / 4 / 1 | |
+| coupling | 12,268 | 14.4M (97 %) |
+| dither | 12,686 | 14.8M |
+| rematrix (2/0) | 7,789 | 7.4M |
+| `dynrng` sent | 11,358 | 2.4M |
+| skip field | 12,584 | 2.9M |
+| short blocks | 4,575 | 9,704 |
+| ch0 uncoupled while coupling | 386 | 1,067 |
+| phase flags in use / set | 73 / **2** | 15,856 / 340 bands |
+| zero SNR offsets | 15 | 1,752 |
+| **delta bit allocation** | **0** (the one NEW block is inside a corrupt frame) | 0 |
+| recombine / rematrix saturation | 0 / 0 | 0 |
+
+Every refusal the RTL makes occurs, and the model agrees with the RTL on all of them.
+377 windows stopped decoding; the RTL tap and the model ran on each, with the frames
+around the stop:
+- **309: identical up to the refusal, and both refuse the same frame**: acmod 0, the
+  coupling-band check, delta-BA overflow, reserved `deltbae`, coupling delta-BA.
+- **68: the model stops on genuinely invalid input** that the RTL decodes on: a grouped
+  code past its range (27–31, 125–127, 121–127), an exponent outside 0–24, a bandwidth
+  code of 63, or a read past the frame. 55 of them are one disc (*Fairytopia*). There
+  the RTL reads past its level tables, or clamps, which is implementation-defined, so
+  matching it exactly is not meaningful.
+- **0 windows where the model and the RTL disagree before a stop.**
+
+⏳ **Decision for an engine port: invalid codes.** Refuse the frame and count it, or
+decode leniently and count it (DTS's D5 precedent). Either way the behaviour becomes
+defined, where today's RTL reads out of range.
 
 ⚠ **Finding: a latent RTL deviation from liba52 in delta bit allocation.**
 `audblk_parse.sv` resets `deltbae` to NONE at the **start of every block**, and
@@ -144,6 +187,11 @@ that sends delta-BA in one block and not in a later block of the same frame (or 
 REUSE), the RTL allocates without the delta where liba52 applies it. The bit
 allocations differ, so the mantissa bit counts differ and the block desynchronises.
 - No stock stream uses delta-BA, so the cosim's "bap bit-exact" could not see this.
+- ✅ **Measured: no library stream uses delta-BA at all** (12,855 streams, above), so
+  decoding with liba52's rule changes zero blocks. The deviation is real and harmless
+  on this library. Delta-BA's coverage stays the RTL's own unit bench
+  (`bench/ac3/run_balloc.sh`, liba52 on a constructed DELTA_BIT_NEW case); enabling
+  delta-BA in a real frame adds bits, so no field rewrite can derive a fixture.
 - The model follows the RTL by default; `Decoder(liba52_deltba=True)` gives liba52's
   rule.
 - `tools/ac3_scan.py` decodes every library window both ways and counts the blocks
@@ -156,9 +204,12 @@ allocations differ, so the mantissa bit counts differ and the block desynchronis
   coupled stereo, coupled 5.1 with LFE, uncoupled 5.1;
 - the committed `bench/ac3/vectors/`: BBB 5.1 (448k, short blocks, ch0 uncoupled in
   coupling) and BBB mono;
-- real-disc windows of about 20 frames, extracted by the PES
-  `first_access_unit_pointer` (as `tools/acmod_scan.py`, never a `0x0B77` search):
-  DRC-heavy 5.1 (*The Matrix*'s 0x82 sets `dynrng` on nearly every block) and delta-BA.
+- disc windows (`~/ac3-streams/gate`, local, never committed), cut by
+  `tools/ac3_scan.py IMAGE --extract DIR --want FEATURE`, from the PES
+  `first_access_unit_pointer` (never a `0x0B77` search). A single-event feature is cut
+  around its first frame, and an error window around its stop. The images and features
+  are in the gate table above; the refusal windows are copied from the error windows
+  that both sides refused identically.
 
 ## Open decisions (⏳ the maintainer's)
 

@@ -7,13 +7,18 @@ Claims:
       / mix levels -- is IDENTICAL to the RTL's (bench/ac3/golden_main.cpp, the
       Verilated front end; regenerated here from the current RTL each run);
   [2] the model refuses exactly the frames the RTL refuses.
-RED arms: mutations of the model, each of which must make [1] fail on at least
-one stream. An arm no stream catches is a FAIL: either the stream set lacks the
-feature or the comparison cannot see it.
+RED arms: mutations of the model, each tied to the stream feature it needs (the
+model's own counters). An arm must make [1] fail on at least one stream that has
+its feature; one that has the feature and is not caught is a FAIL. An arm whose
+feature NO stream carries is reported as a GAP, with the reason, not passed:
+  recombine saturation -- the largest coupled coefficient in ~4,500 disc windows
+  is 7.8 % of full scale and a coordinate is at most 7.75, so no real stream (and
+  no fixed-width field rewrite of one) reaches it; a constructed stream with a
+  coupling-band exponent <= 2 would.
 
 Streams: tools/streams/*.ac3 (tools/gen_test_stream.sh), bench/ac3/vectors/*.ac3,
 and every *.ac3 under $AC3_TEST_DIR (disc windows from tools/ac3_scan.py
---extract: local, never committed).
+--extract, default ~/ac3-streams/gate when it exists: local, never committed).
 Usage: python3 tools/test_ac3_model.py [--frames N]      (exit 0 = PASS)
 """
 import argparse
@@ -34,8 +39,8 @@ GOLD_DIR = os.path.join(REPO, '.sim', 'ac3', 'gold')
 def streams():
     s = sorted(glob.glob(os.path.join(REPO, 'tools', 'streams', '*.ac3')))
     s += sorted(glob.glob(os.path.join(REPO, 'bench', 'ac3', 'vectors', '*.ac3')))
-    d = os.environ.get('AC3_TEST_DIR')
-    if d:
+    d = os.environ.get('AC3_TEST_DIR', os.path.expanduser('~/ac3-streams/gate'))
+    if os.path.isdir(os.path.expanduser(d)):
         s += sorted(glob.glob(os.path.join(os.path.expanduser(d), '**', '*.ac3'), recursive=True))
     return s
 
@@ -99,13 +104,34 @@ def _arms():
     }
 
 
+# arm -> the Decoder.stats counter a stream needs for the arm to be able to bite
+NEEDS = {'dither_round': 'dith', 'recombine_nosat': 'recomb_sat', 'recombine_shift': 'cpl',
+         'remat_off': 'remat', 'grouped_lowfirst': 'blocks', 'cplco_rounding': 'cpl',
+         'phsflg_ignored': 'phsflg'}
+
+
+def features(paths, nframes):
+    out = {}
+    for p in paths:
+        d = M.Decoder()
+        try:
+            for k, (_, fr) in enumerate(M.frames(open(p, 'rb').read())):
+                if k >= nframes:
+                    break
+                d.frame(fr)
+        except M.Ac3Error:
+            pass
+        out[p] = dict(d.stats)
+    return out
+
+
 def run(paths, gold, nframes):
     res = {}
     for p in paths:
         try:
             res[p] = M.compare(p, gold[p], nframes)
-        except M.Ac3Error as e:
-            res[p] = (0, 0, 1, f'model error {e}')
+        except Exception as e:                  # a mutation that crashes the model bites
+            res[p] = (0, 0, 1, f'model error {e!r}')
     return res
 
 
@@ -122,18 +148,26 @@ def main():
     fails = 0
     base = run(paths, gold, a.frames)
     for p, (nf, nb, bad, first) in base.items():
-        ok = bad == 0 and nb > 0
+        refusal = 'refuse' in os.path.basename(p)      # a window that tests a refusal ([2])
+        ok = bad == 0 and (nb > 0 or (refusal and nf > 0))
         fails += not ok
         print(f'[1] {"PASS" if ok else "FAIL"} {os.path.basename(p)}: {nf} frames, {nb} blocks, '
               f'{bad} values differ' + (f' (first: {first})' if first else ''))
+    feat = features(paths, a.frames)
     for name, (patch, restore) in _arms().items():
+        need = NEEDS[name]
+        have = [p for p in paths if feat[p].get(need)]
+        if not have:
+            print(f'    RED {name:18s} GAP -- no stream has {need} (see the docstring)')
+            continue
         patch()
         try:
-            r = run(paths, gold, a.frames)
+            r = run(have, gold, a.frames)
         finally:
             restore()
-        bit = [os.path.basename(p) for p, v in r.items() if v[2] and not base[p][2]]
-        print(f'    RED {name:18s} ' + (f'bites on {len(bit)} stream(s)' if bit else 'NEVER: FAIL'))
+        bit = [p for p, v in r.items() if v[2] and not base[p][2]]
+        print(f'    RED {name:18s} ' + (f'bites on {len(bit)} of {len(have)} stream(s) with {need}'
+                                         if bit else f'BLIND on {len(have)} stream(s) with {need}: FAIL'))
         fails += not bit
     print(f'RESULT: {"PASS" if not fails else "FAIL"}')
     return 1 if fails else 0

@@ -284,18 +284,24 @@ class Mantissas:
         if bap == -1:
             if not self.q1:
                 c = br.bits(5)
+                if c >= 27:
+                    raise Ac3Error('UNMODELLED', f'3-level group code {c} (27..31 are invalid)')
                 self.q1 = [Q1LEV[c % 3], Q1LEV[(c // 3) % 3]]        # popped from the end
                 return Q1LEV[c // 9]
             return self.q1.pop()
         if bap == -2:
             if not self.q2:
                 c = br.bits(7)
+                if c >= 125:
+                    raise Ac3Error('UNMODELLED', f'5-level group code {c} (125..127 are invalid)')
                 self.q2 = [Q2LEV[c % 5], Q2LEV[(c // 5) % 5]]
                 return Q2LEV[c // 25]
             return self.q2.pop()
         if bap == -3:
             if not self.q4:
                 c = br.bits(7)
+                if c >= 121:
+                    raise Ac3Error('UNMODELLED', f'11-level group code {c} (121..127 are invalid)')
                 self.q4 = [Q4LEV[c % 11]]
                 return Q4LEV[c // 11]
             return self.q4.pop()
@@ -337,6 +343,7 @@ class Decoder:
     def __init__(self, liba52_deltba=None):
         self.liba52_deltba = ('liba52_deltba' in OPT) if liba52_deltba is None else liba52_deltba
         self.stats = dict.fromkeys(STATS, 0)
+        self.fields = None           # a list: (name, bit position, width) of fields read
         self.new_in_frame = False
         self.lfsr = 1
         self.exp = {ch: [0] * 256 for ch in range(7)}
@@ -437,8 +444,12 @@ class Decoder:
             for i in range(nf):
                 if (self.chincpl >> i) & 1 and br.bits(1):
                     cplcoe = 1
+                    if self.fields is not None:
+                        self.fields.append(('mstrcplco', br.pos, 2))
                     mstr = 3 * br.bits(2)
                     for j in range(cpl['ncplbnd']):
+                        if self.fields is not None:
+                            self.fields.append(('cplcoexp', br.pos, 4))
                         e, m = br.bits(4), br.bits(4)
                         self.cplco[i][j] = cplco_q518(e, m, mstr)
                         if i == 1:
@@ -697,7 +708,10 @@ def read_golden(path):
         elif t[0] == 'C':
             out[-1]['blocks'][-1]['coeff'][int(t[1])] = [s24(int(v, 16)) for v in t[2:]]
         elif t[0] == 'E':
-            out[int(t[1])]['err'] = True
+            k = int(t[1])
+            while k >= len(out):        # refused before its header record (sync / BSI)
+                out.append(dict(start=None, hdr=None, blocks=[], err=False))
+            out[k]['err'] = True
     return out
 
 
@@ -711,7 +725,7 @@ def compare(stream, golden, nframes=0):
         if k >= len(gold) or (nframes and k >= nframes):
             break
         g = gold[k]
-        if g['start'] != off:
+        if g['start'] is not None and g['start'] != off:
             return nf, nb, bad + 1, f'frame {k}: the RTL found it at byte {g["start"]}, the model at {off}'
         try:
             hdr, blocks = dec.frame(fr)
@@ -720,6 +734,8 @@ def compare(stream, golden, nframes=0):
                 nf += 1
                 break                                    # both refuse: the RTL halts here
             return nf, nb, bad + 1, f'frame {k}: the model refused ({e}), the RTL did not'
+        if g['hdr'] is None:
+            return nf, nb, bad + 1, f'frame {k}: the RTL refused it before its header, the model did not'
         for key in ('acmod', 'lfeon', 'cmixlev', 'surmixlev'):
             if hdr[key] != g['hdr'][key]:
                 bad += 1
