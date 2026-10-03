@@ -22,7 +22,7 @@ module audio_ring_drop_tb;
     wire [15:0]  frame_len, frames_available, bytes_available, overflow_count;
     wire [32:0]  frame_pts;
 
-    audio_ring #(.BYTE_DEPTH(BD), .FRAME_DEPTH(FD)) dut (
+    audio_ring #(.BYTE_DEPTH(BD), .FRAME_DEPTH(FD)) dut ( .cp_step(1'b0),
         .clk(clk), .rst_n(rst_n), .aud_byte(aud_byte), .aud_valid(aud_valid),
         .aud_type(aud_type), .aud_frame_start(aud_frame_start), .drop_pulse(drop_pulse),
         .aud_frame_pts(aud_frame_pts), .aud_frame_pts_valid(aud_frame_pts_valid), .aud_frame_seamless(1'b0),

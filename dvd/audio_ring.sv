@@ -59,7 +59,11 @@
 
 module audio_ring #(
     parameter int BYTE_DEPTH  = 8192,  // payload byte ring depth   (power of two)
-    parameter int FRAME_DEPTH = 64     // completed-frame descriptors (power of two)
+    parameter int FRAME_DEPTH = 64,    // completed-frame descriptors (power of two)
+    // D4 (docs/dts_decoder.md): the byte memory's power-up contents -- the core's ring
+    // carries the DTS high-frequency VQ codebook, copied out once by dts_cb_mem
+    // (cp_step) before the audio path starts. "" = none (every bench).
+    parameter     INIT_FILE   = ""
 ) (
     input  wire        clk,            // clk_sys (27 MHz)
     input  wire        rst_n,
@@ -90,6 +94,10 @@ module audio_ring #(
     output wire  [7:0] out_byte,
     output wire        out_valid,         // = committed bytes available
     input  wire        out_ready,         // pop on out_valid && out_ready
+    // D4: the codebook copier steps the read pointer through the power-up contents,
+    // reading them on out_byte (= mem[rd_ptr]: no second read port). Only while the
+    // audio path is held idle; tie 1'b0 everywhere else.
+    input  wire        cp_step,
 
     // Read side, per-frame metadata. The consumer pops a descriptor, then reads
     // `frame_len` bytes of type `frame_type` from the byte stream.
@@ -120,6 +128,7 @@ module audio_ring #(
 
     // ---- Byte FIFO ----
     logic [7:0]          mem [0:BYTE_DEPTH-1];
+    initial if (INIT_FILE != "") $readmemh(INIT_FILE, mem);   // D4
     logic [BYTE_AW-1:0]  wr_ptr;
     logic [BYTE_AW-1:0]  rd_ptr;
     logic [BYTE_AW:0]    fill;     // total physical bytes (committed + in-progress)
@@ -348,6 +357,7 @@ module audio_ring #(
             // --- reader byte pointer / counter (independent of push branch) ---
             avail <= avail_t;
             if (do_pop) rd_ptr <= rd_ptr + 1'b1;
+            if (cp_step) rd_ptr <= rd_ptr + 1'b1;          // D4 codebook copy (idle path)
         end
     end
 

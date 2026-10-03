@@ -43,7 +43,10 @@
 `timescale 1ns/1ps
 
 module mp2_decode #(
-    parameter int PCM_AW = 12          // PCM FIFO = 2^PCM_AW stereo pairs (~85 ms @48k)
+    parameter int PCM_AW = 12,         // PCM FIFO = 2^PCM_AW stereo pairs (~85 ms @48k)
+    // D4 (docs/dts_decoder.md): the PCM FIFO's power-up contents -- in the core, half
+    // the DTS ADPCM codebook, copied out once by dts_cb_mem. "" = none (every bench).
+    parameter     INIT_FILE = ""
 ) (
     input  logic        clk,
     input  logic        rst,           // synchronous, active-high
@@ -73,7 +76,12 @@ module mp2_decode #(
     //                (synthesis produced real data)
     // Remove with the probe once the HW fault is found.
     output logic        dbg_s_nz,
-    output logic        dbg_pcm_nz
+    output logic        dbg_pcm_nz,
+    // D4 codebook copy: cp_step advances the PCM FIFO's read pointer (pcm_cnt
+    // untouched); cp_q is the FIFO head the read register already holds. Tie
+    // cp_step 1'b0 everywhere else.
+    input  logic        cp_step,
+    output logic [31:0] cp_q
 );
 
     // ------------------------------------------------------------------
@@ -304,6 +312,7 @@ module mp2_decode #(
     // ------------------------------------------------------------------
     localparam int PCM_DEPTH = 1 << PCM_AW;
     logic [31:0] pcm_mem [0:PCM_DEPTH-1];
+    initial if (INIT_FILE != "") $readmemh(INIT_FILE, pcm_mem);   // D4
     logic [PCM_AW-1:0] pcm_wp, pcm_rp;
     logic [PCM_AW:0]   pcm_cnt;
     logic        pcm_push;
@@ -325,7 +334,7 @@ module mp2_decode #(
                 pcm_mem[pcm_wp] <= pcm_wdata;
                 pcm_wp <= pcm_wp + 1'b1;
             end
-            if (pcm_pop) pcm_rp <= pcm_rp + 1'b1;
+            if (pcm_pop || cp_step) pcm_rp <= pcm_rp + 1'b1;   // cp_step: D4 copy
             case ({pcm_push, pcm_pop})
                 2'b10: pcm_cnt <= pcm_cnt + 1'b1;
                 2'b01: pcm_cnt <= pcm_cnt - 1'b1;
@@ -334,6 +343,7 @@ module mp2_decode #(
         end
     end
     always_ff @(posedge clk) pcm_head <= pcm_mem[pcm_rp];
+    assign cp_q = pcm_head;                  // D4: the copier reads the FIFO's own head
 
     // probe taps (see port comment)
     assign dbg_s_nz   = smem_we  && (smem_wd  != '0);

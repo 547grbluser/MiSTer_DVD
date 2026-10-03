@@ -32,7 +32,10 @@
 `timescale 1ns/1ps
 
 module lpcm_unpack #(
-    parameter int FIFO_AW = 9            // pair-FIFO depth = 2^AW (>= one frame)
+    parameter int FIFO_AW = 9,           // pair-FIFO depth = 2^AW (>= one frame)
+    // D4 (docs/dts_decoder.md): the pair FIFO's power-up contents -- in the core, half
+    // the DTS ADPCM codebook, copied out once by dts_cb_mem. "" = none (every bench).
+    parameter     INIT_FILE = ""
 ) (
     input  logic        clk,
     input  logic        rst,             // synchronous, active-high
@@ -59,7 +62,13 @@ module lpcm_unpack #(
     input  logic        aud_ce,          // ~48 kHz sample tick (1-cycle enable)
     output logic signed [15:0] audio_l,
     output logic signed [15:0] audio_r,
-    output logic        aud_valid        // 1 = a real pair was popped this aud_ce
+    output logic        aud_valid,       // 1 = a real pair was popped this aud_ce
+
+    // D4 codebook copy: while cp_mode the FIFO's read register follows mem[rptr] every
+    // cycle (the SAME read: one port) onto audio_l/audio_r, and cp_step advances rptr;
+    // aud_valid stays low. Tie both 1'b0 everywhere else.
+    input  logic        cp_mode,
+    input  logic        cp_step
 );
 
     // ---- group-aware byte assembler ----------------------------------------
@@ -83,6 +92,7 @@ module lpcm_unpack #(
     // ---- pair FIFO (depth 2^FIFO_AW), entry = {L[15:0], R[15:0]} ------------
     localparam int DEPTH = (1 << FIFO_AW);
     logic [31:0] mem [0:DEPTH-1];
+    initial if (INIT_FILE != "") $readmemh(INIT_FILE, mem);   // D4
     logic [FIFO_AW:0] wptr, rptr;         // extra MSB for full/empty disambiguation
     wire  [FIFO_AW:0] level = wptr - rptr;
     wire        empty = (wptr == rptr);
@@ -150,7 +160,11 @@ module lpcm_unpack #(
             aud_valid <= 1'b0;
         end else begin
             aud_valid <= 1'b0;
-            if (aud_ce) begin
+            if (cp_mode) begin                       // D4 codebook copy
+                audio_l <= mem[rptr[FIFO_AW-1:0]][31:16];
+                audio_r <= mem[rptr[FIFO_AW-1:0]][15:0];
+                if (cp_step) rptr <= rptr + 1'b1;
+            end else if (aud_ce) begin
                 if (!empty) begin
                     audio_l   <= mem[rptr[FIFO_AW-1:0]][31:16];
                     audio_r   <= mem[rptr[FIFO_AW-1:0]][15:0];

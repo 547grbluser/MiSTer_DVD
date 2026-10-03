@@ -44,7 +44,11 @@ module dvd_audio_decode #(
     // In-band re-time hold bound: 2^W / CLK_HZ s a discontinuity head may wait at
     // the ring head (for the old tail to play out AND for the clock to reach its
     // timeline) before it is dispatched anyway. 24 -> ~0.62 s. TBs shrink it.
-    parameter int HOLD_W = 24
+    parameter int HOLD_W = 24,
+    // D4 (docs/dts_decoder.md): the codebook halves the LPCM and MP2 PCM FIFOs carry as
+    // their power-up contents (the core passes dvd/dts/cb_host_*.mem; "" = none)
+    parameter     LPCM_INIT = "",
+    parameter     MP2_INIT  = ""
 ) (
     input  logic        clk,             // clk_sys
     input  logic        rst_n,
@@ -208,7 +212,24 @@ module dvd_audio_decode #(
     output logic [1:0]  dbg_cur_codec,
     output logic        dbg_mp2_avalid,
     output logic        dbg_mp2_s_nz,
-    output logic        dbg_mp2_pcm_nz
+    output logic        dbg_mp2_pcm_nz,
+
+    // DTS (docs/dts_decoder.md D4, P2/P3). The codebook copy (emu's dts_cb_mem) reads
+    // the two FIFOs through their own read paths while cb_cp_mode (the caller holds
+    // the audio path idle: enable low, no ring or CD-DA writes); cb_* is the engine's
+    // codebook port, answered from DDR3; dts_tables_ok low refuses DTS. Benches tie
+    // the inputs off (cb_cp_mode / steps / cb_valid / dts_tables_ok 0).
+    input  logic        cb_cp_mode,
+    input  logic        cb_lpcm_step,
+    input  logic        cb_mp2_step,
+    output logic [31:0] cb_lpcm_q,
+    output logic [31:0] cb_mp2_q,
+    output logic        cb_req,
+    output logic        cb_sel,
+    output logic [11:0] cb_addr,
+    input  logic        cb_valid,
+    input  logic [63:0] cb_data,
+    input  logic        dts_tables_ok
 );
 
     localparam logic [1:0] T_AC3 = 2'd0, T_DTS = 2'd1, T_LPCM = 2'd2, T_MP2 = 2'd3;
@@ -818,20 +839,23 @@ module dvd_audio_decode #(
     // CD-DA/WAV mode takes the unpacker over wholesale: bytes come from the
     // reader (little-endian, plain 16-bit), and a seek flush resets the
     // assembler + FIFO. DVD LPCM behaviour (cdda_mode=0) is bit-identical.
-    lpcm_unpack #(.FIFO_AW(12)) lpcm_unpack_inst (
+    lpcm_unpack #(.FIFO_AW(12), .INIT_FILE(LPCM_INIT)) lpcm_unpack_inst (
         .clk      (clk),
         .rst      (rst | (cdda_mode & cdda_flush)),
         .quant    (cdda_mode ? 2'd0 : lpcm_quant),
         .le       (cdda_mode),
-        .wr_en    (cdda_mode ? cdda_wr_en   : lpcm_wr),
+        .wr_en    ((cdda_mode ? cdda_wr_en : lpcm_wr) && !cb_cp_mode),
         .wr_data  (cdda_mode ? cdda_wr_data : ring_byte),
         .full     (lpcm_full),
         .afull    (cdda_full),
         .aud_ce   (aud_ce_play),
         .audio_l  (lpcm_l),
         .audio_r  (lpcm_r),
-        .aud_valid(lpcm_aud_valid)
+        .aud_valid(lpcm_aud_valid),
+        .cp_mode  (cb_cp_mode),            // D4 codebook copy
+        .cp_step  (cb_lpcm_step)
     );
+    assign cb_lpcm_q = {lpcm_l, lpcm_r};
 
     // ---------------------------------------------------------------------
     // MP2 (MPEG-1 Layer II) decoder — the DVD-spec "MPEG audio" format
@@ -873,7 +897,7 @@ module dvd_audio_decode #(
     end
     assign mp2_core_rst = rst | (mp2_rsthold != 0);
 
-    mp2_decode #(.PCM_AW(12)) mp2_decode_inst (
+    mp2_decode #(.PCM_AW(12), .INIT_FILE(MP2_INIT)) mp2_decode_inst (
         .clk            (clk),
         .rst            (mp2_core_rst),
         .wr_en          (mp2_wr),
@@ -887,7 +911,9 @@ module dvd_audio_decode #(
         .err_unsupported(mp2_err),
         .fs_o           (mp2_fs),
         .dbg_s_nz       (dbg_mp2_s_nz),
-        .dbg_pcm_nz     (dbg_mp2_pcm_nz)
+        .dbg_pcm_nz     (dbg_mp2_pcm_nz),
+        .cp_step        (cb_mp2_step),      // D4 codebook copy
+        .cp_q           (cb_mp2_q)
     );
 
     // ---------------------------------------------------------------------

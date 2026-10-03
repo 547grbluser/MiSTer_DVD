@@ -135,7 +135,7 @@ flush_ctl fc (
 wire [7:0]  r_b;  wire r_v;  logic r_ready = 0;
 wire        f_v;  wire [15:0] f_len; wire [1:0] f_t;
 logic       f_pop = 0;
-audio_ring #(.BYTE_DEPTH(32768), .FRAME_DEPTH(128)) ring (
+audio_ring #(.BYTE_DEPTH(32768), .FRAME_DEPTH(128)) ring ( .cp_step(1'b0),
     .clk(clk), .rst_n(aud_rst_n),
     .aud_byte(m_b), .aud_valid(m_v), .aud_type(m_t), .aud_frame_start(m_fs),
     .drop_pulse(1'b0), .aud_frame_pts(m_p), .aud_frame_pts_valid(m_pv), .aud_frame_seamless(1'b0),

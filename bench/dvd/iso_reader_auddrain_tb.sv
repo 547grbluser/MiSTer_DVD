@@ -223,7 +223,7 @@ module iso_reader_auddrain_tb;
     wire        r_valid, f_valid;
     wire [15:0] f_len, frames_avail;
     reg         r_ready = 0, f_pop = 0;
-    audio_ring #(.BYTE_DEPTH(32768), .FRAME_DEPTH(128)) ring (
+    audio_ring #(.BYTE_DEPTH(32768), .FRAME_DEPTH(128)) ring ( .cp_step(1'b0),
         .clk(clk), .rst_n(aud_rst_n),
         .aud_byte(aud_byte), .aud_valid(aud_valid & aud_rdy), .aud_type(aud_type),
         .aud_frame_start(aud_fs & aud_rdy), .drop_pulse(1'b0),

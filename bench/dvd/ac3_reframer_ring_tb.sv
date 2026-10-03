@@ -50,7 +50,7 @@ module ac3_reframer_ring_tb;
     wire [32:0] frame_pts; wire frame_pts_valid; logic frame_pop;
     wire [15:0] frames_available, bytes_available, overflow_count;
 
-    audio_ring #(.BYTE_DEPTH(8192), .FRAME_DEPTH(64)) ring (
+    audio_ring #(.BYTE_DEPTH(8192), .FRAME_DEPTH(64)) ring ( .cp_step(1'b0),
         .clk(clk), .rst_n(rst_n),
         .aud_byte(rf_byte), .aud_valid(rf_valid), .aud_type(rf_type),
         .aud_frame_start(rf_fs),

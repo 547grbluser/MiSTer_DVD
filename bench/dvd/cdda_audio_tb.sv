@@ -83,7 +83,7 @@ module cdda_audio_tb;
     reg cdda_flush = 0;
     wire signed [15:0] audio_l, audio_r;
 
-    dvd_audio_decode #(.CLK_HZ(27000000), .AUD_HZ(48000)) dec (
+    dvd_audio_decode #(.CLK_HZ(27000000), .AUD_HZ(48000)) dec ( .cb_cp_mode(1'b0), .cb_lpcm_step(1'b0), .cb_mp2_step(1'b0), .cb_lpcm_q(), .cb_mp2_q(), .cb_req(), .cb_sel(), .cb_addr(), .cb_valid(1'b0), .cb_data(64'd0), .dts_tables_ok(1'b0),
         .clk(clk), .rst_n(rst_n), .enable(1'b1), .pause(pause), .aud_soft_switch(1'b0),
         .ring_byte(8'd0), .ring_valid(1'b0), .ring_ready(),
         .frame_valid(1'b0), .frame_len(16'd0), .frame_type(2'd0),
@@ -353,7 +353,7 @@ module cdda_audio_tb;
     wire signed [15:0] red_l, red_r;
     wire       red_v;
     reg        red_ce = 0;
-    lpcm_unpack #(.FIFO_AW(6)) red_dut (
+    lpcm_unpack #(.FIFO_AW(6)) red_dut ( .cp_mode(1'b0), .cp_step(1'b0),
         .clk(red_clk), .rst(red_rst), .quant(2'd0), .le(red_le),
         .wr_en(red_wr), .wr_data(red_wd), .full(red_full), .afull(),
         .aud_ce(red_ce), .audio_l(red_l), .audio_r(red_r), .aud_valid(red_v)
