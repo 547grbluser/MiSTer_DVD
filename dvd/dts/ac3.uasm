@@ -181,7 +181,7 @@ B_DTH:
         blt     r4, r7, B_DTH
         ld      r2, F_BLK
         bnei    r2, 0, B_DYN
-        st      r0, F_DYNRNG            ; unity at the frame's start
+        st      r0, F_DYNRNG            ; unity at the frame's start ;MUT dynreset: nop
 B_DYN:
         get     r2, 1                   ; dynrnge
         beqi    r2, 0, B_CPLSTRE
@@ -296,7 +296,7 @@ B_PHS:
         bge     r5, r2, B_REMAT
         get     r2, 1
         ld      r3, A_PHSNEG[r5]
-        xor     r3, r3, r2
+        xor     r3, r3, r2              ;MUT phsflg: mov r3, r3
         st      r3, A_PHSNEG[r5]
         addi    r5, r5, 1
         jmp     B_PHS
@@ -374,7 +374,7 @@ B_BW_N:
         subi    r2, r11, 1
         shr     r10, r10, r2
         get     r12, 4
-        shli    r12, r12, 1             ; the seed is cplabsexp << 1
+        shli    r12, r12, 1             ; the seed is cplabsexp << 1 ;MUT cplseed: shli r12, r12, 0
         vop     EXPD
 ; ---- exponents: full-bandwidth channels
 B_FBWEXP:
@@ -768,7 +768,7 @@ BA_P2E:
         beqi    r2, 7, BA_RET           ; LFE
         ; ---- phase 3: bins 7..19, lowcomp seed 320 (always the look-ahead)
 BA_P3:
-        li      r7, 320
+        li      r7, 320                 ;MUT p3seed: li r7, 384
         call    LOWCOMP3
         call    LEAKBIN
         ld      r6, B_I
@@ -920,7 +920,7 @@ MASKBAP:
 ; COMPUTE_MASK: psd r1, mask r2, index r3 -> r2
 CMASK:
         ld      r4, B_DBKNEE
-        bge     r4, r1, CM_1            ; psd > dbknee: mask -= (psd - dbknee) >> 2
+        bge     r4, r1, CM_1            ; psd > dbknee: mask -= (psd - dbknee) >> 2 ;MUT knee: jmp CM_1
         sub     r5, r1, r4
         sari    r5, r5, 2
         sub     r2, r2, r5

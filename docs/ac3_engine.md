@@ -227,6 +227,17 @@ same way. A coupling coordinate is stored packed (`{m, e == 15, e + mstr}`), bec
 its Q5.18 value needs 22 bits and the registers have 16; the coupling op will expand
 it.
 
+**Gate `tools/test_ac3_isa.py`:**
+- [1] bit-exact against the model on every block of every stream, refusals at the
+  same frames;
+- [2] every frame within 60 % of real time, counting the op charges with their headroom
+  and `imdct_512` in series (13.5K cycles a block measured for 3+ channels, 4.6K for
+  stereo). **Worst: 35.8 %**, `noise_5p1_48k_640k`;
+- [3] the generated images are current;
+- five microcode RED arms (`;MUT` lines), each tied to its feature: the phase-3
+  lowcomp seed, the coupling exponent seed, the phase flags, the frame-start
+  `dynrng` reset, the mask's knee. All bite.
+
 **Result:**
 - ✅ **Bit-exact against the model on every block of all 30 streams**: exponents,
   baps, coefficients, `blksw`, `dynrng`.
@@ -248,7 +259,7 @@ it.
   bar. The op charges carry a ×1.25 headroom factor (`CYC_HEADROOM`), about +13K.
 
 ⚠ **The binding constraint is the microcode's size, not its speed.** The AC-3 program
-is **709 words**, and together with DTS's 500 that is **1,209 words in one ROM**:
+is **711 words**, and together with DTS's 500 that is **1,211 words in one ROM**:
 - over 1,024, so the ROM is 2K deep, **8 M10K**. DTS alone was 2.
 - Options, not yet measured: hardwire phases 1–4 of bit allocation as one op (about
   120 words out, some ALMs in); a 256-entry ÷3 table for the exponent group count (out
