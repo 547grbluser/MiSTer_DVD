@@ -121,7 +121,7 @@ module audio_engine (
     assign fr_ready = e_fr_ready && !codec_busy;
 
     dts_top u_eng (
-        .clk, .rst_n(e_rst_n), .codec(eng_codec),
+        .clk, .rst_n(e_rst_n), .codec({1'b0, eng_codec}),
         .fr_len, .fr_valid(e_fr_valid), .fr_ready(e_fr_ready), .in_byte, .in_valid, .in_ready,
         .cb_req, .cb_sel, .cb_addr, .cb_valid, .cb_data,
         .pcm_l(dts_l), .pcm_r(dts_r), .pcm_valid(dts_valid), .pcm_ready(dts_ready),

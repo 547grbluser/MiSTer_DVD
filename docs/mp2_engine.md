@@ -1,6 +1,6 @@
 # MP2 on the shared audio engine (the rest of scenario E)
 
-**Status (2026-10-03): ✅ M0 done (the model is the RTL's contract on all 89 gate streams); ✅ M1 done (the program and its emulator, bit-exact on all 89, every op's decomposition proved); 🔧 M2 (the RTL) next.** Branch `feature/mp2-engine` (from
+**Status (2026-10-03): ✅ M0 done (the model is the RTL's contract on all 89 gate streams); ✅ M1 done (the program and its emulator, bit-exact on all 89, every op's decomposition proved); ✅ M2 done (the RTL, bit-exact op for op and pair for pair on all 89; A/B against `mp2_decode`); 🔧 M3 (wire in) next.** Branch `feature/mp2-engine` (from
 `feature/ac3-engine`, `CORE_VERSION dev-mp2engine`, not pushed).
 
 **Why.** The engine built for DTS already runs AC-3 (`docs/ac3_engine.md` W1) and DTS
@@ -179,3 +179,33 @@ ROM's 2,016 words) and `tools/mp2_isa.py`. The gate is `tools/test_mp2_isa.py`.
 - Error recovery differs by design. `mp2_decode` hunts byte-wise and resets itself
   (clearing V) on a bad header after sync. The engine refuses the frame and keeps its
   state. Identity is claimed on valid streams only.
+
+## M2 result (2026-10-03)
+
+The RTL is in `dvd/dts/dts_vec.sv` (MDQ, MSYN and RCLR; X widened to 27 bits, the ring
+to 2,048 × 32, the offsets to 10 bits, `icoef` to 256 deep with C at 128 and SCF at 160,
+and two new ROMs, N 2,048 × 16 and D 512 × 18). `dts_seq` and `dts_top` take a 2-bit
+`codec` (0 DTS, 1 AC-3, 2 MP2), and `dts_top` exports `mp2_fs`.
+
+- **`bench/dvd/run_mp2_eng.sh`:** for all 89 gate streams, 2 frames each, the sequencer
+  trace (`dts_seq_tb +codec=2`: every register write and store) and the whole engine
+  (`dts_top_tb +codec=2`: after every vector op, X, the ring and the carried sums by
+  checksum at MP2's widths, plus every pair and the counts) match the emulator. The
+  worst timed frame is **45.5 %** of real time. Further arms: stalls with
+  back-pressure, mono under heavy back-pressure, a refused short frame, and RAMs that
+  start as garbage (`+dirty`). **18 mutations, each caught by its own arm.** One more was
+  examined and recorded as equivalent on this corpus: synthesising channel 1 in mono,
+  which leaves its zero ring unchanged.
+- **`bench/dvd/run_mp2_ab.sh`:** `mp2_decode` and the engine run on the same bytes, and
+  every pair is compared directly, with no model in between. Two mutations must fail it.
+- **The other programs:** DTS's RESET now runs RCLR. A DTS track after an MP2 one
+  would otherwise start on MP2's ring; `run_dts.sh` arm D1 (`+dirty`) and mutation V19
+  prove the clear. Every DTS and AC-3 gate (`run_dts`, `run_dts_seq`, `run_ac3`,
+  `run_ac3_seq`, `run_ac3_ab`, `run_dts_dec`, `test_dts_isa`, `test_ac3_isa`) and
+  `run_mp2` stay green with the widened RAMs.
+- **An aside:** mutation V8 in `run_dts.sh` had silently stopped running when AC-3's
+  REMAT (A2c) duplicated its anchor line. A same-line comment makes the anchor unique
+  again.
+- **MDQ's floor by 7 bites only when nb ≥ 10.** `x16 + d16` is a multiple of
+  2^(16 − nb), so for nb ≤ 9 the floor is exact. Mutation M2 therefore runs on a stream
+  that uses a 1,023-level class or finer; on others it survives harmlessly.

@@ -84,6 +84,8 @@
 
 ; ================================================================ the frame
 RESET:
+        vop     RCLR                    ; the synthesis ring and carried sums: zero (MP2 shares
+                                        ; them, docs/mp2_engine.md M2)
 FRAME:
         frame   r1
         get     r2, 16

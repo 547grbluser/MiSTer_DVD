@@ -14,6 +14,10 @@
 //   [hang]  no progress.
 // It reports each frame's cycles against its real-time budget (27 MHz / 48 kHz =
 // 562.5 cycles a stereo pair), the worst and the mean.
+// +codec=2 runs MP2 (goldens tools/mp2_golden.py, the same format): the checksums at
+// MP2's widths (X 27 bits, the whole 2,048 x 32 ring; tools/mp2_isa.py
+// Machine.checksums), the budget at the stream's own rate (+fs=0 44.1 kHz, 1 48, 2 32
+// kHz), and [count] also checks the rate dts_top exports (mp2_fs) against the golden's.
 
 `default_nettype none
 `timescale 1ns/1ps
@@ -37,12 +41,13 @@ module dts_top_tb;
     logic        vop_start, vop_done, tr_valid;
     logic [5:0]  vop_op;
     logic [10:0] tr_pc;
+    logic [1:0]  codec, mp2_fs;
     logic [1:0]  tr_kind;
     logic [10:0] tr_addr;
     logic [23:0] tr_val;
 
     dts_top dut (
-        .clk, .rst_n, .codec(1'b0), .fr_len, .fr_valid, .fr_ready, .in_byte, .in_valid, .in_ready,
+        .clk, .rst_n, .codec, .mp2_fs, .fr_len, .fr_valid, .fr_ready, .in_byte, .in_valid, .in_ready,
         .cb_req, .cb_sel, .cb_addr, .cb_valid, .cb_data,
         .pcm_l, .pcm_r, .pcm_valid, .pcm_ready,
         .frames, .refused, .last_err, .err_seen, .overrun_bits, .lenient_codes,
@@ -57,7 +62,8 @@ module dts_top_tb;
     logic [133:0] vop_exp [];
     logic [63:0]  cb_ad [0:4095];
     logic [63:0]  cb_vq [0:4095];
-    int n_bytes, n_frames, n_ev, n_vops, n_pairs, n_err, n_ovr, n_len, n_dmix;
+    int n_bytes, n_frames, n_ev, n_vops, n_pairs, n_err, n_ovr, n_len, n_dmix, n_fs;
+    real pair_cyc;                       // cycles a stereo pair in real time
     int bi, fi, pi, vi, gap, fgap, ogap, busy, idle, last_prog, quiet;
     logic [5:0] cur_op;
     // +opstats: cycles by vector op (start to done), and the sequencer's own (the rest)
@@ -75,11 +81,16 @@ module dts_top_tb;
         if (!$value$plusargs("ostall=%d", ostall)) ostall = 0;
         if (!$value$plusargs("cblat=%d", cblat)) cblat = 20;
         opstats = $test$plusargs("opstats");
+        if (!$value$plusargs("codec=%d", r)) r = 0;
+        codec = r[1:0];
         for (int i = 0; i < 9; i++) begin op_cyc[i] = 0; op_n[i] = 0; end
         fd = $fopen({stem, ".meta"}, "r");
         if (fd == 0) $fatal(1, "FAIL [setup] no %s.meta", stem);
-        r = $fscanf(fd, "%d %d %d %d %d %d %d %d %d", n_bytes, n_frames, n_ev, n_vops,
-                    n_pairs, n_err, n_ovr, n_len, n_dmix);
+        n_fs = 1;
+        r = $fscanf(fd, "%d %d %d %d %d %d %d %d %d %d", n_bytes, n_frames, n_ev, n_vops,
+                    n_pairs, n_err, n_ovr, n_len, n_dmix, n_fs);
+        pair_cyc = (codec == 2'd2 && n_fs == 0) ? 27.0e6 / 44100 :
+                   (codec == 2'd2 && n_fs == 2) ? 27.0e6 / 32000 : 562.5;
         $fclose(fd);
         bytes = new[n_bytes];
         flen = new[n_frames];
@@ -178,7 +189,7 @@ module dts_top_tb;
     task automatic close_frame(input int now);
         real f;
         if (fpairs > 0) begin
-            f = (now - fstart) / (fpairs * 562.5);
+            f = (now - fstart) / (fpairs * pair_cyc);
             if (f > worst) worst = f;
             sumfrac += f; nfr_t++;
         end
@@ -196,7 +207,8 @@ module dts_top_tb;
     // the engine buffers' checksums: sum (i + 1) (v mod 2^w), mod 2^32
     function automatic logic [31:0] ck_x(input int dummy);
         logic [63:0] acc; acc = 0;
-        for (int i = 0; i < 1280; i++) acc = acc + (i + 1) * dut.u_vec.xb[i];
+        for (int i = 0; i < 1280; i++)                  // DTS's 25 bits, MP2's 27
+            acc = acc + (i + 1) * ((codec == 2'd2) ? dut.u_vec.xb[i] : {2'b0, dut.u_vec.xb[i][24:0]});
         return acc[31:0];
     endfunction
     function automatic logic [31:0] ck_h(input int dummy);
@@ -206,7 +218,10 @@ module dts_top_tb;
     endfunction
     function automatic logic [31:0] ck_r(input int dummy);
         logic [63:0] acc; acc = 0;
-        for (int i = 0; i < 1024; i++) acc = acc + (i + 1) * dut.u_vec.ring[i];
+        if (codec == 2'd2)                              // MP2's V {ch, i}, 32 bits
+            for (int i = 0; i < 2048; i++) acc = acc + (i + 1) * dut.u_vec.ring[i];
+        else                                            // DTS's {0, side, i}, 24 bits
+            for (int i = 0; i < 1024; i++) acc = acc + (i + 1) * dut.u_vec.ring[i][23:0];
         return acc[31:0];
     endfunction
     function automatic logic [31:0] ck_b(input int dummy);
@@ -238,6 +253,14 @@ module dts_top_tb;
         end
     end
 
+    // +dirty: the ring and the carried sums start as garbage (what another program left):
+    // a program's RESET must clear them (RCLR), or the first op's checksums differ
+    initial if ($test$plusargs("dirty")) begin
+        #1;
+        for (int i = 0; i < 2048; i++) dut.u_vec.ring[i] = $urandom;
+        for (int i = 64; i < 128; i++) dut.u_vec.sm[i] = $urandom;
+    end
+
     initial begin
         busy = 0; idle = 0; last_prog = 0; quiet = 0; worst = 0.0; sumfrac = 0.0; nfr_t = 0;
         repeat (4) @(posedge clk);
@@ -256,6 +279,8 @@ module dts_top_tb;
                 if (overrun_bits != n_ovr) $fatal(1, "FAIL [count] %0d overrun bits, the golden %0d", overrun_bits, n_ovr);
                 if (lenient_codes != n_len) $fatal(1, "FAIL [count] %0d lenient codes, the golden %0d", lenient_codes, n_len);
                 if (dmix_ignored != n_dmix) $fatal(1, "FAIL [count] %0d ignored downmixes, the golden %0d", dmix_ignored, n_dmix);
+                if (codec == 2'd2 && n_pairs > 0 && mp2_fs != n_fs[1:0])
+                    $fatal(1, "FAIL [count] the exported rate %0d, the golden %0d", mp2_fs, n_fs);
                 $display("dts_top_tb: %0d bytes, %0d vector ops, %0d pairs, %0d frames, %0d refused, %0d codebook rows (latency %0d), %0d cycles; real time: worst frame %0.1f %%, mean %0.1f %%",
                          n_bytes, vi, pi, frames, refused, n_cb, cblat, busy - idle,
                          100.0 * worst, nfr_t ? 100.0 * sumfrac / nfr_t : 0.0);

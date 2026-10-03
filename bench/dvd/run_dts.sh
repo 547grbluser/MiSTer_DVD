@@ -14,6 +14,8 @@
 #   R3 Shadoan with stalls and back-pressure (+stall=40 +ostall=600 +cblat=90)
 #   L* T2, 3 frames, the codebook latency swept (1, 20, 60, 150): cycles reported as a
 #      function of the latency ram2 will have (P2 measures it)
+#   D1 T2 with the ring and the carried sums starting as garbage (+dirty: what MP2 left,
+#      docs/mp2_engine.md M2): the program's RESET (RCLR) must clear them
 # Every no-stall arm must also fit BUDGET (default 60 %) of real time, frame by frame.
 #
 # --red [MUTS="V1 V4" to run only those]: mutations on a COPY of the RTL, each caught
@@ -38,6 +40,7 @@
 #   V16 XCLR clears 1,024 words, not 1,280 (channel 4)    (T2)          -> [vop]
 #   V17 an ignored downmix is not counted                 (Cinderella)  -> [count]
 #   V18 ADPCM reads coefficient row pvq / 2               (T2)          -> [vop]
+#   V19 RCLR clears nothing (the ring starts as garbage)  (D1)          -> [vop]
 set -u
 cd "$(dirname "$0")/../.."
 ROOT=$(pwd)
@@ -72,6 +75,7 @@ ARMS+=("R1|$T2|--frames 3 --refuse 1|+stall=20 +ostall=600 +cblat=1|0")
 ARMS+=("R2|$T2|--frames 3 --truncate 1:300||0")
 ARMS+=("R3|$GATE/disc_blockoverflow_shadoan.dts|--frames 2|+stall=40 +ostall=600 +cblat=90|0")
 for L in 1 20 60 150; do ARMS+=("L$L|$T2|--frames 3|+cblat=$L|1"); done
+ARMS+=("D1|$T2|--frames 2|+dirty|0")
 declare -A STEM SIMARGS TIMED
 
 echo "== GREEN: goldens (${#ARMS[@]} arms) =="
@@ -166,20 +170,21 @@ PYEOF
   mut V5 $T "3'd0: begin ma = hs0; mb = cs3; end" "3'd0: begin ma = hs0; mb = cs0; end" '\[vop\]' &
   mut V6 $T "if (k == 12'd4 && !dv) begin k <= 12'd0; st <= V_AD3; end" "if (k == 12'd4 && !dv) begin k <= 12'd0; st <= V_DONE; end" '\[vop\]' &
   mut V7 written_joint "hb_we = k_d[2];" "hb_we = 1'b0;" '\[vop\]' &
-  mut V8 written_sumdiff51 "dsrc = {{31{bf_a[24]}}, bf_a} - {{31{bf_c[24]}}, bf_c};" "dsrc = {{31{bf_a[24]}}, bf_a} + {{31{bf_c[24]}}, bf_c};" '\[vop\]' &
+  mut V8 written_sumdiff51 "dsrc = {{31{bf_a[24]}}, bf_a} - {{31{bf_c[24]}}, bf_c};   // BFLY: X[p] - X[q]" "dsrc = {{31{bf_a[24]}}, bf_a} + {{31{bf_c[24]}}, bf_c};" '\[vop\]' &
   wait
   mut V9 written_amode9 "{5'd0, mb_c, 1'b0} + {8'd0, side};" "{5'd0, mb_c, 1'b0} + {8'd0, !side};" '\[vop\]' &
   mut V10 synth_stereo_1536k_loud "pshift <= (mag > 29'h400000);" "pshift <= 1'b0;" '\[vop\]' &
   mut V11 $T "wire        ip_final = ip_iv && ti_last && (o_idx == 5'd31) && (o_stage != 3'd6);" "wire        ip_final = 1'b0;" '\[vop\]' &
   mut V12 synth_51side_1536k_perfect "wn_ra = {a7[0], w_t, w_q, w_i};" "wn_ra = {1'b0, w_t, w_q, w_i};" '\[(vop|pcm)\]' &
   wait
-  mut V13 $T "off0 <= off0 - 9'd32;" "off0 <= off0;" '\[(vop|pcm)\]' &
+  mut V13 $T "off0 <= off0 - 10'd32;" "off0 <= off0;" '\[(vop|pcm)\]' &
   mut V14 $T "wire  signed [24:0] p_rnd = (\$signed({p_val[23], p_val}) + 25'sd128) >>> 8;" "wire  signed [24:0] p_rnd = \$signed({p_val[23], p_val}) >>> 8;" '\[pcm\]' &
   mut V15 written_amode9 ": {3'd0, args[22:16], 2'd0};" ": 12'd0;" '\[vop\]' &
   mut V16 $T "OP_XCLR: begin lcnt <= 12'd1280; st <= V_LOOP; end" "OP_XCLR: begin lcnt <= 12'd1024; st <= V_LOOP; end" '\[vop\]' &
   wait
   mut V17 disc_dmix_cinderella3 "if (cnt_dmix && dmix_ignored != 16'hFFFF)" "if (1'b0)" '\[count\]' &
   mut V18 $T "cb_addr <= args[43:32];" "cb_addr <= {1'b0, args[43:33]};" '\[vop\]' &
+  mut V19 D1 "direct = 1'b1; rg_we = 1'b1; rg_wa = k_d[10:0];" "direct = 1'b1; rg_we = 1'b0; rg_wa = k_d[10:0];" '\[vop\]' &
   wait
   for f in $(ls "$RES" | sort -V); do grep -v '^MUTFAIL$' "$RES/$f"; grep -q '^MUTFAIL$' "$RES/$f" && fail=1; done
   rm -rf "$RES"

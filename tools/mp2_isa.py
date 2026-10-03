@@ -57,7 +57,7 @@ import mp2_ref as R     # noqa: E402
 REPO = os.path.dirname(HERE)
 UASM = os.path.join(REPO, 'dvd', 'dts', 'mp2.uasm')
 
-VOPS = {'xclr': 0, 'mdq': 26, 'msyn': 27, 'rclr': 28}
+VOPS = {'xclr': 0, 'cnt': 8, 'mdq': 26, 'msyn': 27, 'rclr': 28}
 VOP_NAME = {v: k for k, v in VOPS.items()}
 CYC_HEADROOM = 1.25
 # MODELLED (M2 calibrates): MDQ = C read, two issues, the floor's landing, the SCF
@@ -130,6 +130,7 @@ class Machine(D.Machine):
         self.S = [0] * 256
         self.V = [[0] * 1024 for _ in range(2)]
         self.voff = [0, 0]
+        self.b2 = [0] * 64                  # the window's carried sums {ch, j} (DTS's buffer)
         self.ref = R.MP2Decoder()
         self.fs = None
         self.vec_model = 0
@@ -145,10 +146,14 @@ class Machine(D.Machine):
         if name == 'xclr':
             self.S = [0] * 256
             t = D.CYC['xclr']
-        elif name == 'rclr':
+        elif name == 'cnt':               # counter 0: a frame longer than its header
+            self.counters[a[0]] = self.counters.get(a[0], 0) + 1
+            t = D.CYC['cnt']
+        elif name == 'rclr':              # the ring and the carried sums; the offsets stay
             self.V = [[0] * 1024 for _ in range(2)]
-            self.voff = [0, 0]
+            self.b2 = [0] * 64
             self.ref = R.MP2Decoder()
+            self.ref.voff = list(self.voff)
             t = CYC['rclr']
             self.vec_model += t
         elif name == 'mdq':
@@ -162,6 +167,8 @@ class Machine(D.Machine):
             raise D.EngineError(f'unknown op {op} at pc {self.pc}')
         self.cycles = c0 + D.CYC['vop'] - D.CYC['instr'] + t
         self.by_cat[name] = self.by_cat.get(name, 0) + self.cycles - c0
+        if self.vop_hook is not None:
+            self.vop_hook(self, op)
 
     def mdq(self, a):
         """MDQ, the engine's way, checked against the model's requantize and scale."""
@@ -208,6 +215,7 @@ class Machine(D.Machine):
                     taps.append((self.Dw[di], V[vi]))
                 lo = sum(d * (v & 0xFFFF) for d, v in taps)
                 b2 = lo >> 16                         # the carried sum
+                self.b2[(ch << 5) | j] = b2
                 hi = b2 + sum(d * (v >> 16) for d, v in taps)
                 p = R.sat(hi >> 1, 24)
                 pcm.append(R.sat((p + 128) >> 8, 16))
@@ -220,6 +228,18 @@ class Machine(D.Machine):
         self.pcm[0].extend(out[0])
         self.pcm[1].extend(out[1])
         return CYC['msyn'] + nch * CYC['msyn_ch'] + CYC['msyn_emit']
+
+
+    def checksums(self):
+        """The engine buffers as tools/dts_isa.py Machine.checksums, in the RTL's address
+        order, at MP2's widths: X (1,280 words, 27 bits: the samples at {k, ch, sb}),
+        the ADPCM history (untouched: 0), the ring {ch, i} (2,048 x 32), b2 {ch, j}
+        (64 x 29). -> (x, hist, ring, buf2)"""
+        def ck(vals, w):
+            m = (1 << w) - 1
+            return sum((i + 1) * (v & m) for i, v in enumerate(vals)) & 0xFFFFFFFF
+        return (ck(self.S + [0] * (1280 - 256), 27), 0, ck(self.V[0] + self.V[1], 32),
+                ck(self.b2, 29))
 
 
 def emulate(path, nframes=0, mutate=None):
@@ -248,14 +268,36 @@ def compare(m, want):
     return bad, first
 
 
+IC_C, IC_SCF = 128, 160            # MP2's words in dts_vec's icoef ROM (256 deep)
+
+
+def icoef_words(icoef):
+    """dts_vec's icoef ROM: the IMDCT's coefficients, then MP2's C by class at IC_C and
+    SCF by index at IC_SCF (one M10K holds 256 x 27 as it held 113)."""
+    c, scf, _, _ = vec_tables()
+    assert len(icoef) <= IC_C and IC_C + len(c) <= IC_SCF and IC_SCF + len(scf) <= 256
+    w = list(icoef) + [0] * (IC_C - len(icoef)) + c
+    w += [0] * (IC_SCF - len(w)) + scf
+    return w + [0] * (256 - len(w))
+
+
+def vec_files():
+    """MP2's vector-engine ROM images: N (2,048 x 16, {i, k}) and D (512 x 18)."""
+    _, _, n, d = vec_tables()
+    return {'dts_mp2n.mem': [f'{v & 0xFFFF:04x}' for v in n],
+            'dts_mp2d.mem': [f'{v & 0x3FFFF:05x}' for v in d]}
+
+
 def svh_lines(labels):
-    """MP2's part of dvd/dts/dts_ucode.svh: its entry points and op numbers."""
+    """MP2's part of dvd/dts/dts_ucode.svh: its entry points, its icoef words and op numbers."""
     return [
-        '// MP2 (docs/mp2_engine.md): the entry points and op numbers',
+        '// MP2 (docs/mp2_engine.md): the entry points, its words in icoef, the op numbers',
         f"localparam [10:0] UC_MP2_RESET = 11'd{labels['RESET']};",
         f"localparam [10:0] UC_MP2_FRAME = 11'd{labels['FRAME']};",
+        f"localparam [7:0]  MP2_IC_C     = 8'd{IC_C};",
+        f"localparam [7:0]  MP2_IC_SCF   = 8'd{IC_SCF};",
     ] + [f"localparam [5:0]  V_{k.upper():8s}= 6'd{v};" for k, v in sorted(VOPS.items(), key=lambda kv: kv[1])
-         if k != 'xclr']
+         if k not in ('xclr', 'cnt')]
 
 
 def main():

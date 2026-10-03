@@ -1,7 +1,7 @@
 // bench/dvd/dts_seq_tb.sv -- the engine's sequencer against its emulator (both programs)
 //
 // Feeds STEM.frames (descriptors) and STEM.bytes (tools/dts_golden.py, or
-// tools/ac3_golden.py with +codec=1) into dts_seq, with optional input stalls
+// tools/ac3_golden.py with +codec=1, tools/mp2_golden.py with +codec=2) into dts_seq, with optional input stalls
 // (+stall=N: a gap of up to N cycles before a byte or a descriptor) and XQ
 // back-pressure (+xstall=N), and a stub vector engine: done 1-4 cycles after a start,
 // or after the op's last item is taken -- XQ 8 codes; AC-3's AQ hi - lo bins (r11 -
@@ -36,7 +36,7 @@ module dts_seq_tb;
     logic [23:0]  xq_code;
     logic [10:0]  xq_addr;
     logic         xq_valid, xq_ready;
-    logic         codec;
+    logic   [1:0] codec;                 // 0 DTS, 1 AC-3, 2 MP2
     logic         err_valid, frame_done, overrun_bit, lenient;
     logic [4:0]   err_code;
     logic         tr_valid;
@@ -66,7 +66,7 @@ module dts_seq_tb;
         if (!$value$plusargs("stall=%d", stall)) stall = 0;
         if (!$value$plusargs("xstall=%d", xstall)) xstall = 0;
         if (!$value$plusargs("codec=%d", r)) r = 0;
-        codec = r[0];
+        codec = r[1:0];
         fd = $fopen({stem, ".meta"}, "r");
         if (fd == 0) $fatal(1, "FAIL [setup] no %s.meta", stem);
         r = $fscanf(fd, "%d %d %d %d %d %d %d %d %d", n_bytes, n_frames, n_ev, n_vops, n_pairs,
@@ -157,8 +157,8 @@ module dts_seq_tb;
                 if (!xq_op && !xab) $fatal(1, "FAIL [trace] an item (addr %03x) outside an op", xq_addr);
                 if (!xq_op) xab <= 1'b0;                       // the one pending item
                 xtaken <= xtaken + 1; xtot <= xtot + 1;
-                if (codec && xq_addr == 11'h7F0) xneed <= xneed + ncpl;
-                if (xtaken == xneed - 1 && !(codec && xq_addr == 11'h7F0)) begin
+                if (codec == 2'd1 && xq_addr == 11'h7F0) xneed <= xneed + ncpl;
+                if (xtaken == xneed - 1 && !(codec == 2'd1 && xq_addr == 11'h7F0)) begin
                     vcnt <= 1 + ($urandom % 4); xq_op <= 1'b0;
                 end
                 xgap <= (xstall > 0) ? ($urandom % (xstall + 1)) : 0;
