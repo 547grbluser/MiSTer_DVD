@@ -777,7 +777,8 @@ RAM's "Inferred altsyncram" line.
 - **Sequencer cycles with a stub engine** (this bench): T2 43K a frame (512 samples,
   15 % of 288K); `written_max_subframes` 333K (4,096 samples, 14 % of 2.3M).
 - **Not yet wired** into `DVD.qsf` or `emu.sv` (P3). P1b's fit builds the engine on its
-  own.
+  own. ⚠ Because `DVD.qsf` does not name `dvd/dts/*.sv`, `tools/lint_undriven.sh` has
+  **not** seen them yet (CLAUDE.md cross-cutting lessons); P3 adds them and runs it.
 
 **The whole engine is bit-exact too: `dvd/dts/dts_vec.sv` + `dts_top.sv`, gate
 `bench/dvd/run_dts.sh` (`--red`).** After every vector op the bench reads X, the history,
@@ -847,7 +848,11 @@ dvd/dts/dts_top.sv`: Quartus 17.0.2, every port a virtual pin, SEED 1, both slow
 | DSP | 1 | **1** | 1 | 17 free |
 | Fmax, −40 °C (binding) | 37.7 MHz | **35.8 MHz** (1.33× the clock); 37.7 at 100 °C | — | 27 MHz |
 
-**Cycles** (the calibrated emulator, `tools/dts_cycles.py --dir ~/dts-streams/census`):
+In the core, expect **about 2,070 ALM** for the engine and its telemetry. The standalone
+2,227 includes ~150 of the fitter's "unavailable" packing beside the virtual pins, which
+will not carry over as is. Packing beside the decoder will differ, not vanish.
+
+**Cycles** (the calibrated emulator, `tools/dts_cycles.py --dir "$DTS_CENSUS_DIR"`, default `~/dts-streams/census`):
 **every frame of all 327 census windows (61,678 frames, 147 streams on 90 discs) within
 39.8 % of real time**, the worst on *Shadoan*. None was refused. On the RTL bench the
 gate set's worst frame is 37.1 % (`tools/test_dts_isa.py`, 8 frames a stream).
@@ -888,9 +893,14 @@ was re-proved by both gates (`run_dts_seq.sh --red`, `run_dts.sh --red`) before 
 - ⏳ **Recorded, not taken: the window half.** Each prototype mirrors itself,
   `w[511−i] = ±w[i]`, negated where bit 4 ≠ bit 5. That saves one M10K for an
   add/subtract in the accumulator. With ALMs binding and M10K at 31, it was not worth it.
-- **Still in logic, not M10K:** the constant ROM (92 × 16), the IMDCT coefficients
-  (113 × 27) and the book roots (62 × 12). Moving them would trade ALMs for M10K, which is
-  the direction P4 wants, if M10K stays spare.
+- ⏳ **ALM options, recorded, not taken (not measured one by one; ~200–300 together,
+  which does not change the verdict):**
+  - The constant ROM (92 × 16), the IMDCT coefficients (113 × 27) and the book roots
+    (62 × 12) went to logic. In M10K (10 spare) they would cost 1–2 blocks and return
+    perhaps 100–150 ALM.
+  - `dts_vec` latches r8–r15 into its own 128 flip-flops. The sequencer's registers hold
+    still while an op runs, so the engine could read them directly (perhaps 60).
+  - The 56-bit accumulator and rounding shifter: the measured sums need about 51 bits.
 
 **The handoff's open decisions, closed:**
 - ✅ Block-code division: restoring, the first digit divided as its bits arrive (above).

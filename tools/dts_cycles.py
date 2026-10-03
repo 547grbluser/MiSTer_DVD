@@ -8,7 +8,7 @@ budget (27 MHz x the frame's duration). The RTL bench can afford 2 frames a stre
 this covers whole census windows.
 
     tools/dts_cycles.py FILE.dts ... [--jobs N] [--latency CYCLES] [--budget 0.60]
-    tools/dts_cycles.py --dir ~/dts-streams/census
+    tools/dts_cycles.py --dir "$DTS_CENSUS_DIR"   # the census windows tools/dts_scan.py extracts
 
 Exit 0 when every frame is within the budget and none is refused; 1 otherwise.
 """
@@ -51,7 +51,9 @@ def one(args):
 def main():
     ap = argparse.ArgumentParser(description=__doc__.split('\n')[0])
     ap.add_argument('files', nargs='*')
-    ap.add_argument('--dir')
+    ap.add_argument('--dir', help='every *.dts under it (e.g. $DTS_CENSUS_DIR, default '
+                                   '~/dts-streams/census when the flag is given bare)',
+                    nargs='?', const=os.environ.get('DTS_CENSUS_DIR', '~/dts-streams/census'))
     ap.add_argument('--jobs', type=int, default=max(1, (os.cpu_count() or 2) // 2))
     ap.add_argument('--latency', type=int, default=I.CB_LATENCY)
     ap.add_argument('--budget', type=float, default=0.60)
