@@ -48,7 +48,7 @@ int main(int argc, char** argv) {
     for (int i = 0; i < 6; i++) { eval0(); posedge(); }
     dut->rst = 0;
 
-    long fed = 0, idle = 0;
+    long fed = 0, idle = 0, quiet = 0;
     int frame = -1, blk = 0, nf = 2, prev_err = 0, blocks = 0;
     long fstart = 0; int flen = 0;
     const bool at_imdct = getenv("AC3_TAP") && std::string(getenv("AC3_TAP")) == "imdct";
@@ -109,6 +109,10 @@ int main(int argc, char** argv) {
         prev_err = (int)dut->err_unsupported;
 
         if (fed >= n && ++idle > 4'000'000) break;     // input exhausted, decoder quiet
+        // the RTL halts on err_unsupported and stops taking bytes: give up after a
+        // long stretch with no block, frame or byte
+        if (can || dut->frame_hdr_valid || dut->mant_done) quiet = 0;
+        else if (++quiet > 20'000'000) break;
     }
     std::fprintf(stderr, "ac3_golden: %s: %d frames, %d blocks; cycles a block: parse mean %ld max %ld"
                  " (from the block's side info, so the side-info parse itself is not counted), IMDCT mean %ld max %ld\n",
