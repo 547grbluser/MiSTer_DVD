@@ -8,7 +8,7 @@ same as the video path.
 | **AC-3 (Dolby Digital)** | yes | yes | Every channel mode from 1.0 mono to 5.1, downmixed to stereo |
 | **MPEG-1 Layer II (MP2)** | yes | no | Rare on DVD, universal on Video CD. 48/44.1/32 kHz |
 | **LPCM** | yes | no | 48 kHz stereo. 20/24-bit tracks play, truncated to 16-bit |
-| **DTS** | **no** | yes | Passthrough to a receiver only — the one format with no fallback |
+| **DTS** | yes | yes | The DTS core, up to 5.1, downmixed to stereo |
 | **WAV (PCM file)** | yes | no | 16-bit stereo, 44.1/48 kHz — a plain audio file, not a disc |
 
 By default the core decodes to stereo and sends it over HDMI, which works on any display.
@@ -88,11 +88,17 @@ channels, and the board routes no other pin for it. That is also why 5.1 has to 
 
 ## DTS
 
-**There is no DTS decoder in the core.** A DTS track is silent in `Decode PCM` mode.
+DTS tracks decode in the core and play as stereo in `Decode PCM`, like AC-3. Every channel
+layout up to 5.1 is downmixed to stereo; the LFE channel is left out of the downmix, as
+other stereo players do.
 
-To hear DTS, switch `Audio Out` to [`Passthru`](passthrough.md) and send the bitstream to
-an AV receiver. Most DTS discs also carry an AC-3 track — cycling audio with **B7** will
-usually find one that decodes.
+The core decodes the DTS **core** stream, which is what DVD-Video carries: 48 kHz, at
+768 or 1536 kbit/s. Extensions layered on top of it — DTS-ES 6.1 and 96/24 among them —
+are ignored, and the core underneath plays normally. Those extensions exist for a
+receiver to use, so for full 5.1 or 6.1, switch `Audio Out` to
+[`Passthru`](passthrough.md) and send the bitstream to an AV receiver.
+
+A DTS frame the core cannot decode is skipped rather than played as noise.
 
 ## Choosing a track
 
@@ -168,8 +174,8 @@ If a disc plays with no sound:
    `Decode PCM`** unless you have a receiver — Passthru sends those two as a bitstream,
    which an ordinary television cannot decode. LPCM and MP2 come out as PCM in either
    mode, so they are never silenced by this setting.
-2. **Try another track with B7** — the disc's default may be DTS, or a format the core
-   cannot decode.
+2. **Try another track with B7** — the disc's default may be a format the core cannot
+   decode.
 3. **`CSS ENCRYPTED` on screen** means audio is muted deliberately — see
    [What you need](../getting-started/what-you-need.md).
 

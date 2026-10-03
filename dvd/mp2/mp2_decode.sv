@@ -46,7 +46,7 @@ module mp2_decode #(
     parameter int PCM_AW = 12,         // PCM FIFO = 2^PCM_AW stereo pairs (~85 ms @48k)
     // D4 (docs/dts_decoder.md): the PCM FIFO's power-up contents -- in the core, half
     // the DTS ADPCM codebook, copied out once by dts_cb_mem. "" = none (every bench).
-    parameter     INIT_FILE = ""
+    parameter     CB_INIT = ""
 ) (
     input  logic        clk,
     input  logic        rst,           // synchronous, active-high
@@ -312,7 +312,7 @@ module mp2_decode #(
     // ------------------------------------------------------------------
     localparam int PCM_DEPTH = 1 << PCM_AW;
     logic [31:0] pcm_mem [0:PCM_DEPTH-1];
-    initial if (INIT_FILE != "") $readmemh(INIT_FILE, pcm_mem);   // D4
+    initial if (CB_INIT != "") $readmemh(CB_INIT, pcm_mem);   // D4
     logic [PCM_AW-1:0] pcm_wp, pcm_rp;
     logic [PCM_AW:0]   pcm_cnt;
     logic        pcm_push;

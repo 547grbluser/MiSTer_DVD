@@ -35,7 +35,7 @@ module lpcm_unpack #(
     parameter int FIFO_AW = 9,           // pair-FIFO depth = 2^AW (>= one frame)
     // D4 (docs/dts_decoder.md): the pair FIFO's power-up contents -- in the core, half
     // the DTS ADPCM codebook, copied out once by dts_cb_mem. "" = none (every bench).
-    parameter     INIT_FILE = ""
+    parameter     CB_INIT = ""
 ) (
     input  logic        clk,
     input  logic        rst,             // synchronous, active-high
@@ -92,7 +92,7 @@ module lpcm_unpack #(
     // ---- pair FIFO (depth 2^FIFO_AW), entry = {L[15:0], R[15:0]} ------------
     localparam int DEPTH = (1 << FIFO_AW);
     logic [31:0] mem [0:DEPTH-1];
-    initial if (INIT_FILE != "") $readmemh(INIT_FILE, mem);   // D4
+    initial if (CB_INIT != "") $readmemh(CB_INIT, mem);   // D4
     logic [FIFO_AW:0] wptr, rptr;         // extra MSB for full/empty disambiguation
     wire  [FIFO_AW:0] level = wptr - rptr;
     wire        empty = (wptr == rptr);

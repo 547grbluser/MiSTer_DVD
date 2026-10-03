@@ -26,6 +26,14 @@
 //  imdct_512 reads the coefficients through the engine's X port, a registered read
 //  like mantissa_dequant's coeff_mem; the engine holds X until imdct_done.
 //
+//  DTS (docs/dts_decoder.md P3): the same engine runs dvd/dts/dts.uasm when codec_req
+//  is 0. A change of program waits until the engine is idle at FRAME (no frame in
+//  flight, no IMDCT pending), then holds it in reset for a few cycles with the new
+//  codec: codec_busy is high from the request until then, and the caller must not
+//  present a descriptor meanwhile (the old program would take it). DTS's stereo PCM
+//  leaves on dts_l/dts_r/dts_valid with dts_ready back-pressure (the engine's MIXSYN
+//  waits); its codebook port (cb_*) is answered from DDR3 by dvd/dts/dts_cb_mem.sv.
+//
 //  rst is synchronous, active-high (as ac3_front's).
 //============================================================================
 
@@ -35,6 +43,9 @@
 module audio_engine (
     input  wire         clk,
     input  wire         rst,
+    input  wire         codec_req,           // 1 AC-3, 0 DTS: the program to run
+    output logic        codec_busy,          // a change of program is pending: hold
+                                             // the descriptor
 
     // one frame: a descriptor, then fr_len bytes
     input  wire  [15:0] fr_len,
@@ -51,6 +62,17 @@ module audio_engine (
     output logic [15:0] lvl_q,
     output logic  [2:0] pcm_acmod,           // the drained block's acmod (pcm_out's mono)
     input  wire         pcm_done,            // pcm_out has drained the block
+
+    // DTS: stereo s16 pairs, and the codebook port
+    output logic [15:0] dts_l,
+    output logic [15:0] dts_r,
+    output logic        dts_valid,
+    input  wire         dts_ready,
+    output logic        cb_req,
+    output logic        cb_sel,
+    output logic [11:0] cb_addr,
+    input  wire         cb_valid,
+    input  wire  [63:0] cb_data,
 
     // status
     output logic        synced,              // a frame decoded since reset
@@ -78,13 +100,31 @@ module audio_engine (
     logic        vop_start, vop_done, e_fend, e_ref;
     logic  [4:0] e_rcode;
     logic  [5:0] vop_op;
-    always_comb e_rst_n = !rst;
+    logic        im_busy;                    // this request's transform is running/done
+    // the program: a change waits for the engine to idle at FRAME, then resets it
+    logic        eng_codec;
+    logic  [2:0] sw_cnt;
+    logic        e_fr_ready;
+    wire         idle_at_frame = e_fr_ready && !imdct_req && !im_busy;
+    always_ff @(posedge clk) begin
+        if (rst) begin
+            eng_codec <= 1'b1; sw_cnt <= 3'd0;
+        end else if (sw_cnt != 3'd0) sw_cnt <= sw_cnt - 3'd1;
+        else if (codec_req != eng_codec && idle_at_frame) begin
+            eng_codec <= codec_req; sw_cnt <= 3'd7;
+        end
+    end
+    assign codec_busy = (codec_req != eng_codec) || (sw_cnt != 3'd0);
+    always_comb e_rst_n = !rst && (sw_cnt == 3'd0);
+    // a descriptor reaches the engine only when it runs the program it is for
+    wire e_fr_valid = fr_valid && !codec_busy;
+    assign fr_ready = e_fr_ready && !codec_busy;
 
     dts_top u_eng (
-        .clk, .rst_n(e_rst_n), .codec(1'b1),
-        .fr_len, .fr_valid, .fr_ready, .in_byte, .in_valid, .in_ready,
-        .cb_req(), .cb_sel(), .cb_addr(), .cb_valid(1'b0), .cb_data(64'd0),
-        .pcm_l(), .pcm_r(), .pcm_valid(), .pcm_ready(1'b1),
+        .clk, .rst_n(e_rst_n), .codec(eng_codec),
+        .fr_len, .fr_valid(e_fr_valid), .fr_ready(e_fr_ready), .in_byte, .in_valid, .in_ready,
+        .cb_req, .cb_sel, .cb_addr, .cb_valid, .cb_data,
+        .pcm_l(dts_l), .pcm_r(dts_r), .pcm_valid(dts_valid), .pcm_ready(dts_ready),
         .frames(e_frames), .refused(e_refused), .last_err(e_last_err), .err_seen(err_seen),
         .overrun_bits(e_ovr), .lenient_codes(), .dmix_ignored(),
         .frame_end(e_fend), .refuse(e_ref), .refuse_code(e_rcode),
@@ -99,7 +139,6 @@ module audio_engine (
 
     // ---- the IMDCT handshake ----
     logic        pcm_free;                   // pcm_mem drained (or never written)
-    logic        im_busy;                    // this request's transform is running/done
     logic        im_go;
     logic  [4:0] i_blksw;
     logic  [7:0] i_dynrng;

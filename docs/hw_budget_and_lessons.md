@@ -79,6 +79,12 @@ outlive it.
 
 ## 1. ★ A WHOLE 64-BIT DDR3 PORT IS FREE IN THIS CORE
 
+⚠ **Taken, 2026-10-03:** `ram2` now carries the DTS codebooks (`dvd/dts/dts_cb_mem.sv`,
+`docs/dts_decoder.md` "P2 + P3 result"). The traffic is a 64 KB copy at configuration,
+then one-word reads at ~0.5 MB/s while DTS plays, so the port is nearly idle and could be
+SHARED. But the next master must add an arbiter, not just a connection. The recipe below
+is what was applied.
+
 This is the most valuable thing the attempt found, and it has nothing to do with
 deinterlacing.
 

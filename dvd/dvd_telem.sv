@@ -56,6 +56,12 @@
 //                               window, cycles/4096 (dec_duty; changes once a window)
 //     word 23 pic_n          -- pictures decoded (wraps)
 //     word 24 pic_over       -- ... that took longer than one frame period (wraps)
+//     word 25 AUD_MAGIC      -- says words 26..30 exist (the audio engine; docs/dts_decoder.md)
+//     word 26 dts_flags      -- [0] codebooks copied, [1] their checksum matched (tables_ok:
+//                               DTS decodes), [2] the engine runs DTS, [12:8] last refusal
+//     word 27 cb_sum[31:16]  word 28 cb_sum[15:0] -- the copy's checksum (D4 rule 2)
+//     word 29 eng_frames     -- frames the engine decoded (AC-3 + DTS, wraps)
+//     word 30 eng_refused    -- frames it refused (wraps)
 //   Word 11 is the measurement docs/av_sync.md "THE STC IS A CLOCK" is built
 //   on: the picture on SCREEN against the clock the audio is scheduled by. It
 //   is ~0 when the display is scheduled by PTS (Stage 1) and reads the whole
@@ -95,7 +101,8 @@ module dvd_telem #(
     parameter [15:0] CMD_AF = 16'h007B,
     parameter [15:0] MAGIC = 16'hD7D1,
     parameter [15:0] DUTY_MAGIC = 16'hDD01,  // word 16: dec_duty words 17..20 follow
-    parameter [15:0] PIC_MAGIC  = 16'hDD02   // word 21: dec_duty per-picture words 22..24 follow
+    parameter [15:0] PIC_MAGIC  = 16'hDD02,  // word 21: dec_duty per-picture words 22..24 follow
+    parameter [15:0] AUD_MAGIC  = 16'hDD03   // word 25: the audio engine's words 26..30 follow
 ) (
     input         clk,
 
@@ -133,6 +140,10 @@ module dvd_telem #(
     input  [15:0] dec_pic_max,           // word 22: longest picture decode, last window (cycles/4096)
     input  [15:0] dec_pic_n,             // word 23: pictures decoded
     input  [15:0] dec_pic_over,          // word 24: ... over one frame period
+    input  [15:0] dts_flags,             // word 26
+    input  [31:0] cb_sum,                // words 27, 28
+    input  [15:0] eng_frames,            // word 29
+    input  [15:0] eng_refused,           // word 30
 
     // --- audio link format (CMD_AF) -------------------------------------
     // What the wire is actually carrying, which is NOT what the OSD bit says: in
@@ -176,7 +187,7 @@ module dvd_telem #(
     // registered-sample commit (never the raw asynchronous input), 1/3 the
     // flops. The atomic snapshot below is untouched: q[] is latched together
     // on the command strobe exactly as the 19 outputs were.
-    localparam int NSRC = 24;
+    localparam int NSRC = 29;
     wire [15:0] src [0:NSRC-1];
     assign src[0]  = refreshes;
     assign src[1]  = pickups;
@@ -214,6 +225,11 @@ module dvd_telem #(
     assign src[21] = dec_pic_max;
     assign src[22] = dec_pic_n;
     assign src[23] = dec_pic_over;
+    assign src[24] = dts_flags;
+    assign src[25] = cb_sum[31:16];
+    assign src[26] = cb_sum[15:0];
+    assign src[27] = eng_frames;
+    assign src[28] = eng_refused;
 
     reg  [4:0]  cur;                        // source being sampled
     reg  [1:0]  sph;                        // 0: sample A, 1: sample B, 2: compare+commit
@@ -247,6 +263,8 @@ module dvd_telem #(
     wire [15:0] s_afmt    = q[16];
     wire [15:0] s_ddisp   = q[17], s_dstarve = q[18], s_dback = q[19], s_dref = q[20];
     wire [15:0] s_pmax    = q[21], s_pn      = q[22], s_pover = q[23];
+    wire [15:0] s_dflags  = q[24], s_sumhi   = q[25], s_sumlo = q[26];
+    wire [15:0] s_efr     = q[27], s_eref    = q[28];
 
     reg  [4:0] wcnt;
     reg        active;
@@ -254,7 +272,7 @@ module dvd_telem #(
 
     // the atomic snapshot
     reg [15:0] q1, q2, q3, q4, q5, q6, q7, q8, q9, q10, q11, q12, q13, q14, q15;
-    reg [15:0] q17, q18, q19, q20, q22, q23, q24;
+    reg [15:0] q17, q18, q19, q20, q22, q23, q24, q26, q27, q28, q29, q30;
     reg [15:0] q_afmt;
     reg        af_sel;
 
@@ -290,6 +308,11 @@ module dvd_telem #(
                 q22 <= s_pmax;
                 q23 <= s_pn;
                 q24 <= s_pover;
+                q26 <= s_dflags;
+                q27 <= s_sumhi;
+                q28 <= s_sumlo;
+                q29 <= s_efr;
+                q30 <= s_eref;
                 q_afmt <= s_afmt;
                 dout_r <= MAGIC;
             end else begin
@@ -320,6 +343,12 @@ module dvd_telem #(
                     5'd22:   dout_r <= q22;
                     5'd23:   dout_r <= q23;
                     5'd24:   dout_r <= q24;
+                    5'd25:   dout_r <= AUD_MAGIC;
+                    5'd26:   dout_r <= q26;
+                    5'd27:   dout_r <= q27;
+                    5'd28:   dout_r <= q28;
+                    5'd29:   dout_r <= q29;
+                    5'd30:   dout_r <= q30;
                     default: dout_r <= 16'd0;
                 endcase
             end

@@ -52,6 +52,8 @@ module dts_cb_mem #(
     output logic         cp_ring_step,
     input  wire    [7:0] cp_ring_q,
     output logic         busy,                 // copying: hold the audio path
+    output logic         host_rst,             // a few cycles after the copy: reset the
+                                               // hosts (the copy moved their read pointers)
     output logic         tables_ok,            // copied, and the checksum matched
     output logic  [31:0] sum_seen,             // the checksum copied (telemetry)
 
@@ -89,6 +91,8 @@ module dts_cb_mem #(
     logic [63:0] acc = 64'd0;
     logic [31:0] s1 = 32'd0, s2 = 32'd0;
     logic        first = 1'b1;                // the host's first word needs no step
+    logic  [2:0] hr_cnt = 3'd0;               // the post-copy host reset (power-up once)
+    assign host_rst = (hr_cnt != 3'd0);
 
     assign busy = !copied;
     assign sum_seen = s2 ^ s1;
@@ -145,10 +149,11 @@ module dts_cb_mem #(
                         end else begin row <= row + 12'd1; cst <= C_STEP; end
                     end
                 end
-                C_DONE: begin copied <= 1'b1; tables_ok <= ((s2 ^ s1) == CB_SUM); end
+                C_DONE: begin copied <= 1'b1; hr_cnt <= 3'd7; tables_ok <= ((s2 ^ s1) == CB_SUM); end
                 default: cst <= C_STEP;
             endcase
         end else begin
+            if (hr_cnt != 3'd0) hr_cnt <= hr_cnt - 3'd1;
             // the fetch service: one request at a time (the engine waits for each row)
             if (ddr_read && !ddr_busy) ddr_read <= 1'b0;
             if (cb_req && !rd_pend) begin

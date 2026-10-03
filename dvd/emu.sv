@@ -94,6 +94,20 @@ module emu (
 	output  [7:0] DDRAM_BE,
 	output        DDRAM_WE,
 
+	// DVD-FORK: the second DDR3 master (sys_top's ram2, idle in this fork): the DTS
+	// codebooks, copied there once and fetched by the audio engine (dvd/dts/dts_cb_mem.sv,
+	// docs/dts_decoder.md D4). 64-bit words, on clk_sys.
+	output        DDRAM2_CLK,
+	input         DDRAM2_BUSY,
+	output  [7:0] DDRAM2_BURSTCNT,
+	output [28:0] DDRAM2_ADDR,
+	input  [63:0] DDRAM2_DOUT,
+	input         DDRAM2_DOUT_READY,
+	output        DDRAM2_RD,
+	output [63:0] DDRAM2_DIN,
+	output  [7:0] DDRAM2_BE,
+	output        DDRAM2_WE,
+
 	input         UART_CTS,
 	output        UART_RTS,
 	input         UART_RXD,
@@ -1160,6 +1174,14 @@ wire [15:0] telem_dout;
 assign ext_bus[32]   = telem_drive;
 assign ext_bus[15:0] = telem_dout;
 
+// the audio engine's words (25..30): declared here, above their users below
+// (Verilog declaration order). cb_* is the DTS codebook copy (dts_cb_mem, further down).
+wire        cb_busy, cb_tables_ok;
+wire [31:0] cb_sum_seen;
+wire [15:0] eng_frames_w, eng_refused_w;
+wire  [4:0] eng_last_err_w;
+wire        dts_active_w;
+
 dvd_telem dvd_telem_inst (
     .clk        (clk_sys),
     .io_enable  (ext_bus[34]),
@@ -1194,6 +1216,12 @@ dvd_telem dvd_telem_inst (
     .dec_pic_max  (core_pic_max),
     .dec_pic_n    (core_pic_n),
     .dec_pic_over (core_pic_over),
+    // words 25..30: the audio engine (docs/dts_decoder.md): the codebook copy's verdict
+    // and checksum (D4 rule 2: never silent), the engine's frames and refusals
+    .dts_flags    ({3'd0, eng_last_err_w, 5'd0, dts_active_w, cb_tables_ok, ~cb_busy}),
+    .cb_sum       (cb_sum_seen),
+    .eng_frames   (eng_frames_w),
+    .eng_refused  (eng_refused_w),
     // CMD_AF: what the audio wire is really carrying, so Main can put the ADV7513
     // into PCM mode for an LPCM/MP2 track in Passthru.
     .af_passthru    (pass_mode),
@@ -3834,8 +3862,13 @@ end
 // and actively misleading about the cause. CSS is the root cause; suppress this
 // under it. (The IFO itself is never scrambled, so attr_a_fmt stays truthful —
 // it just isn't the user's problem on such a disc.)
+// DTS (format 6) decodes in fabric since P3 (docs/dts_decoder.md), from codebooks copied
+// to DDR3 at configuration; if that copy's checksum failed (cb_tables_ok low, telemetry
+// word 26) the decoder discards DTS, and a DTS track in Decode PCM says so here rather
+// than playing silent (D4 rule 2). In Passthru the receiver decodes DTS: no notice.
 wire aud_unsupported = iso_mode_w & nav_ready_w & aud_dec_en & ~css_scrambled &
-                       (attr_a_fmt_w == 3'd3);
+                       ((attr_a_fmt_w == 3'd3) |
+                        ((attr_a_fmt_w == 3'd6) & ~cb_tables_ok & ~pass_mode));
 
 // (C) Title-VTS notice — largest-VTS heuristic path ONLY. With Disc Menus On
 // (the default since PR #179) the disc's own VM picks the title, so the
@@ -4030,12 +4063,59 @@ assign aud_frame_pop  = rt_wrap_owns ? pass_frame_pop  : dec_frame_pop;
 // The real T2-menu audio dropout is the audio pipeline being RESET at every keep_vbuf
 // menu->menu transition while the video buffer is kept - fixed by aud_rst_n excluding
 // keep_vbuf jumps below, not by ring size. See docs/dvd_menu_refinements.md §5d.)
-audio_ring #(.BYTE_DEPTH(32768), .FRAME_DEPTH(128)) audio_ring_inst (
+// ---- The DTS codebooks (docs/dts_decoder.md D4, P2). They ship as the power-up contents
+// of three FIFOs -- this ring's byte memory (the VQ codebook) and dvd_audio_decode's LPCM
+// and MP2 PCM FIFOs (the ADPCM codebook's halves) -- which dts_cb_mem copies, ONCE per
+// configuration, through each FIFO's own read path into DDR3 (ram2, byte 0x30800000).
+// While it copies (cb_busy, ~8 ms after configuration) the audio path is held idle: no
+// ring writes, the decoder parked. From then on the FIFOs are ordinary FIFOs, and the
+// audio engine fetches codebook rows from DDR3. cb_tables_ok low (the copy's checksum
+// failed) makes the decoder discard DTS, as before P2.
+wire        cb_host_rst, cb_ring_step, cb_lpcm_step, cb_mp2_step;   // (cb_busy, cb_tables_ok,
+wire [31:0] cb_lpcm_q, cb_mp2_q;                                     //  cb_sum_seen: by dvd_telem)
+wire        dts_cb_req, dts_cb_sel, dts_cb_valid;
+wire [11:0] dts_cb_addr;
+wire [63:0] dts_cb_data;
+
+dts_cb_mem dts_cb_mem_inst (
+    .clk          (clk_sys),
+    .rst_n        (reset_n),
+    .hosts_ready  (aud_rst_n),
+    .cp_lpcm_step (cb_lpcm_step),
+    .cp_lpcm_q    (cb_lpcm_q),
+    .cp_mp2_step  (cb_mp2_step),
+    .cp_mp2_q     (cb_mp2_q),
+    .cp_ring_step (cb_ring_step),
+    .cp_ring_q    (aud_ring_byte),
+    .busy         (cb_busy),
+    .host_rst     (cb_host_rst),
+    .tables_ok    (cb_tables_ok),
+    .sum_seen     (cb_sum_seen),
+    .cb_req       (dts_cb_req),
+    .cb_sel       (dts_cb_sel),
+    .cb_addr      (dts_cb_addr),
+    .cb_valid     (dts_cb_valid),
+    .cb_data      (dts_cb_data),
+    .ddr_addr     (DDRAM2_ADDR),
+    .ddr_burstcnt (DDRAM2_BURSTCNT),
+    .ddr_read     (DDRAM2_RD),
+    .ddr_write    (DDRAM2_WE),
+    .ddr_wdata    (DDRAM2_DIN),
+    .ddr_be       (DDRAM2_BE),
+    .ddr_busy     (DDRAM2_BUSY),
+    .ddr_rdata    (DDRAM2_DOUT),
+    .ddr_rvalid   (DDRAM2_DOUT_READY)
+);
+assign DDRAM2_CLK = clk_sys;
+
+audio_ring #(.BYTE_DEPTH(32768), .FRAME_DEPTH(128),
+             .CB_INIT("dvd/dts/cb_host_ring.mem")) audio_ring_inst (   // D4: the VQ codebook
     .clk              (clk_sys),
-    .rst_n            (aud_rst_n),       // audio-only: also resets on an audio-track switch
+    .rst_n            (aud_rst_n & ~cb_host_rst),   // + once after the codebook copy
+    .cp_step          (cb_ring_step),    // D4: the codebook copy reads the power-up contents
 
     .aud_byte         (rf_aud_byte),
-    .aud_valid        (rf_aud_valid),
+    .aud_valid        (rf_aud_valid & ~cb_busy),   // nothing written while the copy runs
     .aud_type         (rf_aud_type),
     .aud_frame_start  (rf_aud_frame_start),
     .drop_pulse       (aud_drop_pulse),      // §5d: drop menu-transition splice frames
@@ -4222,10 +4302,28 @@ assign ps_aud_ready = ~(aud_ring_almost_full && aud_bp_armed && ~step_session);
 wire        aud_dec_en = ~status[5];
 wire        ac3_synced_dbg, ac3_err_dbg;
 
-dvd_audio_decode #(.CLK_HZ(27000000), .AUD_HZ(48000)) dvd_audio_decode_inst (
+dvd_audio_decode #(.CLK_HZ(27000000), .AUD_HZ(48000),
+                   .LPCM_INIT("dvd/dts/cb_host_lpcm.mem"),   // D4: the ADPCM codebook's halves
+                   .MP2_INIT("dvd/dts/cb_host_mp2.mem")) dvd_audio_decode_inst (
     .clk         (clk_sys),
-    .rst_n       (aud_rst_n),            // audio-only: also resets on an audio-track switch
-    .enable      (aud_dec_en),
+    .rst_n       (aud_rst_n & ~cb_host_rst),   // + once after the codebook copy
+    .enable      (aud_dec_en & ~cb_busy),   // parked while the codebook copy runs
+    // D4 / P3: the codebook copy, the engine's codebook port, and DTS on or off
+    .cb_cp_mode  (cb_busy),
+    .cb_lpcm_step(cb_lpcm_step),
+    .cb_mp2_step (cb_mp2_step),
+    .cb_lpcm_q   (cb_lpcm_q),
+    .cb_mp2_q    (cb_mp2_q),
+    .cb_req      (dts_cb_req),
+    .cb_sel      (dts_cb_sel),
+    .cb_addr     (dts_cb_addr),
+    .cb_valid    (dts_cb_valid),
+    .cb_data     (dts_cb_data),
+    .dts_tables_ok(cb_tables_ok),
+    .dbg_eng_frames  (eng_frames_w),
+    .dbg_eng_refused (eng_refused_w),
+    .dbg_eng_last_err(eng_last_err_w),
+    .dbg_dts_active  (dts_active_w),
     .pause       (pause_aud),    // freeze/silence audio while paused OR a seek gesture is held
     // This aud_rst_n pulse is the GENTLE, audio-only class (flush_ctl's
     // aud_resync: a track switch, or a non-seamless display re-anchor) and NOT

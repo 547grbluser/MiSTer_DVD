@@ -51,7 +51,7 @@ know. It is not an endorsement of the approach — draw your own conclusions.
 - **Video** — MPEG-2 and MPEG-1, NTSC and PAL auto-detected, progressive or native
   480i/576i, [3:2 pulldown for film](https://owenb321.github.io/MiSTer_DVD/video/film-24p/), and one clock for
   picture, sound, subtitles and captions — so lip sync holds across seeks, menus and mode changes.
-- **Audio** — AC-3 (every channel mode) and MP2 and LPCM decoded
+- **Audio** — AC-3 (every channel mode), DTS (the core stream, up to 5.1) and MP2 and LPCM decoded
   [entirely in fabric](https://owenb321.github.io/MiSTer_DVD/audio/formats/); AC-3 and DTS as
   [IEC 61937 bitstream](https://owenb321.github.io/MiSTer_DVD/audio/passthrough/) to a receiver — over optical S/PDIF,
   or over HDMI with the custom Main, so 5.1 needs no add-on board. Tracks with no bitstream
@@ -82,7 +82,8 @@ know. It is not an endorsement of the approach — draw your own conclusions.
   need `MiSTer_DVDcss` plus a user-supplied libdvdcss — as do the Eject and Volume
   buttons, which the core cannot service by itself.
 - **ISO9660 only** — UDF-only images report `UNSUPPORTED IMAGE`.
-- **No DTS decode** — passthrough to a receiver only.
+- **DTS decodes as its core stream only** — extensions (DTS-ES 6.1, 96/24) reach a receiver
+  through passthrough.
 - **Bitstream passthrough over HDMI needs `MiSTer_DVDcss`**; over optical S/PDIF the
   bare `.rbf` is enough.
 - **Closed captions are analog-only** and need a television that decodes them. Roughly

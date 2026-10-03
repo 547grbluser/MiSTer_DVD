@@ -109,6 +109,8 @@ set_global_assignment -name SYSTEMVERILOG_FILE dvd/dts/dts_seq.sv
 set_global_assignment -name SYSTEMVERILOG_FILE dvd/dts/dts_vec.sv
 set_global_assignment -name SYSTEMVERILOG_FILE dvd/dts/dts_top.sv
 set_global_assignment -name SYSTEMVERILOG_FILE dvd/audio_engine.sv
+# D4: the DTS codebooks, copied once from three FIFOs' power-up contents into DDR3 (ram2)
+set_global_assignment -name SYSTEMVERILOG_FILE dvd/dts/dts_cb_mem.sv
 set_global_assignment -name SYSTEMVERILOG_FILE dvd/ac3/bit_fifo.sv
 set_global_assignment -name SYSTEMVERILOG_FILE dvd/ac3/bit_reader.sv
 set_global_assignment -name SYSTEMVERILOG_FILE dvd/ac3/imdct_512.sv

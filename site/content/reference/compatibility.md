@@ -55,7 +55,8 @@ including its busiest scenes. The one exception is by design: **Film 24p Out = O
 ## Audio
 
 Covered in full on [Audio formats](../audio/formats.md). In short: AC-3 (all channel modes)
-and MP2 and LPCM decode in the core; **DTS is passthrough-only**; AC-3 1+1 dual mono is
+and DTS (its core stream, up to 5.1, to stereo) and MP2 and LPCM decode in the core; DTS
+extensions (DTS-ES, 96/24) reach a receiver only through Passthru; AC-3 1+1 dual mono is
 deliberately refused; the MPEG-2 multichannel MP2 extension is unverified.
 
 **WAV files** play through the same PCM path (16-bit stereo, 44.1/48 kHz); unsupported

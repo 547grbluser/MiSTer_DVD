@@ -60,8 +60,15 @@ predate later confirmations; the `CLAUDE.md` index carries the reconciled status
     - the latab/baptab clamps: no stream reaches them;
     - recombine saturation: no stream reaches it.
 
-- 🔧 **IN-FABRIC DTS CORE DECODER (2026-10-02: the engine RTL built and fitted
-  standalone, not wired; branch `feature/dts-decode`, `CORE_VERSION dev-dtsdecode`).**
+- 🔧 **IN-FABRIC DTS CORE DECODER (2026-10-03: P2 + P3 built and sim-proven on
+  `feature/ac3-engine`; ⏳ in-core build + HIL).** P2: the codebooks are copied at
+  configuration from three FIFOs' power-up contents into DDR3 over `ram2`
+  (`dvd/dts/dts_cb_mem.sv`, `run_cb_copy.sh --red`). P3: the `T_DTS` arm sends DTS to
+  the shared audio engine, and its PCM plays out of the LPCM FIFO (`run_dts_dec.sh
+  --red`, `check_dts_wiring.py`). Telemetry words 25–30. The manual and README now
+  describe DTS decode. `docs/dts_decoder.md` "P2 + P3 result". Earlier entry:
+  (2026-10-02: the engine RTL built and fitted
+  standalone, not wired; branch `feature/dts-decode`, `CORE_VERSION dev-dtsdecode`).
   Full plan: `docs/dts_decoder.md`.
   - **Ask (maintainer):** decode DTS so a DTS track plays on a plain TV, not only through a
     receiver. Today `T_DTS` is a discard in `dvd_audio_decode` (`Decode PCM` is silent).

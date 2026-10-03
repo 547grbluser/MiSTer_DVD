@@ -9,6 +9,8 @@
 //           tables (CB/cb_adpcm.mem, CB/cb_vq.mem: tools/dts_golden.py --codebooks, the
 //           engine's own row format), and tables_ok is high
 //   [fetch] 2,000 random rows fetched through the engine's port equal the tables
+//   [after] the copy ends with the hosts reset: every read pointer back at 0, so the
+//           FIFOs start empty and aligned (the copy moved the pointers)
 //   [once]  a reset after the copy, with the hosts then written as FIFOs, does not
 //           copy again: DDR3 is unchanged (D4 rule 1, the flag with no reset term)
 //   [hang]  the copy does not finish
@@ -35,6 +37,7 @@ module cb_copy_tb;
     end
 
     // ---- the hosts (their init files are the core's, unless a mutation swaps them)
+    logic        busy, host_rst;
     logic        ring_step, lpcm_step, mp2_step, cp_mode;
     logic [7:0]  ring_q;
     logic [31:0] mp2_q;
@@ -43,27 +46,27 @@ module cb_copy_tb;
     logic [7:0]  lpcm_wd;
 
     audio_ring #(.BYTE_DEPTH(32768), .FRAME_DEPTH(128),
-                 .INIT_FILE("dvd/dts/cb_host_ring.mem")) u_ring (
+                 .CB_INIT("dvd/dts/cb_host_ring.mem")) u_ring (
         .cp_step(ring_step),
-        .clk, .rst_n, .aud_byte(8'd0), .aud_valid(1'b0), .aud_type(2'd0),
+        .clk, .rst_n(rst_n && !host_rst), .aud_byte(8'd0), .aud_valid(1'b0), .aud_type(2'd0),
         .aud_frame_start(1'b0), .aud_frame_pts(33'd0), .aud_frame_pts_valid(1'b0),
         .aud_frame_seamless(1'b0), .aud_ready(), .out_byte(ring_q), .out_valid(),
         .out_ready(1'b0), .frame_valid(), .frame_len(), .frame_type(), .frame_pts(),
         .frame_pts_valid(), .frame_seamless(), .frame_pop(1'b0), .frames_available(),
         .bytes_available(), .overflow_count(), .almost_full(), .drop_pulse(1'b0));
 
-    lpcm_unpack #(.FIFO_AW(12), .INIT_FILE("dvd/dts/cb_host_lpcm.mem")) u_lpcm (
-        .clk, .rst(!rst_n), .quant(2'd0), .le(1'b0), .wr_en(lpcm_wr), .wr_data(lpcm_wd),
+    lpcm_unpack #(.FIFO_AW(12), .CB_INIT("dvd/dts/cb_host_lpcm.mem")) u_lpcm (
+        .clk, .rst(!rst_n || host_rst), .quant(2'd0), .le(1'b0), .wr_en(lpcm_wr), .wr_data(lpcm_wd),
         .full(), .afull(), .aud_ce(1'b0), .audio_l(lpcm_l), .audio_r(lpcm_r), .aud_valid(),
         .cp_mode, .cp_step(lpcm_step));
 
-    mp2_decode #(.PCM_AW(12), .INIT_FILE("dvd/dts/cb_host_mp2.mem")) u_mp2 (
-        .clk, .rst(!rst_n), .wr_en(1'b0), .wr_data(8'd0), .full(), .aud_ce(1'b0),
+    mp2_decode #(.PCM_AW(12), .CB_INIT("dvd/dts/cb_host_mp2.mem")) u_mp2 (
+        .clk, .rst(!rst_n || host_rst), .wr_en(1'b0), .wr_data(8'd0), .full(), .aud_ce(1'b0),
         .audio_l(), .audio_r(), .aud_valid(), .synced(), .err_unsupported(), .fs_o(),
         .dbg_s_nz(), .dbg_pcm_nz(), .cp_step(mp2_step), .cp_q(mp2_q));
 
     // ---- the copier
-    logic        busy, tables_ok, cb_req, cb_sel, cb_valid;
+    logic        tables_ok, cb_req, cb_sel, cb_valid;
     logic [11:0] cb_addr;
     logic [63:0] cb_data;
     logic [31:0] sum_seen;
@@ -76,7 +79,7 @@ module cb_copy_tb;
         .cp_lpcm_step(lpcm_step), .cp_lpcm_q({lpcm_l, lpcm_r}),
         .cp_mp2_step(mp2_step), .cp_mp2_q(mp2_q),
         .cp_ring_step(ring_step), .cp_ring_q(ring_q),
-        .busy, .tables_ok, .sum_seen,
+        .busy, .host_rst, .tables_ok, .sum_seen,
         .cb_req, .cb_sel, .cb_addr, .cb_valid, .cb_data,
         .ddr_addr(d_addr), .ddr_burstcnt(d_bc), .ddr_read(d_rd), .ddr_write(d_wr),
         .ddr_wdata(d_wd), .ddr_be(d_be), .ddr_busy(d_busy), .ddr_rdata(d_rdata),
@@ -143,6 +146,9 @@ module cb_copy_tb;
             $fatal(1, "FAIL [copy] %0d rows differ or were not written exactly once; %0d writes, %0d outside the region",
                    bad, writes, stray);
         if (!tables_ok) $fatal(1, "FAIL [copy] the rows are right but tables_ok is low (sum %08x)", sum_seen);
+        if (u_ring.rd_ptr !== '0 || u_lpcm.rptr !== '0 || u_mp2.pcm_rp !== '0)
+            $fatal(1, "FAIL [after] the hosts' read pointers after the copy: ring %0d lpcm %0d mp2 %0d",
+                   u_ring.rd_ptr, u_lpcm.rptr, u_mp2.pcm_rp);
         $display("cb_copy_tb: 8192 rows copied in %0d cycles, checksum %08x, tables_ok", t, sum_seen);
 
         // [fetch]

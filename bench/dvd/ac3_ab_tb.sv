@@ -90,6 +90,8 @@ module ac3_ab_tb;
     logic [31:0] eseen;
 
     audio_engine u_new (
+        .codec_req(1'b1), .codec_busy(), .dts_l(), .dts_r(), .dts_valid(), .dts_ready(1'b1),
+        .cb_req(), .cb_sel(), .cb_addr(), .cb_valid(1'b0), .cb_data(64'd0),
         .clk, .rst, .fr_len, .fr_valid, .fr_ready, .in_byte, .in_valid, .in_ready,
         .imdct_done(n_done), .pcm_rd_addr(n_ra), .pcm_rd_data(n_rd), .lvl_q(n_lvl),
         .pcm_acmod(n_acmod), .pcm_done(n_pdone),

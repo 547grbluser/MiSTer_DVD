@@ -36,7 +36,7 @@ stage() {   # dir: a private copy of the sources (mutations edit it)
 stage "$GEN/w"; build "$GEN/w" $TB || exit 1
 # C1's bench: the lpcm and mp2 host images swapped
 stage "$GEN/c1"
-sed -i 's#INIT_FILE("dvd/dts/cb_host_lpcm.mem")#INIT_FILE("dvd/dts/cb_host_MP2X.mem")#; s#INIT_FILE("dvd/dts/cb_host_mp2.mem")#INIT_FILE("dvd/dts/cb_host_lpcm.mem")#; s#cb_host_MP2X#cb_host_mp2#' "$GEN/c1/$TB"
+sed -i 's#CB_INIT("dvd/dts/cb_host_lpcm.mem")#CB_INIT("dvd/dts/cb_host_MP2X.mem")#; s#CB_INIT("dvd/dts/cb_host_mp2.mem")#CB_INIT("dvd/dts/cb_host_lpcm.mem")#; s#cb_host_MP2X#cb_host_mp2#' "$GEN/c1/$TB"
 build "$GEN/c1" $TB || exit 1
 echo "== GREEN =="
 for a in "G1|w|" "G2|w|+busy=70 +lat=20" "C1|c1|+expect_bad"; do
@@ -80,6 +80,7 @@ PYEOF
   mut M5 w "" $CB "if (phase == 2'd2) acc <= {cp_ring_q, acc[63:8]};" "if (phase == 2'd2) acc <= {acc[55:0], cp_ring_q};" "\[copy\]" &
   mut M6 w "" $CB "if (!copied && !hosts_ready) begin" "if (1'b0) begin" "\[copy\]" &
   mut M7 w "" $CB "ddr_addr <= CB_BASE + {16'd0, cb_sel, cb_addr};" "ddr_addr <= CB_BASE + {16'd0, 1'b0, cb_addr};" "\[fetch\]" &
+  mut M9 w "" $CB "C_DONE: begin copied <= 1'b1; hr_cnt <= 3'd7;" "C_DONE: begin copied <= 1'b1; hr_cnt <= 3'd0;" "\[after\]" &
   mut M8 w "" dvd/lpcm_unpack.sv "                if (cp_step) rptr <= rptr + 1'b1;" "" "\[copy\]" &
   wait
 fi

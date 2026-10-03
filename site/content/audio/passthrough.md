@@ -2,9 +2,10 @@
 
 Set **`Audio Out` = `Passthru (SPDIF+HDMI)`** and the disc's **undecoded AC-3 or DTS
 bitstream** goes to an AV receiver to decode instead of being decoded in the core. This is
-what gets you real 5.1 rather than a stereo downmix, and it is the only way to hear DTS at
-all. Tracks with no bitstream format — LPCM and MP2 — are still decoded and sent as
-ordinary PCM, so the setting never costs you sound.
+what gets you real 5.1 rather than a stereo downmix — for DTS it is also the only way to
+hear the extensions, such as DTS-ES 6.1, which the core's own decoder ignores. Tracks with
+no bitstream format — LPCM and MP2 — are still decoded and sent as ordinary PCM, so the
+setting never costs you sound.
 
 The format is **IEC 61937**, the standard wrapper for carrying compressed audio inside what
 otherwise looks like an ordinary PCM stream. It is what a set-top DVD player's optical
@@ -53,7 +54,7 @@ something else.
 | Format | In Passthru | Notes |
 |---|---|---|
 | **AC-3 (Dolby Digital)** | Bitstreamed | All channel modes |
-| **DTS** | Bitstreamed | **The only way to hear DTS** — there is no DTS decoder in the core |
+| **DTS** | Bitstreamed | Including any extensions (DTS-ES, 96/24) the core's decoder ignores |
 | **LPCM** | Sent as PCM | Decoded in the core and sent as ordinary stereo — see below |
 | **MP2** | Sent as PCM | Same; this is what VCD and SVCD discs carry |
 
@@ -74,12 +75,10 @@ and an LPCM or MP2 track is decoded in the core and goes out as ordinary PCM. Ch
 audio track with **B7** switches the format on the wire, and your receiver will re-lock —
 a second or so of silence at the change is normal, and a real player does the same.
 
-!!! warning "DTS still needs a receiver"
-    **There is no DTS decoder in the core**, so DTS is the one format with no fallback:
-    on a plain television or monitor a DTS track is silent in *both* modes. Most DTS
-    discs also carry a Dolby Digital track — cycling audio with **B7** will usually find
-    one. AC-3 has the same limitation in Passthru specifically, but `Decode PCM` handles
-    it on any display.
+!!! note "Passthru needs a receiver"
+    In Passthru, Dolby Digital and DTS leave as bitstreams, which a plain television or
+    monitor cannot decode. On such a display use `Decode PCM`, which decodes both in the
+    core and sends stereo.
 
 ## If the receiver names the format but plays static
 

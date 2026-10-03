@@ -63,7 +63,7 @@ module audio_ring #(
     // D4 (docs/dts_decoder.md): the byte memory's power-up contents -- the core's ring
     // carries the DTS high-frequency VQ codebook, copied out once by dts_cb_mem
     // (cp_step) before the audio path starts. "" = none (every bench).
-    parameter     INIT_FILE   = ""
+    parameter     CB_INIT   = ""
 ) (
     input  wire        clk,            // clk_sys (27 MHz)
     input  wire        rst_n,
@@ -128,7 +128,7 @@ module audio_ring #(
 
     // ---- Byte FIFO ----
     logic [7:0]          mem [0:BYTE_DEPTH-1];
-    initial if (INIT_FILE != "") $readmemh(INIT_FILE, mem);   // D4
+    initial if (CB_INIT != "") $readmemh(CB_INIT, mem);   // D4
     logic [BYTE_AW-1:0]  wr_ptr;
     logic [BYTE_AW-1:0]  rd_ptr;
     logic [BYTE_AW:0]    fill;     // total physical bytes (committed + in-progress)
