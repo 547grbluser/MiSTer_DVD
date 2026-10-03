@@ -4,8 +4,9 @@
 ; the RTL's behaviour): the sync info and BSI, then six audio blocks, each its
 ; side information, its exponents (EXPD), its bit allocation (microcode around the
 ; BAPSD band-integration and BAPFILL lookup ops), and its mantissas.
-; A1a: the mantissas run as MANTMODEL, a stand-in op that decodes them with the
-; model's own code from this program's exponents and baps (replaced in A1b).
+; then its mantissas: AQ per channel, the coupling bands through AQC (each bin read
+; once, scattered into every coupled channel), the zero tails (CZERO), LFE, the 2/0
+; rematrix (REMAT), and IMDCT (the block's coefficients are ready).
 ;
 ; Assembled by tools/ac3_isa.py. Registers: r1-r7 scratch, r8-r15 op arguments.
 ; Refusals are the RTL's (dvd/ac3/*.sv err_unsupported), and an invalid code is
@@ -52,6 +53,8 @@
 .equ F_CPLCOE    0x018
 .equ F_PSD       0x019             ; BAPSD's result
 .equ F_ALCH      0x01A             ; ALLOC's channel (BA_CHAN uses every scratch register)
+.equ F_DONECPL   0x01B             ; the coupling bins are read (by the first coupled channel)
+.equ F_MCH       0x01C             ; MANT's channel
 ; the bit allocation of one channel (BA_CHAN's frame)
 .equ B_FDECAY    0x020
 .equ B_FGAIN     0x021
@@ -505,7 +508,95 @@ B_SKIP1:
 ; ---- bit allocation
 B_ALLOC:
         call    ALLOC
-        vop     MANTMODEL               ; A1a stand-in: the mantissas, coupling, rematrix
+        call    MANT
+        ret
+
+; ================================================================ mantissas
+; per channel: bins [0, endmant) (AQ); the FIRST coupled channel then reads the
+; coupling bins for every coupled channel (CPLPASS); then the channel's zero tail,
+; from cplendmant if coupled, else from endmant. Then LFE, then the 2/0 rematrix.
+MANT:
+        vop     QRST                    ; the grouped-quantizer caches empty
+        st      r0, F_DONECPL
+        li      r4, 0
+M_CH:
+        st      r4, F_MCH
+        mov     r8, r4
+        ld      r9, C_BINBASE[r4]
+        li      r10, 0
+        ld      r11, A_ENDMANT[r4]
+        ld      r12, A_DITH[r4]
+        vop     AQ
+        ld      r4, F_MCH
+        ld      r2, F_CHINCPL
+        shr     r2, r2, r4
+        andi    r2, r2, 1
+        beqi    r2, 0, M_UTAIL
+        ld      r2, F_DONECPL
+        bnei    r2, 0, M_CTAIL
+        li      r2, 1
+        st      r2, F_DONECPL
+        call    CPLPASS
+M_CTAIL:
+        ld      r8, F_MCH
+        ld      r9, F_CPLEND            ;MUT ctail: ld r9, F_CPLSTRT
+        jmp     M_TAIL
+M_UTAIL:
+        mov     r8, r4
+        ld      r9, A_ENDMANT[r4]
+M_TAIL:
+        li      r10, 256
+        vop     CZERO
+        ld      r4, F_MCH
+        addi    r4, r4, 1
+        ld      r7, F_NF
+        blt     r4, r7, M_CH
+        ld      r2, F_LFEON
+        beqi    r2, 0, M_REMAT
+        li      r8, 6
+        ld      r9, C_BINBASE+6
+        li      r10, 0
+        li      r11, 7
+        li      r12, 0
+        vop     AQ
+M_REMAT:
+        ld      r2, F_ACMOD
+        bnei    r2, 2, M_DONE
+        ld      r8, F_REMAT
+        beqi    r8, 0, M_DONE
+        ld      r9, A_ENDMANT
+        ld      r2, A_ENDMANT+1
+        min     r9, r9, r2              ; end = min(endmant0, endmant1)
+        vop     REMAT                   ;MUT noremat: nop
+M_DONE:
+        vop     IMDCT                   ; this block's coefficients are ready
+        ret
+
+; the coupling bands: liba52's band-merge replay (each set structure bit merges the
+; next 12-bin sub-band into this band), then AQC for the band's bins
+CPLPASS:
+        ld      r9, F_CPLSTRT           ; i
+        li      r8, 0                   ; band
+        li      r5, 0                   ; the structure bit (sub-band) index
+        ld      r6, F_NCPLSUB
+        subi    r6, r6, 1               ; ncplsubnd - 1 structure bits
+CP_BAND:
+        ld      r2, F_CPLEND
+        bge     r9, r2, CP_RET
+        addi    r10, r9, 12             ; this band's end
+CP_MERGE:
+        bge     r5, r6, CP_GO           ; past the structure bits: a 0
+        ld      r2, A_BNDSTRC[r5]
+        addi    r5, r5, 1
+        beqi    r2, 0, CP_GO
+        addi    r10, r10, 12            ;MUT nomerge: nop
+        jmp     CP_MERGE
+CP_GO:
+        vop     AQC                     ; band r8, bins [r9, r10)
+        mov     r9, r10
+        addi    r8, r8, 1
+        jmp     CP_BAND
+CP_RET:
         ret
 
 ; ================================================================ delta-BA segments

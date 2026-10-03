@@ -29,7 +29,7 @@ FRAME_CYC = 27_000_000 * 1536 // 48000      # 864,000
 BUDGET = 0.60
 IMDCT_BLOCK = {1: 4573, 2: 4573}            # by channel count; 3+ -> 13479 (measured)
 ARMS = {'p3seed': 'blocks', 'cplseed': 'cpl', 'phsflg': 'phsflg', 'dynreset': 'dynrnge',
-        'knee': 'blocks'}
+        'knee': 'blocks', 'noremat': 'remat', 'nomerge': 'cplmerge', 'ctail': 'cpl'}
 
 
 def frame_cost(m, nch):

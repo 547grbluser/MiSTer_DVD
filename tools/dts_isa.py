@@ -410,6 +410,7 @@ class Machine:
         self.cb_latency = CB_LATENCY
         self.trace = None        # a list to receive (kind, pc, addr, value): module doc
         self.vop_hook = None     # called as vop_hook(machine, op) after every vector op
+        self.pc_prof = None      # a dict: cycles by pc (profiling)
 
     # -- input ------------------------------------------------------------
     def feed(self, data):
@@ -621,6 +622,8 @@ class Machine:
             w = self.prog[self.pc]
             op, rd, rs, rt, imm, aux = decode(w)
             npc = self.pc + 1
+            if self.pc_prof is not None:            # cycles by instruction (profiling)
+                self._prof_pc, self._prof_c0 = self.pc, self.cycles
             self.cycles += CYC['instr']
             if op == 'nop':
                 pass
@@ -700,6 +703,9 @@ class Machine:
                 self.bitpos = len(self.cur) * 8 if self.cur is not None else 0
             elif op == 'bpos':
                 self.setr(rd, self.bitpos & 0xFFFF)
+            if self.pc_prof is not None:
+                self.pc_prof[self._prof_pc] = (self.pc_prof.get(self._prof_pc, 0) +
+                                               self.cycles - self._prof_c0)
             self.pc = npc
         raise EngineError('step limit')
 

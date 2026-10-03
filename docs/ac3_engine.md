@@ -1,10 +1,13 @@
 # The AC-3 parse on the shared audio engine (scenario E)
 
-**Status (2026-10-02): ✅ A0 done; ✅ A1a done.** The model is bit-exact against the
-RTL on 30 streams. The engine program (side information, exponents, bit allocation;
-mantissas by a stand-in op) is bit-exact against the model on all 30. ⏳ **Next: A1b,
-the mantissa, coupling and rematrix ops.** Branch `feature/ac3-engine` (from
-`feature/dts-decode`, `CORE_VERSION dev-ac3engine`, not pushed).
+**Status (2026-10-02): ✅ A0 and ✅ A1 done.** The model is bit-exact against the RTL
+on 30 streams. The whole AC-3 parse runs as an engine program (`dvd/dts/ac3.uasm`,
+emulated by `tools/ac3_isa.py`) and is bit-exact against the model on every block of
+those 30 streams. The worst frame needs **36 % of real time** with the IMDCT in series.
+⏳ **Next: the maintainer's decision on the microcode's size** (1,279 words with DTS's
+program; A1 result below), then RTL and a fit if scenario E goes ahead. Branch
+`feature/ac3-engine` (from `feature/dts-decode`, `CORE_VERSION dev-ac3engine`, not
+pushed).
 
 **Why.** `docs/dts_decoder.md` §4 scenario E estimates that moving MP2 and the AC-3
 parse onto the microcoded engine built for DTS (P1, `dvd/dts/`) saves **−1,000 …
@@ -267,6 +270,77 @@ is **711 words**, and together with DTS's 500 that is **1,211 words in one ROM**
   per-channel array" loops.
 - MP2 on the engine adds a third program. The ROM depth is a scenario-E cost to
   measure, not assume.
+
+## A1b result: the mantissas on the engine; A1 complete (2026-10-02)
+
+The stand-in is gone. The mantissa stage is microcode (`MANT`, `CPLPASS`) around five
+ops, each calling the model's own function:
+
+| Op | Does | Charge (derived; no RTL) |
+|---|---|---|
+| `QRST` | empties the grouped-quantizer caches at the block's mantissa stage | 2 |
+| `AQ` | one channel's bins: zero, dither or a dequantised mantissa (`one_coeff`) | 1 a bin + its code bits + a fresh grouped code's divisions (high digit first, so 2×5 / 2×7 / 1×7 extra) + 3 |
+| `AQC` | one coupling band: each bin read once, scattered into every coupled channel (`cpl_bins`) | as `AQ` + 1 a coupled channel a bin + 2 + nf coordinate reads |
+| `CZERO` | a channel's zero tail | 1 a bin + 2 |
+| `REMAT` | 2/0 rematrix (`rematrix_coeffs`) | 4 a bin + 3 |
+| `IMDCT` | the block's coefficients are ready (the handshake that starts `imdct_512`) | 2 |
+
+**Where the engine state lives (decided):**
+- **coefficients** in the vector engine's X buffer: 7 slots × 256 × 24 bits fit its 2K
+  words, and `imdct_512` reads them there. It needs a read port: a wiring item, as
+  DTS's P3;
+- **the grouped-quantizer caches** in the sequencer's mantissa unit, emptied by `QRST`
+  (the RTL resets them per block too);
+- **the dither LFSR** in a vector-engine register, reset only at power-up.
+
+AC-3's ops are numbered from 16, so **the vop field the RTL decodes widens from 4 to
+6 bits**. The instruction word already carries 6.
+
+**Result:**
+- ✅ `tools/test_ac3_isa.py` passes: **bit-exact against the model on every block of all
+  30 streams**, refusals at the same frames, eight microcode RED arms all biting (the
+  five of A1a, plus rematrix off, coupling bands unmerged, and a coupled channel's zero
+  tail from the wrong bin).
+- The model gate gained a `cplmerge` counter for the band-merge arm.
+
+**Cycles a frame (emulator):**
+
+| Stream | Frame | Sequencer microcode | Ops |
+|---|---|---|---|
+| `noise_5p1_48k_640k` (heaviest) | 218K | 159K | 58K (`AQ` 33K) |
+| *Matrix Reloaded* 5.1 448k | 200K | 150K | 48K |
+| `tone_5p1_48k_192k` (coupled 5.1) | 135K | 116K | 19K |
+| *Battlefield Earth* 2/0 192k | 81K | 62K | 18K |
+
+The gate's worst frame, with ×1.25 headroom on the op charges and `imdct_512` in
+series, is **36.3 % of real time**.
+
+**Where the cycles go (profile, *Matrix Reloaded*):** bit allocation's microcode is
+about **70 % of the frame**, about 140K cycles (16 % of real time). It is the per-bin
+and per-band helpers: mask 27K, leak update 26K, bap write 14K, lowcomp 11K, and the
+channel loop.
+
+**Where the words go (779):**
+
+| Part | Words |
+|---|---|
+| side information (`BLOCK`) | 283 |
+| bit allocation (`BA_CHAN` 141, `ALLOC` 102, helpers about 90) | about 333 |
+| the header (`FRAME`) | 62 |
+| mantissas (`MANT` + `CPLPASS`) | 68 |
+| delta-BA segments | 33 |
+
+⏳ **Decision: the microcode's size.** DTS 500 + AC-3 779 = **1,279 words**, so the ROM is
+2K deep and takes **8 M10K**. DTS alone takes 2; ≤ 1,024 words would take 4.
+- Scenario E frees about 40 M10K, so +6 is affordable, and M10K is not the binding
+  resource.
+- To fit 1,024, AC-3 must shed about 255 words. A hardwired per-band
+  bit-allocation op (leak update + mask + bap fill) would remove about 200 words *and*
+  most of the 140K cycles, but it costs ALMs, the binding resource, so only a fit can
+  price it.
+- A table-driven per-channel field reader would trim `BLOCK` a little.
+- MP2 would be a third program in the same ROM.
+- Recommendation: accept the 2K ROM for now, and decide at the fit.
 
 ## Gate set
 

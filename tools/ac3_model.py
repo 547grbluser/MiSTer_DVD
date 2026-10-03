@@ -42,7 +42,7 @@ AC3 = os.path.join(REPO, 'dvd', 'ac3')
 OPT = set()
 STATS = ('blocks', 'cpl', 'remat', 'dynrnge', 'short', 'dith', 'deltba_new', 'deltba_reuse',
          'deltbaie_off_after_new', 'skip', 'zero_snr', 'phsflginu', 'phsflg', 'recomb_sat',
-         'remat_sat', 'cpl_ch0_uncoupled')
+         'remat_sat', 'cpl_ch0_uncoupled', 'cplmerge')
 # (phsflg: bands whose phase flag was set; *_sat: coefficients that saturated)
 
 
@@ -556,6 +556,7 @@ class Decoder:
             br.bits(8 * br.bits(9))
             st['skip'] += 1
         st['cpl'] += bool(self.chincpl)
+        st['cplmerge'] += bool(self.chincpl and cpl['bndstrc'])
         st['remat'] += bool(acmod == 2 and self.rematflg)
         # ---- bit allocation (the RTL computes every channel, every block)
         bap = self.allocate(nf, lfeon)
@@ -642,12 +643,7 @@ class Decoder:
 
     def one(self, mq, bap, e, dith):
         """One coefficient (Q1.23): zero, dither, or a dequantised mantissa."""
-        if bap == 0:
-            if dith:
-                self.lfsr = dither_next(self.lfsr)
-                return dither_coeff(self.lfsr, e)
-            return 0
-        return scale_coeff(mq.m16(bap), e)
+        return one_coeff(self, mq, bap, e, dith)
 
     def coupling(self, mq, nf, bap, dith, coeff):
         c = self.cpl
@@ -661,43 +657,69 @@ class Decoder:
             co = [(-self.cplco[ch][bnd] if ch == 1 and self.phsneg[bnd] else self.cplco[ch][bnd])
                   for ch in range(nf)]
             bnd += 1
-            while i < iend:
-                b, e = bap.get(i, 0), self.exp[CH_CPL][i]
-                cc = None if b == 0 else scale_coeff(mq.m16(b), e)
-                for ch in range(nf):
-                    if (self.chincpl >> ch) & 1:
-                        if cc is None:
-                            if dith[ch]:
-                                self.lfsr = dither_next(self.lfsr)
-                                coeff[ch][i] = recombine(dither_coeff(self.lfsr, e), co[ch])
-                            else:
-                                coeff[ch][i] = 0
-                        else:
-                            coeff[ch][i] = recombine(cc, co[ch])
-                            if abs((cc * co[ch]) >> 18) > 8388607:
-                                self.stats['recomb_sat'] += 1
-                i += 1
+            cpl_bins(self, mq, nf, self.chincpl, i, iend, co, lambda k: bap.get(k, 0),
+                     lambda k: self.exp[CH_CPL][k], dith, coeff)
+            i = iend
 
     def rematrix(self, coeff):
-        end = min(self.endmant[0], self.endmant[1])
-        if end <= 13:
-            return
-        j, i, flg = 13, 0, self.rematflg
-        while j < end:
-            if not flg & 1:
-                flg >>= 1
-                j = REMATRIX_BAND[i]
-                i += 1
-                continue
+        rematrix_coeffs(self, coeff, min(self.endmant[0], self.endmant[1]), self.rematflg)
+
+
+# ------------------------------------------------------------------ the mantissa ops
+# Module-level so the engine emulator (tools/ac3_isa.py) runs the same code. `st` is
+# whatever holds the dither LFSR (.lfsr) and the counters (.stats).
+def one_coeff(st, mq, bap, e, dith):
+    """One coefficient (Q1.23): zero, dither, or a dequantised mantissa."""
+    if bap == 0:
+        if dith:
+            st.lfsr = dither_next(st.lfsr)
+            return dither_coeff(st.lfsr, e)
+        return 0
+    return scale_coeff(mq.m16(bap), e)
+
+
+def cpl_bins(st, mq, nf, chincpl, i, iend, co, bap_of, exp_of, dith, coeff):
+    """Coupling bins [i, iend) of one band: each mantissa read ONCE and scattered into
+    every coupled channel with its coordinate co[ch]; a bap-0 bin dithers each coupled,
+    dithered channel in channel order (one LFSR step each) or zeroes it."""
+    while i < iend:
+        b, e = bap_of(i), exp_of(i)
+        cc = None if b == 0 else scale_coeff(mq.m16(b), e)
+        for ch in range(nf):
+            if (chincpl >> ch) & 1:
+                if cc is None:
+                    if dith[ch]:
+                        st.lfsr = dither_next(st.lfsr)
+                        coeff[ch][i] = recombine(dither_coeff(st.lfsr, e), co[ch])
+                    else:
+                        coeff[ch][i] = 0
+                else:
+                    coeff[ch][i] = recombine(cc, co[ch])
+                    if abs((cc * co[ch]) >> 18) > 8388607:
+                        st.stats['recomb_sat'] += 1
+        i += 1
+
+
+def rematrix_coeffs(st, coeff, end, flags):
+    """2/0 rematrixing of bins [13, end) by the active rematrix bands (saturating)."""
+    if end <= 13:
+        return
+    j, i, flg = 13, 0, flags
+    while j < end:
+        if not flg & 1:
             flg >>= 1
-            band = min(REMATRIX_BAND[i], end)
+            j = REMATRIX_BAND[i]
             i += 1
-            while j < band:
-                l, r = coeff[0][j], coeff[1][j]
-                coeff[0][j], coeff[1][j] = sat24(l + r), sat24(l - r)
-                if sat24(l + r) != l + r or sat24(l - r) != l - r:
-                    self.stats['remat_sat'] += 1
-                j += 1
+            continue
+        flg >>= 1
+        band = min(REMATRIX_BAND[i], end)
+        i += 1
+        while j < band:
+            l, r = coeff[0][j], coeff[1][j]
+            coeff[0][j], coeff[1][j] = sat24(l + r), sat24(l - r)
+            if sat24(l + r) != l + r or sat24(l - r) != l - r:
+                st.stats['remat_sat'] += 1
+            j += 1
 
 
 # ------------------------------------------------------------------ streams
