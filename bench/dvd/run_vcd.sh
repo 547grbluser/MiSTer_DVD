@@ -44,7 +44,7 @@ echo "== 3. full chain (free-run) =="
 iverilog -g2012 -I dvd/ac3 -o bench/dvd/vcd_chain_sim \
     dvd/ps_demux.sv dvd/ac3_reframer.sv dvd/dts_reframer.sv dvd/mp2_reframer.sv \
     dvd/audio_ring.sv dvd/dvd_audio_decode.sv dvd/lpcm_unpack.sv \
-    dvd/mp2/mp2_decode.sv dvd/ac3/*.sv bench/dvd/vcd_chain_tb.sv 2>/dev/null
+    dvd/mp2/mp2_decode.sv dvd/ac3/*.sv dvd/dts/dts_seq.sv dvd/dts/dts_vec.sv dvd/dts/dts_top.sv dvd/audio_engine.sv bench/dvd/vcd_chain_tb.sv 2>/dev/null
 vvp bench/dvd/vcd_chain_sim | tail -4 || rc=1
 
 echo "== 3b. full chain (+SCHED drain-gate mode) =="

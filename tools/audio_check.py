@@ -75,13 +75,16 @@ def capture_audio(adev, afmt, secs, path):
     return True
 
 
-def board_audio_track(tmpdir, step):
+def board_audio_track(tmpdir, step, presses=1):
     """Press Audio and read the track the core reports from the HUD popup.
 
     The popup is the core's own answer to "which track is selected and how many
     are there", so the loop follows the disc rather than assuming a count.
     """
-    M.cmd_key(argparse.Namespace(names=['audio']))
+    for k in range(presses):
+        if k:
+            time.sleep(0.5)            # inside the popup: this press steps
+        M.cmd_key(argparse.Namespace(names=['audio']))
     time.sleep(1.5)
     png = os.path.join(tmpdir, f'aud{step:02d}.png')
     rc, _ = M.ssh('''
@@ -151,7 +154,15 @@ def main():
                   f'({"no HUD" if lang is None else repr(lang)})')
             break
         if cur in seen:
-            break                      # wrapped around the disc's own list
+            # Show-first Audio (PR #145): a press while the popup is DOWN only
+            # shows the current track; a press while it is up steps. After a
+            # capture window the popup has timed out, so a single press re-shows
+            # the track just measured -- show and step, two presses 0.5 s apart
+            # (a press after the screenshot read lands after the popup's timeout).
+            cur, total2, lang2 = board_audio_track(tmpdir, 100 + i, presses=2)
+            if cur is None or cur in seen:
+                break                  # wrapped around the disc's own list
+            total, lang = total2, lang2
         seen.add(cur)
         # ⚠ RED PROOF. The FINDING path must be shown to fire, or "all tracks
         # audible" means nothing. --red mutes the core for ONE track, so exactly

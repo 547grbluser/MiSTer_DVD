@@ -43,12 +43,17 @@ predate later confirmations; the `CLAUDE.md` index carries the reconciled status
       Worst frame 37.3 % of real time on the RTL.
   - **Decided (maintainer):** the 2K ROM for now; invalid codes refused and counted;
     today's decoder keeps its delta-BA rule; the RTL and a standalone fit (A2) before MP2.
+    - W1 (2026-10-03): wired in. `dvd/audio_engine.sv` replaced `ac3_front` in
+      `dvd_audio_decode`, bit-identical block for block (`run_ac3_ab.sh`, 31 arms). In
+      core the front end is ~2,395 ALM against `ac3_front`'s 2,687 (−290), M10K +15,
+      SEED 1 re-pinned (clk_dec 90.49 / 88.33). HIL: AC-3 audible on BBB, MiB (4/4) and
+      T2; one open observation, a quiet ~0.5 s tail after an AC-3→DTS switch.
     - A2d: standalone fit 2,921 ALM / 39 M10K / 1 DSP, 35.8 MHz at −40 °C. AC-3 adds
       +688 to the DTS engine, against −2,687 measured for today's AC-3 parse and bit
       readers. DTS plus the migrated parse is about +200 … +300 ALM net, against ~1,125
       spare: it fits, where DTS alone does not.
-  - **Next:** the maintainer's decision. Recommended: wire the engine in for both (the
-    in-core fit is the real measurement). `docs/ac3_engine.md` "Open decisions".
+  - **Decided (maintainer, 2026-10-03):** wire it in for both. W1 (AC-3) done.
+  - **Next:** DTS P2 (codebooks in DDR3) and P3 (the `T_DTS` arm).
   - **Known gaps:**
     - BAPZERO's write value: the only zero-SNR window codes exponent 0;
     - the pending item at a refusal: today's timing never leaves one at the engine;

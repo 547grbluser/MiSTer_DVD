@@ -5,9 +5,13 @@
 //  descriptor FIFO) and drives two frames through the dispatcher:
 //    Phase A: an LPCM frame (type=2) -> verify the bytes are routed to
 //             lpcm_unpack and pop out as the correct BE->LE s16 L/R pairs.
-//    Phase B: a real AC-3 frame (type=0, first bytes of an ffmpeg 48k stereo
-//             frame) -> verify the bytes are routed to ac3_front and it locks
-//             sync (ac3_synced) with no err_unsupported.
+//    Phase B: a real AC-3 frame (type=0, a whole ffmpeg 48k stereo frame) ->
+//             verify the bytes are routed to the AC-3 decoder (audio_engine since
+//             2026-10-03), it decodes the frame to its end (ac3_synced) with no
+//             refusal, and its six blocks come out of the module as real (non-X)
+//             samples. (It fed only the first 96 bytes while ac3_front, which
+//             merely synced on them, was the decoder: the engine takes whole frames
+//             and decodes a short one's tail as zeros.)
 //
 //  This exercises the dispatch FSM contract (descriptor pop + exact-length byte
 //  routing + per-codec sink-ready back-pressure) end-to-end.  Full AC-3 PCM
@@ -125,7 +129,7 @@ module dvd_audio_decode_tb;
             if ((audio_l !== pL) || (audio_r !== pR)) begin
                 pL <= audio_l; pR <= audio_r;
                 if ((audio_l !== 16'sd0) || (audio_r !== 16'sd0)) begin
-                    if (cap < 16) begin cL[cap] = audio_l; cR[cap] = audio_r; end
+                    cL[cap % 16] = audio_l; cR[cap % 16] = audio_r;   // a ring: AC-3 adds ~1,500
                     cap = cap + 1;
                 end
             end
@@ -184,7 +188,7 @@ module dvd_audio_decode_tb;
 
         // ---------------- Phase B: AC-3 frame ----------------
         $readmemh("bench/dvd/test_ac3/tone_1k_48k_stereo_192k.ac3.frame0.hex", ac3hex);
-        ac3_n = 96;                    // enough bytes to sync + parse the header
+        ac3_n = 768;                   // the whole frame (192 kbit/s at 48 kHz)
         for (i = 0; i < ac3_n; i = i + 1) mem[committed + i] = ac3hex[i];
         desc_len[1]  = ac3_n;
         desc_type[1] = 2'd0;           // AC-3
@@ -195,7 +199,21 @@ module dvd_audio_decode_tb;
         t = 0;
         while (!ac3_synced && t < 200000) begin @(posedge clk); t = t + 1; end
         if (!ac3_synced) begin $display("FAIL: AC-3 did not sync"); errs=errs+1; end
-        if (ac3_err)     begin $display("FAIL: AC-3 err_unsupported asserted"); errs=errs+1; end
+        if (ac3_err)     begin $display("FAIL: AC-3 frame refused"); errs=errs+1; end
+        // its six blocks play out (sched_en is low: free-running) as real samples
+        begin
+            integer capb, quiet;
+            capb = cap; quiet = 0;
+            while (quiet < 60000) begin
+                @(posedge clk);
+                if (^audio_l === 1'bx || ^audio_r === 1'bx) begin
+                    $display("FAIL: AC-3 output is X"); errs = errs + 1; quiet = 60000;
+                end
+                if (cap != capb) begin capb = cap; quiet = 0; end else quiet = quiet + 1;
+            end
+            if (cap < NP + 100) begin $display("FAIL: AC-3 frame produced only %0d distinct output values", cap - NP); errs=errs+1; end
+            else $display("  [B] AC-3 frame decoded and played (%0d distinct output values)", cap - NP);
+        end
 
         // ---------------- Phase C: PTS-scheduled DRAIN gate ----------------
         // C1: gate armed from the moment sched_en rises — held while the STC is
@@ -246,8 +264,8 @@ module dvd_audio_decode_tb;
             t = 0;
             while (cap < cap0+1 && t < 200000) begin @(posedge clk); t = t + 1; end
             if (cap < cap0+1) begin $display("FAIL C1: samples did not play at schedule"); errs=errs+1; end
-            else if (cL[cap0] !== 16'h1122 || cR[cap0] !== 16'h3344)
-                 begin $display("FAIL C1: wrong sample at head (%04x/%04x)", cL[cap0], cR[cap0]); errs=errs+1; end
+            else if (cL[cap0 % 16] !== 16'h1122 || cR[cap0 % 16] !== 16'h3344)
+                 begin $display("FAIL C1: wrong sample at head (%04x/%04x)", cL[cap0 % 16], cR[cap0 % 16]); errs=errs+1; end
             else $display("  [C1] held un-anchored + early, released at stc = play_pts");
         end
 
@@ -357,8 +375,8 @@ module dvd_audio_decode_tb;
             t = 0;
             while (cap < cap0+1 && t < 200000) begin @(posedge clk); t = t + 1; end
             if (cap < cap0+1) begin $display("FAIL C5: fresh frame did not play"); errs=errs+1; end
-            else if (cL[cap0] !== 16'h1234 || cR[cap0] !== 16'h5678)
-                 begin $display("FAIL C5: stale frame leaked to the head (%04x/%04x)", cL[cap0], cR[cap0]); errs=errs+1; end
+            else if (cL[cap0 % 16] !== 16'h1234 || cR[cap0 % 16] !== 16'h5678)
+                 begin $display("FAIL C5: stale frame leaked to the head (%04x/%04x)", cL[cap0 % 16], cR[cap0 % 16]); errs=errs+1; end
             else $display("  [C5] stale frame discarded; fresh frame played first, on schedule");
         end
 
@@ -454,8 +472,8 @@ module dvd_audio_decode_tb;
             while (cap < cap0+1 && t < 200000) begin @(posedge clk); t = t + 1; end
             if (cap < cap0+1) begin $display("FAIL C8: arrival-limited stale head was not played"); errs=errs+1; end
             else if (dbg_skip_cnt != skip0[7:0]) begin $display("FAIL C8: arrival-limited head was DISCARDED"); errs=errs+1; end
-            else if (cL[cap0] !== 16'h5A5B || cR[cap0] !== 16'h5C5D)
-                 begin $display("FAIL C8: wrong samples (%04x/%04x)", cL[cap0], cR[cap0]); errs=errs+1; end
+            else if (cL[cap0 % 16] !== 16'h5A5B || cR[cap0 % 16] !== 16'h5C5D)
+                 begin $display("FAIL C8: wrong samples (%04x/%04x)", cL[cap0 % 16], cR[cap0 % 16]); errs=errs+1; end
             else $display("  [C8] arrival-limited stale head played late (no treadmill discard)");
         end
 
@@ -511,8 +529,8 @@ module dvd_audio_decode_tb;
             t = 0;
             while (cap < cap0+2 && t < 200000) begin @(posedge clk); t = t + 1; end
             if (cap < cap0+2) begin $display("FAIL C9: current frame did not play after catch-up"); errs=errs+1; end
-            else if (cL[cap0+1] !== 16'h7788 || cR[cap0+1] !== 16'h99AA)
-                 begin $display("FAIL C9: stale backlog leaked (%04x/%04x)", cL[cap0+1], cR[cap0+1]); errs=errs+1; end
+            else if (cL[(cap0+1) % 16] !== 16'h7788 || cR[(cap0+1) % 16] !== 16'h99AA)
+                 begin $display("FAIL C9: stale backlog leaked (%04x/%04x)", cL[(cap0+1) % 16], cR[(cap0+1) % 16]); errs=errs+1; end
             else if (dbg_skip_cnt != skip0[7:0] + 8'd2)
                  begin $display("FAIL C9: expected 2 catch-up discards (skip %0d->%0d)", skip0, dbg_skip_cnt); errs=errs+1; end
             else $display("  [C9] mid-play catch-up: 2 stale frames skipped once current audio arrived");

@@ -1,6 +1,10 @@
 # The AC-3 parse on the shared audio engine (scenario E)
 
-**Status (2026-10-03): ✅ A0–A2d done: the engine RTL decodes AC-3 and is fitted.** The model is
+**Status (2026-10-03): ✅ A0–A2d done, and ✅ W1: the engine IS the core's AC-3 front end**
+(`dvd/audio_engine.sv` in `dvd_audio_decode`, bit-identical to `ac3_front` block for block,
+in-core fit −290 ALM for the front end, timing closed on SEED 1, AC-3 audible on the rig).
+⏳ Next: DTS — P2 (codebooks in DDR3) and P3 (the `T_DTS` arm), `dts_decoder.md` §7.
+Earlier status, kept: The model is
 bit-exact against the RTL on 30 streams. The whole AC-3 parse runs as an engine
 program (`dvd/dts/ac3.uasm`, emulated by `tools/ac3_isa.py`) and is bit-exact against
 the model on every block of those 30 streams. The sequencer's AC-3 units are built
@@ -622,6 +626,81 @@ SEED 1, both slow corners.
   ALMs, and the ROM's extra 4–6 M10K are affordable (M10K is not the binding resource).
   A hardwired op would *add* ALMs, the binding resource, to save M10K. Recommendation:
   keep the 2K ROM.
+
+## W1: the engine in the core (2026-10-03)
+
+The maintainer's call on A2d's result: wire it in for both programs. W1 is the AC-3 half;
+DTS (P2, P3) follows.
+
+- **`dvd/audio_engine.sv`** takes `ac3_front`'s place in `dvd_audio_decode`. It holds
+  `dts_top` with `codec = 1`, the unchanged `imdct_512`, and the IMDCT handshake:
+  - `imdct_512` starts only once `pcm_out` has drained the previous block (`pcm_done`),
+    because the next transform overwrites `pcm_mem`;
+  - the block's side information is **latched at that start and held until the next
+    one**. The engine runs ahead, parsing block k+1 while `pcm_out` drains block k, and
+    `imdct_512`'s `lvl_q` (which `pcm_out` applies during the drain) is combinational in
+    acmod and the mix levels. `ac3_front` never ran ahead: it waited for `pcm_done`.
+- **The dispatcher hands the engine whole frames:** the descriptor at `S_POP`, held until
+  FRAME takes it, then the bytes straight from audio_ring (`ac3_reframer` already makes
+  each one an AC-3 syncframe). The 4 KB `bit_fifo` is gone. ⚠ An engine reset
+  mid-frame (the stall watchdog, `enable` low) would leave the dispatcher waiting for
+  ever in S_ROUTE, since nothing takes the rest of that frame's bytes. `ac3_drop`
+  discards them instead.
+- **No self-heal on a refusal.** The engine drains a refused frame and waits for the
+  next, so `ac3_err` now pulses per refused frame (`dbg_ac3_err_resets` counts them);
+  only the stall watchdog and `enable` reset it.
+- **Deliberate deviation:** an invalid grouped mantissa code. `ac3_front` decodes it
+  through an out-of-range level read (X in simulation, whatever the ROM returns in
+  silicon); the engine refuses the frame (A1's decision). The A/B bench compares up to
+  that refusal.
+- **Gates:**
+  - **`bench/dvd/run_ac3_ab.sh`** (`ac3_ab_tb.sv`, new): `ac3_front` and the engine on
+    the same stream; every block's `pcm_mem` (what `pcm_out` drains), `lvl_q` and
+    acmod. **31 arms, all identical**: the 30 streams at 6 frames, plus D1, a slow
+    drain (4,000 cycles), so the run-ahead is exercised.
+  - `dvd_audio_decode_tb` Phase B was strengthened. It fed only 96 bytes of a frame,
+    which `ac3_front` merely synced on; it now feeds the whole frame and requires its
+    six blocks out as real samples. The capture became a 16-pair ring.
+  - The audio benches compile the engine: `run_aud_retime`, `run_mp2`,
+    `run_stc_freerun`, `run_vcd`, `run_wav`, `run_reader_regress`.
+- **`DVD.qsf`:** the engine in; `ac3_front`, `ac3_parse`, `sync_crc`, `bsi_parse`,
+  `audblk_parse`, `exponent_decode`, `bit_allocation` and `mantissa_dequant` out. They
+  stay in `dvd/ac3/` as the A/B reference. `bit_fifo` and `bit_reader` stay because
+  `mp2_decode` uses them. `lint_undriven` passes.
+- **In-core fit:**
+
+  | | SEED 7 (marginal) | **SEED 1 (pinned)** | menu-panscan baseline |
+  |---|---|---|---|
+  | ALM (device) | 40,680 | **39,095** | 40,785 |
+  | `audio_engine` (incl. `imdct_512` 2,011) | | **4,407** | — |
+  | the engine alone (seq 1,229, vec 1,153, top) | | **~2,395** | `ac3_front`'s parse + readers 2,687 |
+  | M10K | 527 | 527 | 512 |
+  | DSP | 92 | 92 | 95 |
+  | clk_dec (100 °C / −40 °C, gate 86) | 85.79 / 86.95 ✗ | **90.49 / 88.33** ✓ | |
+
+  - **The AC-3 front end on the engine is about 290 ALM smaller than the one it
+    replaced, with DTS's hardware already inside it.** The A2d estimate was +80 … +200.
+  - The device total moves about ±1,600 ALM between seeds (packing), so the per-entity
+    figure is the comparison.
+  - The engine's own domain (`clk_sys`) closes with +6.6 ns of 37 ns (worst paths in
+    `imdct_512`). The sys-PLL clock's negative slack is the usual cross-clock
+    infrastructure.
+  - Build: `releases/DVD_ac3engine_20261003_1300.rbf`.
+- **HIL** (2026-10-03, on the SEED 7 build; the control arm was the menu-panscan build):
+  - `audio_check`: *Big Buck Bunny* NTSC (5.1) audible; *Men in Black* 4 of 4 tracks;
+    *Ultimate T2*: the AC-3 tracks audible and the DTS track silent (DTS not decoded
+    yet). Same as the control.
+  - Telemetry on *BBB*: audio at 47,999.3 Hz, no drain-gate closures, no lates or
+    drops, A/V drift median −19.6 ms.
+  - `tools/audio_check.py` learned show-first Audio (PR #145): a single press after
+    the popup has timed out only re-shows the track.
+  - ⏳ **Open observation:** after switching from an AC-3 track to the DTS track, the
+    first ~0.5 s carried a quiet tail (−50 … −76 dBFS RMS, −39 dBFS peak) on the
+    engine build. The control measured −86 dBFS. That is one or two samples per build,
+    and audio_ring is reset on a switch, so it is not yet a finding. It needs repeat
+    captures on both builds and a track-switch scenario in simulation.
+- **Next:** DTS. P2 (codebooks: initialised hosts, the copier, `ram2`), then P3 (the
+  `T_DTS` arm drives the same engine with `codec = 0`, switching programs in reset).
 
 ## Gate set
 

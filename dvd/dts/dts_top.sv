@@ -52,6 +52,9 @@ module dts_top (
     output logic  [15:0] overrun_bits,
     output logic  [15:0] lenient_codes,
     output logic  [15:0] dmix_ignored,
+    output logic         frame_end,          // pulse: a frame decoded to its end (FEND)
+    output logic         refuse,             // pulse: a frame refused ...
+    output logic   [4:0] refuse_code,        // ... with this code
 
     // AC-3: the block for imdct_512
     output logic         imdct_req,
@@ -104,6 +107,10 @@ module dts_top (
             blk_acmod <= vop_args[34:32];    blk_lfeon  <= vop_args[48];
             blk_cmix  <= vop_args[65:64];    blk_surmix <= vop_args[81:80];
         end
+
+    assign frame_end = frame_done;
+    assign refuse = err_valid;
+    assign refuse_code = err_code;
 
     // CNT's counter id is r8 (dts_isa.CNT_DMIX_IGNORED = 0)
     wire cnt_dmix = vop_start && (vop_op == 6'd8) && (vop_args[15:0] == 16'd0);

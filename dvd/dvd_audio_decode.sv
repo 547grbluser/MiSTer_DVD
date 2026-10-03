@@ -7,7 +7,8 @@
 //  ~48 kHz for emu.sv to drive onto AUDIO_L/AUDIO_R.
 //
 //    frame_type (from ps_demux / audio_ring): 0=AC-3  1=DTS  2=LPCM  3=unknown
-//      AC-3   -> ac3_front (decode + 5.1->stereo downmix) -> pcm_out (Q8.23->s16)
+//      AC-3   -> audio_engine (the microcoded engine's AC-3 program + imdct_512:
+//                decode + 5.1->stereo downmix) -> pcm_out (Q8.23->s16)
 //      LPCM   -> lpcm_unpack (BE->LE 16-bit, L/R interleave)
 //      DTS    -> discarded (no fabric DTS decoder yet; future: IEC 61937 to the
 //                Digital I/O board). unknown -> discarded.
@@ -633,11 +634,44 @@ module dvd_audio_decode #(
     end
 
     // ---------------------------------------------------------------------
-    // AC-3 decoder: ac3_front (decode + downmix) feeding pcm_out (Q8.23->s16).
+    // AC-3 decoder: audio_engine (the engine's AC-3 program + imdct_512: decode +
+    // downmix) feeding pcm_out (Q8.23->s16). docs/ac3_engine.md "W1". It replaced
+    // ac3_front (2026-10-03), bit-identical block for block (bench/dvd/run_ac3_ab.sh).
     // ---------------------------------------------------------------------
-    // Feed ac3_front from the dispatch FSM when the current frame is AC-3.
-    wire        ac3_wr   = consume && (cur_type == T_AC3) && !discard_cur;
+    // The engine takes a FRAME: a descriptor (the frame's byte length), then exactly
+    // that many bytes. The descriptor is presented as the dispatcher pops an AC-3
+    // frame it will play (S_POP), and held until the engine's FRAME instruction takes
+    // it; the bytes follow through the normal route, accepted when the engine asks for
+    // one (in_ready).
+    // ⚠ An engine reset mid-frame (the stall watchdog, `enable` low) loses the frame:
+    // the engine restarts waiting for a descriptor and would never take the rest of
+    // its bytes, so the dispatcher would wait in S_ROUTE for ever (ac3_front's byte
+    // FIFO always took them). ac3_drop discards the remainder of that frame instead,
+    // and the engine starts clean on the next one.
+    wire         ac3_core_rst;
+    logic        ac3_drop;
+    wire        ac3_wr   = consume && (cur_type == T_AC3) && !discard_cur && !ac3_drop;
     wire [7:0]  ac3_data = ring_byte;
+    logic        ac3_desc_v;
+    logic [15:0] ac3_desc_len;
+    wire         ac3_fr_ready, ac3_in_ready;
+    always_ff @(posedge clk) begin
+        if (rst) ac3_drop <= 1'b0;
+        else if (ac3_core_rst && (cur_type == T_AC3) && ((state == S_POP) || (state == S_ROUTE)))
+            ac3_drop <= 1'b1;
+        else if (state == S_POP) ac3_drop <= 1'b0;           // a new frame
+        if (ac3_core_rst) ac3_desc_v <= 1'b0;
+        else begin
+            if (ac3_desc_v && ac3_fr_ready) ac3_desc_v <= 1'b0;
+            if ((state == S_POP) && (cur_type == T_AC3) && !discard_cur && (bytes_left != 16'd0)) begin
+                ac3_desc_v   <= 1'b1;
+                ac3_desc_len <= bytes_left;
+            end
+        end
+    end
+    // a byte is accepted only when the engine asks for one (it asks only inside a frame
+    // whose descriptor it has taken), or dropped after a mid-frame reset
+    assign ac3_full = !(ac3_in_ready || ac3_drop);
 
     // DVD-FORK 2026-08-31: acmod 1 (1/0 mono) decodes a single fbw channel, so
     // pcm_mem ch1 is not written. Tell pcm_out to read ch0 for BOTH outputs.
@@ -653,15 +687,14 @@ module dvd_audio_decode #(
     wire        ac3_aud_valid;
 
     // ---------------------------------------------------------------------
-    // AC-3 self-heal. err_unsupported is STICKY and halts ac3_front (P_HALT) —
-    // a single frame the decoder rejects would otherwise silence AC-3 for the
-    // rest of the disc. Also watchdog a decode stall (no imdct_done for ~0.6 s
-    // while AC-3 is the active codec). On either, pulse a local reset so the
-    // front-end re-syncs on the next 0x0B77 syncframe (brief glitch, then audio
-    // resumes) instead of dying. rsthold gives a clean multi-cycle reset and a
-    // one-shot (it won't re-fire until the condition recurs after recovery).
+    // AC-3 self-heal. The engine REFUSES a frame it cannot decode (drains it and
+    // waits for the next: ac3_err pulses, counted in dbg_ac3_err_resets), so a
+    // refusal needs no reset -- ac3_front's err_unsupported was sticky and halted it,
+    // which is what this reset used to clear. What remains is the decode-STALL
+    // watchdog (no imdct_done for ~0.6 s while fed) and `enable` going low (the
+    // dispatcher parks mid-frame): either resets the engine, so it restarts at a frame
+    // boundary. rsthold gives a clean multi-cycle reset and a one-shot.
     // ---------------------------------------------------------------------
-    wire        ac3_core_rst;
     logic [4:0]  ac3_rsthold;
     logic [23:0] ac3_wdog;                 // 2^24/27e6 ~= 0.62 s
     wire         ac3_wdog_to = (&ac3_wdog);
@@ -695,15 +728,15 @@ module dvd_audio_decode #(
             // start a reset pulse on a fresh error, or a stall timeout WHILE FED
             if (ac3_rsthold != 0)
                 ac3_rsthold <= ac3_rsthold - 1'b1;
-            else if (ac3_err || ac3_stall_rst)
+            else if (ac3_stall_rst)
                 ac3_rsthold <= 5'd31;
         end
     end
-    assign ac3_core_rst = rst | (ac3_rsthold != 0);
+    assign ac3_core_rst = rst | (ac3_rsthold != 0) | !enable;    // parked: held in reset
 
-    // Debug: count self-heal reset pulses (rising edges), split by cause so HW can
-    // tell ERR-caused resets (a real bitstream the decoder rejects) from stall-wdog
-    // resets. (The old dbg_ac3_underruns counter was bogus: it gated on aud_ce &&
+    // Debug: count self-heal reset pulses (rising edges); dbg_ac3_err_resets now
+    // counts the engine's REFUSED frames (a real bitstream it rejects -- no reset
+    // follows one any more), the name kept for the telemetry consumers. (The old dbg_ac3_underruns counter was bogus: it gated on aud_ce &&
     // !ac3_aud_valid, but ac3_aud_valid is asserted the cycle AFTER aud_ce, so the
     // two never coincide and it counted ~every tick — it measured nothing useful.)
     logic ac3_rst_d;
@@ -714,73 +747,38 @@ module dvd_audio_decode #(
             ac3_rst_d          <= 1'b0;
         end else begin
             ac3_rst_d <= (ac3_rsthold != 0);
-            if ((ac3_rsthold != 0) && !ac3_rst_d) begin
-                dbg_ac3_resets <= dbg_ac3_resets + 1'b1;              // total
-                if (ac3_err) dbg_ac3_err_resets <= dbg_ac3_err_resets + 1'b1; // ERR-caused
-            end
+            if ((ac3_rsthold != 0) && !ac3_rst_d)
+                dbg_ac3_resets <= dbg_ac3_resets + 1'b1;              // stall / park resets
+            if (ac3_err && !(&dbg_ac3_err_resets))
+                dbg_ac3_err_resets <= dbg_ac3_err_resets + 1'b1;      // refused frames
         end
     end
 
-    ac3_front #(.FIFO_DEPTH(4096)) ac3_front_inst (
-        .clk             (clk),
-        .rst             (ac3_core_rst),
-        .wr_en           (ac3_wr),
-        .wr_data         (ac3_data),
-        .full            (ac3_full),
-
-        .synced          (ac3_synced),
-        .frame_hdr_valid (),
-        .frame_words     (),
-        .frame_bytes     (),
-        .fscod           (),
-        .frmsizcod       (),
-        .crc1            (),
-        .sync_bitpos     (),
-
-        .bsi_valid       (),
-        .bsid            (),
-        .bsmod           (),
-        .acmod           (ac3_acmod),
-        .dsurmod         (),
-        .cmixlev         (),
-        .surmixlev       (),
-        .lfeon           (),
-        .dialnorm        (),
-
-        .block_side_valid(),
-        .blk_bits        (),
-
-        .chincpl         (),
-        .cplstrtmant     (),
-        .cplendmant      (),
-        .ncplbnd         (),
-        .cplstrtbnd      (),
-        .phsflginu       (),
-        .rematflg        (),
-        .cplco_rd_addr   (8'd0),
-        .cplco_rd_data   (),
-
-        .exp_done        (),
-        .dexp_rd_addr    (11'd0),
-        .dexp_rd_data    (),
-
-        .ba_done         (),
-        .bap_rd_addr     (11'd0),
-        .bap_rd_data     (),
-
-        .mant_done       (),
-        .coeff_rd_addr   (11'd0),
-        .coeff_rd_data   (),
-
-        // PCM read port — pcm_out walks ch 0/1; zero-extend its 9-bit addr to the
-        // 11-bit {ch[2:0],idx[7:0]} ac3_front expects (only ch 0/1 are read).
-        .imdct_done      (imdct_done),
-        .pcm_rd_addr     ({2'b00, pcm_rd_addr9}),
-        .pcm_rd_data     (pcm_rd_data),
-        .lvl_q           (ac3_lvl_q),
-
-        .pcm_done        (pcm_done_w),
-        .err_unsupported (ac3_err)
+    audio_engine ac3_engine_inst (
+        .clk         (clk),
+        .rst         (ac3_core_rst),
+        .fr_len      (ac3_desc_len),
+        .fr_valid    (ac3_desc_v),
+        .fr_ready    (ac3_fr_ready),
+        .in_byte     (ac3_data),
+        .in_valid    ((state == S_ROUTE) && ring_valid && (cur_type == T_AC3) && !discard_cur && !ac3_drop),
+        .in_ready    (ac3_in_ready),
+        // PCM read port -- pcm_out walks ch 0/1; zero-extend its 9-bit addr to the
+        // 11-bit {ch[2:0],idx[7:0]} imdct_512 expects (only ch 0/1 are read).
+        .imdct_done  (imdct_done),
+        .pcm_rd_addr ({2'b00, pcm_rd_addr9}),
+        .pcm_rd_data (pcm_rd_data),
+        .lvl_q       (ac3_lvl_q),
+        .pcm_acmod   (ac3_acmod),
+        .pcm_done    (pcm_done_w),
+        .synced      (ac3_synced),
+        .frame_ok    (),
+        .refused     (ac3_err),
+        .err_code    (),
+        .n_frames    (),
+        .n_refused   (),
+        .err_seen    (),
+        .n_overrun   ()
     );
 
     // FIFO_AW=11 -> 2048 sample-pairs (~43 ms) to ride out the demux/governor's

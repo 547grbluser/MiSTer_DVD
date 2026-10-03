@@ -467,10 +467,9 @@ finds the main feature, navigates to it, and plays from start.
 > AC-3 parse reclaim; branch `feature/dts-decode`).
 >
 > **The AC-3 parse on the same engine (scenario E)** is being measured first:
-> **`docs/ac3_engine.md`**. A0–A2d are done: the engine RTL decodes AC-3, every
-> coefficient equal to today's decoder's. Its fit says DTS plus the migrated AC-3 parse
-> is about +200 … +300 ALM net, within the spare. ⏳ Next: the maintainer's call on
-> wiring it in. Branch `feature/ac3-engine`.
+> **`docs/ac3_engine.md`**. A0–A2d are done, and **W1 has wired it in:** the engine
+> is now the core's AC-3 front end, bit-identical to the decoder it replaced and ~290 ALM
+> smaller in core. ⏳ Next: DTS P2 (codebooks in DDR3) and P3 (the `T_DTS` arm). Branch `feature/ac3-engine`.
 
 **Goal:** make DTS (and AC-3) tracks audible on an AV receiver.
 
