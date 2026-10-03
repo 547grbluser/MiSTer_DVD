@@ -60,8 +60,10 @@ predate later confirmations; the `CLAUDE.md` index carries the reconciled status
     - the latab/baptab clamps: no stream reaches them;
     - recombine saturation: no stream reaches it.
 
-- 🔧 **IN-FABRIC DTS CORE DECODER (2026-10-03: P2 + P3 built and sim-proven on
-  `feature/ac3-engine`; ⏳ in-core build + HIL).** P2: the codebooks are copied at
+- ✅ **IN-FABRIC DTS CORE DECODER (2026-10-03: P2 + P3 built, in core, and PLAYING on the
+  rig on `feature/ac3-engine`, not merged).** HIL: *Ultimate T2*'s DTS track at −32 dBFS
+  (silent before), correlation 0.922 with its AC-3 track over the same passage,
+  telemetry `dts_ok 1`, checksum = `CB_SUM`, 0 refused. P2: the codebooks are copied at
   configuration from three FIFOs' power-up contents into DDR3 over `ram2`
   (`dvd/dts/dts_cb_mem.sv`, `run_cb_copy.sh --red`). P3: the `T_DTS` arm sends DTS to
   the shared audio engine, and its PCM plays out of the LPCM FIFO (`run_dts_dec.sh

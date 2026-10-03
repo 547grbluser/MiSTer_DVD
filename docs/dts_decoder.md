@@ -1,6 +1,9 @@
 # In-fabric DTS core decoder (`dvd/dts/`)
 
-**Status (2026-10-03): 🔧 P2 + P3 BUILT, sim-proven, ⏳ in-core build + HIL pending.** The
+**Status (2026-10-03): ✅ P2 + P3 BUILT AND PLAYING ON THE RIG** (`feature/ac3-engine`, not
+merged): *Ultimate T2*'s DTS track decodes, correlating 0.922 with the disc's AC-3 track over
+the same passage. ⏳ Open: the regression sweep's last gates, a by-ear pass on more DTS
+discs. The
 codebooks ride in three FIFOs' power-up contents and are copied once to DDR3 over `ram2`
 (P2); the `T_DTS` arm sends DTS frames to the shared audio engine, which also runs AC-3
 since `docs/ac3_engine.md` W1 (P3). See "P2 + P3 result" below. Earlier status, kept:
@@ -963,9 +966,26 @@ branch. One engine now runs both programs.
 - **Gate `tools/check_dts_wiring.py`** reads every `emu.sv` / `sys_top.v` seam out of the
   files (`ram2`, the copy, the hold, the DTS port, telemetry). Each of three spot
   mutations fails its own claim.
-- **⏳ Not done yet:** the in-core fit and timing, HIL on DTS discs (*Ultimate T2*'s DTS
-  track), and the census `dts_scan` streams by ear. The manual is updated, and the
-  release bump is a minor one.
+- **In core** (SEED 1, `releases/DVD_ac3engine_20261003_1513.rbf`): 40,848 / 41,910 ALM,
+  527 M10K (unchanged: DTS reuses the LPCM FIFO and the hosts), 92 DSP, clk_dec
+  89.98 / 91.19 MHz.
+  - By entity, P2 + P3 cost ~550 ALM. `audio_engine` grew 4,407 → 4,627 because DTS's
+    output and codebook paths, pruned while unconnected in W1, are now live.
+    `dts_cb_mem` is 172; the serialiser, the program change and telemetry ~150.
+  - ~1,060 ALM remain.
+- **HIL (2026-10-03):**
+  - *Ultimate T2* in `Decode PCM`: **the DTS track (track 2) plays at −32 dBFS RMS**
+    (`audio_check`: all 4 tracks audible). The control build measured it at −93 dBFS,
+    digitally silent.
+  - Telemetry: `dts_copied 1, dts_ok 1, dts_sum 6e6f7b8d` (= `CB_SUM`), 362 frames, 0
+    refused.
+  - **Correctness:** the title was started twice, once on the DTS track and once on the
+    AC-3 track. A 6 s window of the DTS capture correlates **0.922** with the AC-3
+    capture at the matching offset, and the levels agree to 0.2 dB (−39.7 / −39.5 dBFS).
+    That is two independent encodes of one mix, decoded by the same engine running two
+    programs (`.sim`-local script; the method is the record).
+- **⏳ Still to do:** a by-ear pass on more DTS discs (the census's 147 streams pass in
+  the emulator). The manual is updated, and the release bump is a minor one.
 
 ### P1b result: the standalone fit, the go/no-go (2026-10-02)
 
