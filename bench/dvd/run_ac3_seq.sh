@@ -14,6 +14,9 @@
 #   S2 the invalid grouped-code window (E_GROUP mid-AQ) with stalls and back-pressure
 #   R1 tone 5.1, frame 1's exponent codes rewritten: EXPD refuses (E_EXP)
 #   T1 tone 5.1, frame 1 delivered 200 bytes short: read past its end as zeros (counted)
+# and on every arm with no stall and no refusal, [cycles]: each op's cycles in its own
+# states equal the emulator's charge (tools/ac3_isa.py bin_cycles etc.), so the
+# emulator's budget figure is the RTL's for everything but the vector side
 #
 # --red [MUTS="X1 X5" to run only those]: mutations on a COPY of the RTL, each caught by
 # its own arm (the arms are in the mut lines below).
@@ -68,13 +71,13 @@ CPL=$(pick cpl "$GATE"/*.ac3)
 # arm | stream | golden args | sim args
 ARMS=()
 for s in "${STREAMS[@]}"; do
-  case "$s" in *refuse*) g="--frames 5";; *) g="--frames 4";; esac
-  ARMS+=("$(basename "$s" .ac3)|$s|$g|")
+  case "$s" in *refuse*) g="--frames 5"; c="";; *) g="--frames 4"; c="+cyc";; esac
+  ARMS+=("$(basename "$s" .ac3)|$s|$g|$c")
 done
 ARMS+=("S1|$NOISE|--frames 3|+stall=20 +xstall=5")
 ARMS+=("S2|$GROUP|--frames 5|+stall=10 +xstall=4")
 ARMS+=("R1|$TONE|--frames 4 --badexp 1|")
-ARMS+=("T1|$TONE|--frames 4 --truncate 1:200|")
+ARMS+=("T1|$TONE|--frames 4 --truncate 1:200|+cyc")
 declare -A STEM SIMARGS
 
 echo "== GREEN: goldens (${#ARMS[@]} arms) =="
@@ -167,6 +170,8 @@ PYEOF
   mut X2 R1 "end else if (ex_bad) u_ref = 1'b1;" \
             "end else if (ex_bad) begin u_ref = 1'b1; rec_we = 1'b1; rec_wd = {9'd0, ex_e}; end" "\[trace\]" &
   mut X3 R1 "(ex_e > 7'd24)" "(ex_e > 7'd30)" "\[trace\]" &
+  mut X20 $T "x_rem <= 5'd0; x_it <= 5'd7; u_nb <= 5'd7;" \
+             "x_rem <= 5'd0; x_it <= 5'd8; u_nb <= 5'd8;" "\[cycles\]" &   # a leading 0: timing only
   mut X4 $T "(rf[11][1:0] == 2'd2) ? 2'd1 : 2'd3;" "(rf[11][1:0] == 2'd2) ? 2'd1 : 2'd2;" "\[trace\]" &
   wait
   # bit allocation

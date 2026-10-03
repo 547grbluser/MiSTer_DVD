@@ -7,28 +7,28 @@ AC-3's program (dvd/dts/ac3.uasm), its constant ROM and record map, and its
 vector ops, each of which calls tools/ac3_model.py's own function, so the
 emulator is anchored to the model and the model to the RTL.
 
-The ops (numbered after DTS's: one engine, one op space) and the hardware each
-charge is DERIVED FROM -- none of it built yet, so the cycle figure carries a
-headroom factor (CYC_HEADROOM) and says which part is modelled:
-  EXPD     exponent groups -> the bins' exp fields. A sequencer-side unit on the
-           bit reader: 7 code bits a group overlap the 3 x rep record writes ->
-           max(7, 3 rep) + 1 a group, + 4.
-  BAPSD    a band's integrated PSD (liba52's log-add) -> F_PSD. One record read and
-           one latab lookup a bin, pipelined: 1 a bin + 4.
-  BAPFILL  bap = baptab[156 + mask + 4 exp] over a band: read, look up, write back,
-           pipelined on the 1R1W record RAM: 1 a bin + 4.
-  BAPZERO  bap = 0 over [from, to) (zero SNR offsets): 1 a bin + 3.
-  QRST     empty the grouped-quantizer caches (the block's mantissa stage starts): 2.
-  AQ       one channel's bins [from, to): zero, dither or a dequantised mantissa
-           (the model's one_coeff). A sequencer-side unit on the bit reader and the
-           record, the scale (a shift) and dither (x 23170) on the vector side:
-           1 a bin + its code bits + a fresh grouped code's divisions, + 3.
-  AQC      one coupling band: each bin read once and scattered into every coupled
-           channel (cpl_bins): as AQ, + 1 a coupled channel a bin (the recombine on
-           the multiplier, one write each), + 2 + nf coordinate reads.
+The ops (numbered after DTS's: one engine, one op space). The sequencer-side units
+are BUILT (dvd/dts/dts_seq.sv, A2b) and their charge is the RTL's own cycle count in
+the unit's states, structure for structure (unit_cycles below; bench/dvd/
+run_ac3_seq.sh's [cycles] arm checks it on every stall-free arm). The vector side is
+not built yet (A2c), so its charges are MODELLED and carry the headroom factor
+(CYC_HEADROOM); test_ac3_isa.py's budget applies it to those alone:
+  EXPD     exponent groups -> the bins' exp fields: per group 7 code bits + 1, two
+           in-place divisions by 5 (14), 3 x rep record writes.
+  BAPSD    a band's integrated PSD (liba52's log-add) -> F_PSD: 2 a bin.
+  BAPFILL  bap = baptab[156 + mask + 4 exp] over a band, pipelined: 1 a bin + 2.
+  BAPZERO  bap = 0 over [from, to) (zero SNR offsets): 1 a bin + 1.
+  QRST     empty the grouped-quantizer caches: none (done at the vop's dispatch).
+  AQ       one channel's bins [from, to): 1 + per bin 2 + its path (bin_cycles: the
+           code bits + 1, a fresh grouped code's divisions, the level read). The
+           vector engine (scale, dither x 23170) keeps up; modelled: its tail.
+  AQC      one coupling band: the header (nf, chincpl, phase, nf dither flags), each
+           coupled channel's coordinate (a serial shift, its exponent + 3), then the
+           bins as AQ. Modelled: the recombine's one write a coupled channel a bin
+           where it outruns the bin's sequencer time, and the tail.
   CZERO    a channel's zero tail: 1 a bin + 2.     REMAT  2/0 rematrix: 4 a bin + 3.
   IMDCT    the block's coefficients are ready (the handshake that starts
-           imdct_512, which runs in series): 2.
+           imdct_512, which runs in series): 2.     (all three modelled)
 
 Usage:
     tools/ac3_isa.py --asm [--check]            # assemble -> dvd/dts/ac3_*.mem
@@ -53,13 +53,25 @@ VOP_NAME = {v: k for k, v in VOPS.items()}
 BINBASE = [0x100, 0x200, 0x300, 0x400, 0x500, 0x600 - 37, 0x6D8]   # slots 0-4, cpl, lfe
 F_PSD = 0x019
 E_EXP, E_GROUP = 9, 10
-CYC_HEADROOM = 1.25            # on the modelled op charges (no RTL yet)
-CYC = {'expd': 4, 'bapsd': 4, 'bapfill': 4, 'bapzero': 3, 'qrst': 2, 'aq': 3, 'aqc': 2,
-       'czero': 2, 'remat': 3, 'imdct': 2}
-# a fresh grouped code: its digits come out of the restoring divider low digit first
-# (the first while the code's bits arrive), and the HIGH digit is used first, so all
-# but one division precede the first coefficient: (digits - 1) x nb extra cycles
-GROUP_EXTRA = {-1: 2 * 5, -2: 2 * 7, -3: 1 * 7}
+CYC_HEADROOM = 1.25            # on the MODELLED (vector-side) charges only
+CYC = {'vec_tail': 2, 'czero': 2, 'remat': 3, 'imdct': 2}     # the modelled ones
+
+
+def bin_cycles(bap, nbits):
+    """One bin of AQ / AQC in dts_seq.sv: S_AQ_D and S_AQ_E (2), then its path --
+    bap 0 none; a cached grouped digit S_AQ_Q + S_AQ_L; a fresh grouped code its bits +
+    1 (S_AQ_G), its divisions in place (S_UV: nb each, two for 3- and 5-level, one for
+    11-level), S_AQ_Q + S_AQ_L; bap 3 / 4 the bits + 1 and the level read; a direct
+    code the bits + 1."""
+    if bap == 0:
+        return 2
+    if bap in (-1, -2, -3):
+        if nbits == 0:
+            return 4
+        return 2 + (nbits + 1) + nbits * (1 if bap == -3 else 2) + 2
+    if bap in (3, 4):
+        return 2 + nbits + 2
+    return 2 + nbits + 1
 
 
 def build_const():
@@ -138,6 +150,8 @@ class Machine(D.Machine):
         self.stats = dict.fromkeys(M.STATS, 0)
         self.blocks = []                 # per block: blksw, dynrng, exp, bap, coeff, lfe
         self.mant_cycles = 0
+        self.ucyc = {}                   # op -> cycles in its unit's states (the RTL's)
+        self.vec_model = 0               # the modelled (vector-side) cycles, all frames
 
     def exp_of(self, base):
         return lambda k: self.rec[(base + k) & 0x7FF] & 31
@@ -168,9 +182,15 @@ class Machine(D.Machine):
             self.trace.append((2, self.pc, addr & 0x7FF, value & 0xFFFFFF))
 
     def coded(self, bap, b0):
-        """Cycles for one coefficient: dispatch, its code bits, a fresh code's division."""
-        nbits = self.bitpos - b0
-        return 1 + nbits + (GROUP_EXTRA.get(bap, 0) if nbits else 0)
+        """A bin's cycles in the mantissa unit (bin_cycles), from the bits it read."""
+        return bin_cycles(bap, self.bitpos - b0)
+
+    def charge(self, op, unit, vec=0):
+        """-> op_t for vop(): `unit` cycles in the op's own states (the RTL's exact
+        count; the vop's dispatch cycle is the instruction's) plus `vec` modelled ones."""
+        self.ucyc[op] = self.ucyc.get(op, 0) + unit
+        self.vec_model += vec
+        return unit + vec - (D.CYC['vop'] - D.CYC['instr'])
 
     def vop(self, op):
         a = [self.reg[i] for i in range(8, 16)]
@@ -178,7 +198,7 @@ class Machine(D.Machine):
         c0 = self.cycles
         op_t = 0
         try:
-            op_t = self.run_op(name, a)
+            op_t = self.run_op(name, a, op)
         except M.Ac3Error:
             self.op_err = E_GROUP if name in ('aq', 'aqc') else E_EXP
             return
@@ -189,7 +209,7 @@ class Machine(D.Machine):
         if self.vop_hook is not None:
             self.vop_hook(self, op)
 
-    def run_op(self, name, a):
+    def run_op(self, name, a, op=None):
         if name == 'expd':
             base, start, ngrps, expstr, e = a[0], a[1], a[2], a[3], a[4]
             rep = (1, 2, 4)[expstr - 1]
@@ -204,7 +224,7 @@ class Machine(D.Machine):
                     for _ in range(rep):
                         self.op_store(base + idx, e)
                         idx += 1
-            return CYC['expd'] + ngrps * (max(7, 3 * rep) + 1)
+            return self.charge(op, ngrps * (8 + 14 + 3 * rep))
         if name == 'bapsd':
             base, j, eb = a[0], a[1], a[2]
             ex = self.exp_of(base)
@@ -213,7 +233,7 @@ class Machine(D.Machine):
                 def __getitem__(_, k):
                     return ex(k)
             self.op_store(F_PSD, M.ba_band_psd(V(), j, eb))
-            return CYC['bapsd'] + (eb - j)
+            return self.charge(op, 2 * max(eb - j, 1))
         if name == 'bapfill':
             base, j, eb, mask = a[0], a[1], a[2], a[3]
             ex = self.exp_of(base)
@@ -224,19 +244,19 @@ class Machine(D.Machine):
             for k, b in M.ba_bap_fill(mask, V(), j, eb).items():
                 w = self.rec[(base + k) & 0x7FF]
                 self.op_store(base + k, ((b & 63) << 8) | (w & 31))
-            return CYC['bapfill'] + (eb - j)
+            return self.charge(op, eb - j + 2 if eb > j else 1)
         if name == 'bapzero':
             base, j, eb = a[0], a[1], a[2]
             for k in range(j, eb):
                 self.op_store(base + k, self.rec[(base + k) & 0x7FF] & 31)
-            return CYC['bapzero'] + (eb - j)
+            return self.charge(op, max(eb - j, 0) + 1)
         if name == 'qrst':
             self.mq = M.Mantissas(_Bits(self))
-            return CYC['qrst']
+            return self.charge(op, 0)
         if name == 'aq':                 # one channel's bins [from, to)
             slot, base, lo, hi, dith = a[0], a[1], a[2], a[3], a[4]
             bap, ex = self.bap_of(base), self.exp_of(base)
-            t = CYC['aq']
+            t = 1 if lo < hi else 0              # S_AQ_R
             rq = _RecMq(self.mq)
             for k in range(lo, hi):
                 b0, bp, e = self.bitpos, bap(k), ex(k)
@@ -247,7 +267,7 @@ class Machine(D.Machine):
                           ((bp == 0) << 22) | ((bp == 0 and dith) << 23))
                 t += self.coded(bp, b0)
             self.mant_cycles += t
-            return t
+            return self.charge(op, t, CYC['vec_tail'])
         if name == 'aqc':                # one coupling band, bins [from, to)
             band, lo, hi = a[0], a[1], a[2]
             nf, chincpl = self.rec[0x001], self.rec[0x007]
@@ -255,7 +275,14 @@ class Machine(D.Machine):
             dith = [self.rec[0x048 + ch] for ch in range(nf)]
             bap, ex = self.bap_of(BINBASE[5]), self.exp_of(BINBASE[5])
             ncpl = bin(chincpl & ((1 << nf) - 1)).count('1')
-            t = CYC['aqc'] + nf                 # the band's coordinates, one read each
+            # the header: 4 reads, nf dither flags, the channel set, nf + 1 channel
+            # steps, and per coupled channel its coordinate (read, shift by its
+            # exponent, send); then S_AQ_R
+            t = 4 + nf + 1 + (nf + 1) + 1
+            v = 0
+            for ch in range(nf):
+                if (chincpl >> ch) & 1:
+                    t += (self.rec[0x0A0 + ch * 18 + band] & 31) + 3
             # to the vector engine: the band's channel set, then each coupled channel's
             # coordinate (Q5.18, the phase applied), then the bins
             self.emit(0x7F0, sum(d << c for c, d in enumerate(dith)) | (chincpl << 5) | (nf << 10))
@@ -268,24 +295,27 @@ class Machine(D.Machine):
                 rq.last = 0
                 M.cpl_bins(self, rq, nf, chincpl, k, k + 1, co, bap, ex, dith, self.coef)
                 self.emit((5 << 8) | k, (rq.last & 0x1FFFF) | (e << 17) | ((bp == 0) << 22))
-                t += self.coded(bp, b0) + ncpl  # + a scatter write a coupled channel
+                c = self.coded(bp, b0)
+                t += c
+                v += max(0, ncpl - c)           # the recombine's writes, where they outrun it
             self.mant_cycles += t
-            return t
+            return self.charge(op, t, v + CYC['vec_tail'])
         if name == 'czero':
             slot, lo, hi = a[0], a[1], a[2]
             for k in range(lo, min(hi, 256)):
                 self.coef[slot][k] = 0
-            return CYC['czero'] + max(0, min(hi, 256) - lo)
+            n = max(0, min(hi, 256) - lo)
+            return self.charge(op, 0, CYC['czero'] + n)
         if name == 'remat':
             flags, end = a[0], a[1]
             before = [list(self.coef[0]), list(self.coef[1])]
             M.rematrix_coeffs(self, self.coef, end, flags)
             n = sum(1 for k in range(256) if self.coef[0][k] != before[0][k] or
                     self.coef[1][k] != before[1][k])
-            return CYC['remat'] + 4 * max(n, 0)     # 2 reads + 2 writes a bin
+            return self.charge(op, 0, CYC['remat'] + 4 * max(n, 0))   # 2 reads + 2 writes a bin
         if name == 'imdct':
             self.snapshot()
-            return CYC['imdct']
+            return self.charge(op, 0, CYC['imdct'])
         if name == 'cnt':
             return D.CYC['cnt']
         raise D.EngineError(f'unknown op {name}')

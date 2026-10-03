@@ -10,9 +10,11 @@ Claims (docs/ac3_engine.md):
       DIRECTLY (bench/ac3/golden_main.cpp dumps, regenerated from the current RTL):
       not only through the model, so a convention error the model's snapshot and
       the emulator's shared could not hide;
-  [2] every frame fits BUDGET of real time, counting the op charges with their
-      headroom factor and imdct_512 in series (13.5K cycles a block, measured on
-      the RTL by bench/ac3/golden_main.cpp, for 3+ channels; 4.6K for stereo);
+  [2] every frame fits BUDGET of real time: the sequencer and its units at the
+      RTL's own cycle counts (bench/dvd/run_ac3_seq.sh [cycles] checks the units'
+      charges), the vector side's MODELLED charges with their headroom factor, and
+      imdct_512 in series (13.5K cycles a block, measured on the RTL by
+      bench/ac3/golden_main.cpp, for 3+ channels; 4.6K for stereo);
   [3] the generated images match the program (ac3_isa.py --asm --check).
 RED arms: microcode mutations (`;MUT name:` lines in ac3.uasm), each tied to the
 stream feature it needs; one that bites on no stream with the feature is a FAIL,
@@ -37,12 +39,13 @@ ARMS = {'p3seed': 'blocks', 'cplseed': 'cpl', 'phsflg': 'phsflg', 'dynreset': 'd
 
 
 def frame_cost(m, nch):
-    """The worst frame: the op charges with headroom, plus the IMDCT in series."""
+    """The worst frame: the sequencer and its units as the RTL counts them, the
+    modelled vector-side charges with headroom, plus the IMDCT in series."""
     if not m.frame_cycles:
         return 0
     seq_and_ops = max(m.frame_cycles)
-    ops = sum(v for k, v in m.by_cat.items()) / max(len(m.frame_cycles), 1)
-    head = (A.CYC_HEADROOM - 1) * ops
+    vec = m.vec_model / max(len(m.frame_cycles), 1)
+    head = (A.CYC_HEADROOM - 1) * vec
     imdct = 6 * IMDCT_BLOCK.get(nch, 13479)
     return seq_and_ops + head + imdct
 

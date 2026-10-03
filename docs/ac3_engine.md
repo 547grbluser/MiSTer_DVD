@@ -1,9 +1,12 @@
 # The AC-3 parse on the shared audio engine (scenario E)
 
-**Status (2026-10-02): ✅ A0 and ✅ A1 done.** The model is bit-exact against the RTL
-on 30 streams. The whole AC-3 parse runs as an engine program (`dvd/dts/ac3.uasm`,
-emulated by `tools/ac3_isa.py`) and is bit-exact against the model on every block of
-those 30 streams. The worst frame needs **36 % of real time** with the IMDCT in series.
+**Status (2026-10-02): ✅ A0, ✅ A1, ✅ A2a, ✅ A2b done; next A2c.** The model is
+bit-exact against the RTL on 30 streams. The whole AC-3 parse runs as an engine
+program (`dvd/dts/ac3.uasm`, emulated by `tools/ac3_isa.py`) and is bit-exact against
+the model on every block of those 30 streams. The sequencer's AC-3 units are built
+(A2b) and trace-identical to the emulator on all of them, with the emulator charging
+their exact RTL cycle counts. The worst frame needs **37 % of real time** with the
+IMDCT in series. **Next: A2c**, the vector side of AC-3's ops in `dts_vec.sv`.
 ✅ **Decided (maintainer, 2026-10-02): next is the AC-3 engine's RTL and a standalone
 fit (A2), before MP2.** ALMs are the binding resource, and the AC-3 engine's ALM cost
 is scenario E's least certain number; the same fit prices the hardwired
@@ -407,11 +410,82 @@ channel loop.
   | the band's channel set (`AQC`) | `0x7F0` | dither mask [4:0], `chincpl` [9:5], nf [12:10] |
   | a coordinate (`AQC`) | `0x700 + ch` | Q5.18, the phase applied |
 
-  The vector engine does the scale (a shift), the dither and the recombine. The
+  The vector engine does the scale (a shift), the dither and the recombine, and
+  aborts the op on a refusal's `err_valid` (A2b). The
   emulator traces these items as kind 2 and every op's record write as kind 3, in the
   units' issue order: that is what the sequencer bench will score. The
   bit-allocation units read `baptab` and `latab` through the constant ROM's port
   (`latab` joined it: 784 words, still one 1K-deep ROM).
+
+## A2b: the sequencer's AC-3 units (2026-10-02)
+
+`dvd/dts/dts_seq.sv` gained AC-3's sequencer-side units. They use the existing bit
+reader, XQ's restoring divider and the record and constant ROM ports. `tools/ac3_isa.py`'s
+`Machine.run_op` is each unit's definition:
+
+- **EXPD** splits each 7-bit group code with two in-place divisions by 5 on XQ's
+  divider (`code/25` is the final quotient). It writes each digit's exponent `rep`
+  times. An exponent outside 0..24 refuses (E_EXP) *before* it is written.
+- **BAPSD** does liba52's log-add, 2 cycles a bin. It reads `latab` through the
+  constant ROM's port, with the index clamped at 255. **BAPFILL** reads `baptab` the
+  same way, at `clamp(156 + mask + 4 exp, 0, 304)`, pipelined at 1 a bin. **BAPZERO**
+  takes 1 a bin. Both pipelined units drain before the next instruction, which reads
+  those words. **QRST** finishes at the vop's dispatch.
+  - The clamps copy `bit_allocation.sv`'s `la_addr` / `bl_addr`. `tools/ac3_model.py`
+    now copies them too, because Python's indexing would have raised, or worse wrapped
+    a negative index. No gate stream reaches either clamp, so that is a GAP, not a
+    pass.
+- **The mantissa unit (AQ, AQC).** For each bin it reads the bin's record word, then
+  its code bits. A grouped code is split by the divider (3-level ÷3 twice, 5-level ÷5
+  twice, 11-level ÷11 once). The high digit is used first and the rest are cached. A
+  quotient ≥ levels is an invalid code and refuses (E_GROUP).
+  - The caches persist across every AQ and AQC of a block's mantissa stage. **Only
+    QRST clears them**, and mutation X9 (cleared at each AQ) proves the bench sees it.
+  - Levels come from a new 43-word **MLEV** table in the constant ROM (827 words now).
+    The unit sends one item a bin over XQ's port, now with an 11-bit `xq_addr`.
+  - AQC first reads nf, `chincpl`, the band's phase flag and nf dither flags. It sends
+    the channel set, then each coupled channel's coordinate: a serial shift by its
+    exponent, with ch1's phase applied.
+- **The record RAM has one write port:** the program's stores and the units' writes.
+  The units' writes are traced as kind 3.
+- **⚠ The abort contract (for A2c):** a unit's refusal pulses `err_valid` mid-op, and
+  **the vector engine must abort an in-flight AQ / AQC on it**. The sequencer drains
+  the frame and restarts at FRAME. It also drops a pending item (`xq_valid`).
+- **Gate `bench/dvd/run_ac3_seq.sh`** (shares `dts_seq_tb.sv` with DTS, `+codec=1`;
+  goldens from `tools/ac3_golden.py`): **34 arms GREEN**, every event identical:
+  - every gate stream at 4 frames, and each refusal window at 5, so the restart after
+    the refused frame is scored;
+  - noise 5.1 with input stalls and item back-pressure;
+  - the invalid grouped-code window (E_GROUP mid-AQ) under stalls;
+  - E_EXP through `--badexp`, which rewrites a frame's first exponent codes to 124
+    (no disc window has one);
+  - truncation (1,309 overrun bits).
+  - **[cycles]:** on every stall-free, refusal-free arm, each op's cycles in its own
+    states equal the emulator's charge.
+  - `--red`: **20 mutations, each caught by its own arm**. X20 is timing-only (one
+    extra divider step), so only [cycles] catches it.
+- **⚠ GAP: BAPZERO's value.** The gate's one zero-SNR window (*Dark Passengers*, 114 of
+  120 blocks) codes every such block with exponent 0 and fresh exponents. All its
+  BAPZERO writes are 0, so "the exponent lost" and "the old bap kept" both survive,
+  even over 20 frames. A zero-SNR block with real exponents would show them. X8
+  scores BAPZERO's range instead.
+- **The cycle model is now the RTL's.** `ac3_isa.bin_cycles` and the per-op charges
+  count the units' states one for one. The vector side (A2c) is the only modelled
+  part, and `test_ac3_isa.py` [2] puts the ×1.25 headroom on it alone. The worst frame
+  is **37.4 %** of real time (noise 5.1), against 36.3 % on the derived charges: EXPD
+  and the mantissa unit cost more than the sketch (two divisions a group, about
+  2 + bits + 1 a bin).
+- DTS's gates stay green: `run_dts_seq.sh` (37 arms) and `run_dts.sh` (41).
+- **Next (A2c):** AC-3's ops in `dts_vec.sv`:
+  - the bin items: the scale shift, the dither LFSR × 23170 and the recombine, all on
+    the DSP;
+  - CZERO, REMAT, and the IMDCT handshake;
+  - X-buffer writes;
+  - the abort above;
+  - an X-buffer read port and the side-info outputs on `dts_top` for `imdct_512`.
+
+  Its gate is a whole-engine bench against `.gold` coefficient dumps. Then **A2d**,
+  fit leg (b) against 2,233 ALM / 39 M10K.
 
 ## Gate set
 

@@ -13,6 +13,9 @@ Writes what bench/dvd/dts_seq_tb.sv scores (tools/dts_golden.py's formats):
     STEM.frames   each frame's length in bytes, one a line (the engine's descriptor)
     STEM.trace    "kind pc addr value" hex, one event a line (Machine.trace: register
                   writes, stores, the mantissa unit's items, the units' record writes)
+    STEM.cyc      "op cycles", one AC-3 op a line: the cycles the RTL spends in that
+                  op's own states over the run, as the emulator charges them
+                  (ac3_isa.bin_cycles etc.; the bench's +cyc arm, stall-free arms only)
     STEM.meta     "bytes frames events 0 0 refusals overrun-bits 0 0"
 
     tools/ac3_golden.py STREAM.ac3 --out STEM [--skip N] [--frames N] [--truncate K:N]
@@ -46,9 +49,9 @@ def expd_code_bitpos(words, labels, before, fr, n=5):
     pos = []
     run_op = m.run_op
 
-    def hooked(name, a):
+    def hooked(name, a, op=None):
         if name != 'expd':
-            return run_op(name, a)
+            return run_op(name, a, op)
         bits = m.bits
 
         def b(k):
@@ -57,7 +60,7 @@ def expd_code_bitpos(words, labels, before, fr, n=5):
             return bits(k)
         m.bits = b
         try:
-            return run_op(name, a)
+            return run_op(name, a, op)
         finally:
             m.bits = bits
     m.run_op = hooked
@@ -137,6 +140,8 @@ def main(argv=None):
         f.write(''.join(f'{len(fr):x}\n' for fr in sel))
     with open(stem + '.trace', 'w') as f:
         f.write(''.join(f'{k:x} {pc:03x} {ad:x} {v:06x}\n' for k, pc, ad, v in m.trace))
+    with open(stem + '.cyc', 'w') as f:
+        f.write(''.join(f'{op} {m.ucyc.get(op, 0)}\n' for op in sorted(A.VOPS.values()) if op >= 16))
     nerr = sum(m.errors.values())
     with open(stem + '.meta', 'w') as f:
         f.write(f'{len(data)} {len(sel)} {len(m.trace)} 0 0 {nerr} {m.overrun} 0 0\n')

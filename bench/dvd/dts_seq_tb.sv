@@ -232,7 +232,7 @@ module dts_seq_tb;
                 end
                 $display("dts_seq_tb: %0d bytes, %0d events, %0d frames, %0d refusals, %0d overrun bits, %0d lenient, %0d dmix, %0d cycles (%0d a frame)",
                          n_bytes, ei, frames, errs, ovr, nlen, ncnt, busy, busy / n_frames);
-                $write("dts_seq_tb: unit cycles by op:");
+                $write("dts_seq_tb units by op:");
                 for (int i = 0; i < 64; i++) if (ucyc[i] != 0) $write(" %0d:%0d", i, ucyc[i]);
                 $write("\n");
                 $display("PASS: dts_seq_tb");
