@@ -1,10 +1,10 @@
 # The AC-3 parse on the shared audio engine (scenario E)
 
-**Status (2026-10-02): ✅ A0 done. The golden tap and the model are built; the model
-(`tools/ac3_model.py`) is bit-exact against the RTL on 30 streams (13 stock, 17 disc
-windows), and on every library window it reaches. The emulator (A1) and any RTL are
-not built.** Branch `feature/ac3-engine` (from `feature/dts-decode`, `CORE_VERSION
-dev-ac3engine`, not pushed).
+**Status (2026-10-02): ✅ A0 done; ✅ A1a done.** The model is bit-exact against the
+RTL on 30 streams. The engine program (side information, exponents, bit allocation;
+mantissas by a stand-in op) is bit-exact against the model on all 30. ⏳ **Next: A1b,
+the mantissa, coupling and rematrix ops.** Branch `feature/ac3-engine` (from
+`feature/dts-decode`, `CORE_VERSION dev-ac3engine`, not pushed).
 
 **Why.** `docs/dts_decoder.md` §4 scenario E estimates that moving MP2 and the AC-3
 parse onto the microcoded engine built for DTS (P1, `dvd/dts/`) saves **−1,000 …
@@ -197,6 +197,65 @@ allocations differ, so the mantissa bit counts differ and the block desynchronis
 - `tools/ac3_scan.py` decodes every library window both ways and counts the blocks
   that differ. That measures how often a real disc hits this.
 - Fixing it changes today's decoder, so it is the maintainer's call, not this branch's.
+
+## A1a result: side information, exponents and bit allocation on the engine (2026-10-02)
+
+`dvd/dts/ac3.uasm` (the program) and `tools/ac3_isa.py` (the emulator: `tools/dts_isa.py`'s
+sequencer with AC-3's constant ROM, its record map and its ops). Each op calls the
+model's own function:
+
+| Op | Does | Charge (derived from the intended structure; no RTL yet) |
+|---|---|---|
+| `EXPD` | 7-bit exponent groups to the bins' exponents | max(7, 3·rep) + 1 a group, + 4 |
+| `BAPSD` | a band's integrated PSD (`ba_band_psd`) | 1 a bin + 4 |
+| `BAPFILL` | the band's baps (`ba_bap_fill`) | 1 a bin + 4 |
+| `BAPZERO` | baps 0 (zero SNR offsets) | 1 a bin + 3 |
+| `MANTMODEL` | **A1a's stand-in**: the mantissas, coupling and rematrix, decoded by the model's code from the program's own exponents and baps | estimated: 1 a code bit + 2 a coefficient |
+
+The rest of the parse is microcode: the frame header, the BSI, the side
+information, the coupling coordinates, all five phases of liba52's bit
+allocation, and the band masks.
+
+**Record map** (2K × 16, as DTS's):
+- 0x000–0x0FF holds the side information;
+- `{bap[13:8], exp[4:0]}` sit one word a bin from 0x100: slots 0–4 at 0x100 + 256·ch,
+  the coupling channel at 0x5DB (bins 37–252), LFE at 0x6D8;
+- the 5 × 50 delta-BA bands sit at 0x6E0.
+
+So the ops take the base address of a slot's bin 0, and every slot is addressed the
+same way. A coupling coordinate is stored packed (`{m, e == 15, e + mstr}`), because
+its Q5.18 value needs 22 bits and the registers have 16; the coupling op will expand
+it.
+
+**Result:**
+- ✅ **Bit-exact against the model on every block of all 30 streams**: exponents,
+  baps, coefficients, `blksw`, `dynrng`.
+- Each refusal window stops at the same frame with the matching code (acmod 0,
+  coupling delta-BA, reserved `deltbae`, delta-BA overflow, an invalid group code).
+- One bug found on the way: the allocation loop's channel counter lived in a register
+  that `BA_CHAN` clobbers, so channel 1 got no bit allocation.
+
+**Cycles a frame (the emulator; the stand-in's share is an estimate):**
+
+| Stream | Total | Mantissa stand-in | % of 864K |
+|---|---|---|---|
+| `noise_5p1_48k_640k` (the heaviest) | 211K | 30K | 24 % |
+| *Matrix Reloaded* 5.1 448k | 192K | 24K | 22 % |
+
+- The sequencer's own instructions are about 75 % of it: the side information and the
+  bit allocation's per-bin (phases 1–4) and per-band logic.
+- With `imdct_512` in series (81K a 5.1 frame), the frame is about 34 %, under the 60 %
+  bar. The op charges carry a ×1.25 headroom factor (`CYC_HEADROOM`), about +13K.
+
+⚠ **The binding constraint is the microcode's size, not its speed.** The AC-3 program
+is **709 words**, and together with DTS's 500 that is **1,209 words in one ROM**:
+- over 1,024, so the ROM is 2K deep, **8 M10K**. DTS alone was 2.
+- Options, not yet measured: hardwire phases 1–4 of bit allocation as one op (about
+  120 words out, some ALMs in); a 256-entry ÷3 table for the exponent group count (out
+  of a microcode loop); a shared subroutine for the five "read a field into a
+  per-channel array" loops.
+- MP2 on the engine adds a third program. The ROM depth is a scenario-E cost to
+  measure, not assume.
 
 ## Gate set
 

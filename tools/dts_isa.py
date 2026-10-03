@@ -217,15 +217,20 @@ def _is_reg(tok, aliases):
     return re.fullmatch(r'r\d+', tok) is not None
 
 
-def assemble(text, mutate=None):
+def assemble(text, mutate=None, vops=None, cbase=None, extra_equ=None):
     """-> (words, labels, line numbers). `mutate`: a name; a line carrying
     `;MUT <name>: <instruction>` assembles that instruction instead (the RED arms
     of tools/test_dts_isa.py live beside the code they break)."""
-    equ = {'C_' + k: v for k, v in CBASE.items()}
+    # vops / cbase / extra_equ: another program on the same machine (tools/ac3_isa.py)
+    # names its own vector ops (numbered after DTS's: one engine, one op space), its
+    # constant ROM, and its own equates
+    vop_map = VOP if vops is None else vops
+    equ = {'C_' + k: v for k, v in (CBASE if cbase is None else cbase).items()}
     equ.update({'B_' + n.upper(): i for n, i in BOOK_ID.items()})
-    equ.update({'V_' + n.upper(): i for n, i in VOP.items()})
+    equ.update({'V_' + n.upper(): i for n, i in vop_map.items()})
     equ['CNT_DMIX_IGNORED'] = CNT_DMIX_IGNORED
     equ['ERRV'] = ERR_BASE
+    equ.update(extra_equ or {})
     aliases, labels, stmts = {}, {}, []
     mutated = False
     for ln, raw in enumerate(text.splitlines(), 1):
@@ -331,7 +336,7 @@ def assemble(text, mutate=None):
             elif mn == 'err':
                 words.append(encode('err', 0, 0, 0, ev(args[0], ln)))
             elif mn == 'vop':
-                words.append(encode('vop', 0, 0, 0, 0, VOP[args[0].lower()]))   # op in aux
+                words.append(encode('vop', 0, 0, 0, 0, vop_map[args[0].lower()]))   # op in aux
             elif mn in ('frame', 'bpos'):
                 words.append(encode(mn, reg(0)))
             else:
@@ -444,8 +449,9 @@ class Machine:
         a &= 0xFFFF
         if a < REC_WORDS:
             return s16(self.rec[a])
-        if MEM_CONST <= a < MEM_CONST + len(CONST):
-            return s16(CONST[a - MEM_CONST])
+        const = getattr(self, 'const', CONST)
+        if MEM_CONST <= a < MEM_CONST + len(const):
+            return s16(const[a - MEM_CONST])
         raise EngineError(f'load from 0x{a:04x} at pc {self.pc}')
 
     def store(self, a, v):
@@ -670,6 +676,14 @@ class Machine:
                 npc = self.labels['FRAME']
             elif op == 'vop':
                 self.vop(aux)
+                code = getattr(self, 'op_err', None)
+                if code is not None:                   # an op refused the frame
+                    self.op_err = None
+                    self.cycles += self.drain_cycles()
+                    self.errors[code] = self.errors.get(code, 0) + 1
+                    self.cur = None
+                    self.stack = []
+                    npc = self.labels['FRAME']
             elif op == 'frame':
                 if self.cur is not None:
                     self.frame_cycles.append(self.cycles - self.frame_start)

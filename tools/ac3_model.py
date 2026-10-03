@@ -161,6 +161,31 @@ def compute_mask(psd, mask, i, dbknee, snroffset, deltba_i, floor):
     return mask - floor
 
 
+def ba_band_psd(exp, j, endband):
+    """The band's integrated PSD: liba52's log-add over bins [j, endband) (the
+    engine's band-integration op)."""
+    psd = 128 * exp[j]
+    j += 1
+    while j < endband:
+        nxt = 128 * exp[j]
+        j += 1
+        delta = nxt - psd
+        sw = delta >> 9
+        if -6 <= sw <= -2:
+            psd = nxt
+        elif sw == -1:
+            psd = nxt + LATAB[(-delta) >> 1]
+        elif sw == 0:
+            psd += LATAB[delta >> 1]
+    return psd
+
+
+def ba_bap_fill(mask, exp, j, endband):
+    """bap[k] = baptab[156 + mask + 4 exp[k]] for k in [j, endband) (the engine's
+    bap-lookup op)."""
+    return {k: BAPTAB[156 + mask + 4 * exp[k]] for k in range(j, endband)}
+
+
 def bit_allocate(g, bai_ch, deltba, bndstart, start, end, fastleak, slowleak, exp):
     """liba52 a52_bit_allocate(), fscod 0 (halfrate 0): -> {bin: bap} for bins in
     [start, end). `g` holds the frame-shared parameters (bai, csnroffst);
@@ -235,30 +260,14 @@ def bit_allocate(g, bai_ch, deltba, bndstart, start, end, fastleak, slowleak, ex
     while True:
         startband = j
         endband = BNDTAB[i - 20] if BNDTAB[i - 20] < end else end
-        psd = 128 * exp[j]
-        j += 1
-        while j < endband:
-            nxt = 128 * exp[j]
-            j += 1
-            delta = nxt - psd
-            sw = delta >> 9
-            if -6 <= sw <= -2:
-                psd = nxt
-            elif sw == -1:
-                psd = nxt + LATAB[(-delta) >> 1]
-            elif sw == 0:
-                psd += LATAB[delta >> 1]
+        psd = ba_band_psd(exp, j, endband)
         fastleak = min(fastleak + fdecay, psd + fgain)
         slowleak = min(slowleak + sdecay, psd + sgain)
         mask = fastleak if fastleak < slowleak else slowleak
         mask = compute_mask(psd, mask, i, dbknee, snroffset, deltba[i], floor)
         i += 1
-        j = startband
-        while True:
-            bap[j] = lut(mask, exp[j])
-            j += 1
-            if j >= endband:
-                break
+        bap.update(ba_bap_fill(mask, exp, startband, endband))
+        j = endband
         if j >= end:
             break
     return bap
@@ -344,6 +353,7 @@ class Decoder:
         self.liba52_deltba = ('liba52_deltba' in OPT) if liba52_deltba is None else liba52_deltba
         self.stats = dict.fromkeys(STATS, 0)
         self.fields = None           # a list: (name, bit position, width) of fields read
+        self.snapshot = False        # blocks also return their exps and baps
         self.new_in_frame = False
         self.lfsr = 1
         self.exp = {ch: [0] * 256 for ch in range(7)}
@@ -549,7 +559,26 @@ class Decoder:
         st['remat'] += bool(acmod == 2 and self.rematflg)
         # ---- bit allocation (the RTL computes every channel, every block)
         bap = self.allocate(nf, lfeon)
-        # ---- mantissas
+        coeff, lfe = self.mantissas(br, nf, lfeon, acmod, dith, bap)
+        out = dict(blksw=sum(b << i for i, b in enumerate(blksw)), dynrng=self.dynrng,
+                   coeff=coeff, lfe=lfe)
+        if self.snapshot:            # the block's exponents and baps (the A1a score)
+            c = self.cpl
+            out['exp'] = {ch: list(self.exp[ch][:self.endmant[ch]]) for ch in range(nf)}
+            out['bap'] = {ch: [bap[ch].get(k, 0) for k in range(self.endmant[ch])]
+                          for ch in range(nf)}
+            if self.chincpl:
+                rng = range(c['strtmant'], c['endmant'])
+                out['exp'][CH_CPL] = [self.exp[CH_CPL][k] for k in rng]
+                out['bap'][CH_CPL] = [bap[CH_CPL].get(k, 0) for k in rng]
+            if lfeon:
+                out['exp'][CH_LFE] = list(self.exp[CH_LFE][:7])
+                out['bap'][CH_LFE] = [bap[CH_LFE].get(k, 0) for k in range(7)]
+        return out
+
+    def mantissas(self, br, nf, lfeon, acmod, dith, bap):
+        """The block's mantissas -> (coeff[ch][256], lfe[7] or None), from the
+        exponents, baps and coupling state in self; advances the dither LFSR."""
         mq = Mantissas(br)
         coeff = [[0] * 256 for _ in range(nf)]
         done_cpl = False
@@ -566,8 +595,7 @@ class Decoder:
             lfe = [self.one(mq, bap[CH_LFE].get(k, 0), self.exp[CH_LFE][k], 0) for k in range(7)]
         if acmod == 2 and self.rematflg:
             self.rematrix(coeff)
-        return dict(blksw=sum(b << i for i, b in enumerate(blksw)), dynrng=self.dynrng,
-                    coeff=coeff, lfe=lfe)
+        return coeff, lfe
 
     def parse_deltba(self, br):
         d = [0] * 50
