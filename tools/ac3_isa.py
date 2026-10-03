@@ -78,6 +78,7 @@ def build_const():
     put('DBPBTAB', M.DBPBTAB)
     put('FLOORTAB', M.FLOORTAB)
     put('BAPTAB', M.BAPTAB)
+    put('LATAB', M.LATAB)                 # (read by the BAPSD unit through this ROM's port)
     put('BINBASE', BINBASE)
     return words, base
 
@@ -102,6 +103,18 @@ class _Bits:
 
     def bits(self, n):
         return self.m.bits(n)
+
+
+class _RecMq:
+    """The grouped caches, recording the m16 each coefficient took (the value the
+    mantissa unit hands the vector engine)."""
+
+    def __init__(self, mq):
+        self.mq, self.last = mq, 0
+
+    def m16(self, bap):
+        self.last = self.mq.m16(bap)
+        return self.last
 
 
 class Machine(D.Machine):
@@ -140,6 +153,17 @@ class Machine(D.Machine):
         v = ((full << 3) >> idx) & 0xFFFFFF
         return -v if ch == 1 and self.rec[0x088 + band] & 1 else v
 
+    def op_store(self, a, v):
+        """A record write by an op: traced as kind 3, in the order the unit issues it."""
+        self.rec[a & 0x7FF] = v & 0xFFFF
+        if self.trace is not None:
+            self.trace.append((3, self.pc, a & 0x7FF, v & 0xFFFF))
+
+    def emit(self, addr, value):
+        """An item the mantissa unit hands the vector engine: traced as kind 2."""
+        if self.trace is not None:
+            self.trace.append((2, self.pc, addr & 0x7FF, value & 0xFFFFFF))
+
     def coded(self, bap, b0):
         """Cycles for one coefficient: dispatch, its code bits, a fresh code's division."""
         nbits = self.bitpos - b0
@@ -175,7 +199,7 @@ class Machine(D.Machine):
                         self.op_err = E_EXP
                         return None
                     for _ in range(rep):
-                        self.rec[(base + idx) & 0x7FF] = e
+                        self.op_store(base + idx, e)
                         idx += 1
             return CYC['expd'] + ngrps * (max(7, 3 * rep) + 1)
         if name == 'bapsd':
@@ -185,7 +209,7 @@ class Machine(D.Machine):
             class V:
                 def __getitem__(_, k):
                     return ex(k)
-            self.rec[F_PSD] = M.ba_band_psd(V(), j, eb) & 0xFFFF
+            self.op_store(F_PSD, M.ba_band_psd(V(), j, eb))
             return CYC['bapsd'] + (eb - j)
         if name == 'bapfill':
             base, j, eb, mask = a[0], a[1], a[2], a[3]
@@ -196,12 +220,12 @@ class Machine(D.Machine):
                     return ex(k)
             for k, b in M.ba_bap_fill(mask, V(), j, eb).items():
                 w = self.rec[(base + k) & 0x7FF]
-                self.rec[(base + k) & 0x7FF] = ((b & 63) << 8) | (w & 31)
+                self.op_store(base + k, ((b & 63) << 8) | (w & 31))
             return CYC['bapfill'] + (eb - j)
         if name == 'bapzero':
             base, j, eb = a[0], a[1], a[2]
             for k in range(j, eb):
-                self.rec[(base + k) & 0x7FF] &= 31
+                self.op_store(base + k, self.rec[(base + k) & 0x7FF] & 31)
             return CYC['bapzero'] + (eb - j)
         if name == 'qrst':
             self.mq = M.Mantissas(_Bits(self))
@@ -210,9 +234,14 @@ class Machine(D.Machine):
             slot, base, lo, hi, dith = a[0], a[1], a[2], a[3], a[4]
             bap, ex = self.bap_of(base), self.exp_of(base)
             t = CYC['aq']
+            rq = _RecMq(self.mq)
             for k in range(lo, hi):
-                b0, bp = self.bitpos, bap(k)
-                self.coef[slot][k] = M.one_coeff(self, self.mq, bp, ex(k), dith)
+                b0, bp, e = self.bitpos, bap(k), ex(k)
+                rq.last = 0
+                self.coef[slot][k] = M.one_coeff(self, rq, bp, e, dith)
+                # to the vector engine: {dither [23], bap 0 [22], exp [21:17], m16 [16:0]}
+                self.emit((slot << 8) | k, (rq.last & 0x1FFFF) | (e << 17) |
+                          ((bp == 0) << 22) | ((bp == 0 and dith) << 23))
                 t += self.coded(bp, b0)
             self.mant_cycles += t
             return t
@@ -224,9 +253,18 @@ class Machine(D.Machine):
             bap, ex = self.bap_of(BINBASE[5]), self.exp_of(BINBASE[5])
             ncpl = bin(chincpl & ((1 << nf) - 1)).count('1')
             t = CYC['aqc'] + nf                 # the band's coordinates, one read each
+            # to the vector engine: the band's channel set, then each coupled channel's
+            # coordinate (Q5.18, the phase applied), then the bins
+            self.emit(0x7F0, sum(d << c for c, d in enumerate(dith)) | (chincpl << 5) | (nf << 10))
+            for ch in range(nf):
+                if (chincpl >> ch) & 1:
+                    self.emit(0x700 + ch, co[ch])
+            rq = _RecMq(self.mq)
             for k in range(lo, hi):
-                b0, bp = self.bitpos, bap(k)
-                M.cpl_bins(self, self.mq, nf, chincpl, k, k + 1, co, bap, ex, dith, self.coef)
+                b0, bp, e = self.bitpos, bap(k), ex(k)
+                rq.last = 0
+                M.cpl_bins(self, rq, nf, chincpl, k, k + 1, co, bap, ex, dith, self.coef)
+                self.emit((5 << 8) | k, (rq.last & 0x1FFFF) | (e << 17) | ((bp == 0) << 22))
                 t += self.coded(bp, b0) + ncpl  # + a scatter write a coupled channel
             self.mant_cycles += t
             return t

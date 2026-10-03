@@ -3,7 +3,7 @@
 // one ROM), and XQ's code-reader tables (packed: element i at [w*i +: w];
 // index abits - 1).
 localparam int UC_WORDS    = 1279;
-localparam int CONST_WORDS = 528;
+localparam int CONST_WORDS = 784;
 localparam int HUFF_NODES  = 2647;
 localparam int HUFF_BOOKS  = 62;
 localparam [10:0] UC_DTS_RESET = 11'd0;

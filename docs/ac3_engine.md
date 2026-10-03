@@ -387,8 +387,31 @@ channel loop.
 - **Gates:** the DTS benches pass unchanged after the widening (`run_dts_seq.sh --red`
   37 arms and 19 mutations; `run_dts.sh --red` 41 and 18), and so do `test_dts_isa.py`
   and `test_ac3_isa.py`.
-- **Next:** fit leg (a), the DTS engine with the 2K ROM, then A2b (the sequencer-side
-  AC-3 units).
+- **Fit leg (a): the DTS engine with the shared ROM, no AC-3 unit yet** (`tools/fit_unit.sh`,
+  same settings as P1b). It isolates the ROM's own cost from the AC-3 units' cost:
+
+  | | ALM | M10K | Fmax −40 °C / 100 °C |
+  |---|---|---|---|
+  | P1b: DTS engine, 512-word ROM | 2,227 | 31 | 35.8 / 37.7 MHz |
+  | **A2a: DTS engine + the shared 2K ROM** | **2,233** | **39** | 35.5 / 36.8 MHz |
+
+  The microcode ROM goes from 2 M10K to 8 (1,279 × 40). The constant ROM, now 528
+  words, moves out of logic into 2 M10K. The 11-bit pc and the codec select cost
+  about 6 ALM. **Leg (b), the AC-3 units, is measured against 2,233 / 39.**
+- **The sequencer → vector interface for AC-3 (decided):** XQ's code port gains an
+  11-bit address. The mantissa unit hands the vector engine:
+
+  | Item | Address | Value (24 bits) |
+  |---|---|---|
+  | a bin (`AQ`, `AQC`) | `{slot, bin}` | m16 [16:0], exp [21:17], bap 0 [22], dither this bin [23] (AQ) |
+  | the band's channel set (`AQC`) | `0x7F0` | dither mask [4:0], `chincpl` [9:5], nf [12:10] |
+  | a coordinate (`AQC`) | `0x700 + ch` | Q5.18, the phase applied |
+
+  The vector engine does the scale (a shift), the dither and the recombine. The
+  emulator traces these items as kind 2 and every op's record write as kind 3, in the
+  units' issue order: that is what the sequencer bench will score. The
+  bit-allocation units read `baptab` and `latab` through the constant ROM's port
+  (`latab` joined it: 784 words, still one 1K-deep ROM).
 
 ## Gate set
 
