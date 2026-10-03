@@ -592,15 +592,16 @@ SEED 1, both slow corners.
 - **AC-3 on the engine costs +688 ALM** over the DTS engine with the shared ROM: the
   sequencer's units +440, the vector ops +207, and the top's latches and new ports +32.
   It costs **no M10K and no DSP**: the 2K ROM's 8 M10K were counted in leg (a).
-- **Against today's AC-3 parse**, measured per entity in the v0.8.0-era core
-  (`dts_decoder.md` §4 scenario E's removed rows): `audblk_parse`, `mantissa_dequant`,
+- **Against today's AC-3 parse**, measured per entity in the **menu-panscan build's fit
+  (2026-10-01)**, the same fit the ~1,125 spare comes from (`dts_decoder.md` §4,
+  scenario E's removed rows): `audblk_parse`, `mantissa_dequant`,
   `bit_allocation`, `exponent_decode`, `bsi_parse` + `sync_crc` + glue = 2,421; its two
   bit readers 266; **−2,687 ALM** in all.
 - **DTS decode plus the AC-3 parse on one engine, against today's build:**
 
   | | ALM |
   |---|---|
-  | the engine, in core: 2,921 standalone − ~150 of virtual-pin packing (P1b's estimate) | ~+2,770 |
+  | the engine, in core: 2,921 standalone − ~150 of virtual-pin packing (P1b's estimate, not re-measured: the top's own 290 now includes some 36 more of pad logic for the ~50 new ports, so this may undercount by 30–40) | ~+2,770 |
   | glue into `imdct_512`'s coefficient port; the frame path (estimate) | +100 … +200 |
   | today's AC-3 parse and bit readers, removed (measured) | −2,687 |
   | **net** | **~+200 … +300** |
@@ -608,7 +609,10 @@ SEED 1, both slow corners.
   That is against **~1,125 ALM spare** at 97 %. **DTS fits once the AC-3 parse
   moves onto the engine.** The DTS engine alone (~2,070 in core) does not.
   ⚠ Standalone numbers: packing beside the decoder moves area ±5–10 %, and the
-  Fmax flatters. 35.8 MHz cold is 1.32× the clock, alone on an empty device.
+  Fmax flatters. 35.8 MHz cold is 1.32× the clock, alone on an empty device. It also
+  includes `coef_ra`'s virtual pins feeding the X buffer's read-address mux, a path
+  that in the core starts at `imdct_512`'s own address register. **The in-core fit is
+  the measurement; this is the estimate it replaces.**
   M10K: +39 for the engine, −24 for the AC-3 parse, so about +15 against 41 free.
 - **Scenario E without DTS** (MP2 and AC-3 on the engine, no DTS) is not measured by
   this fit. The fitted engine carries DTS's Huffman walker, XQ reader and DTS vector
