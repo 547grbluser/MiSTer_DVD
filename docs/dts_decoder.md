@@ -322,7 +322,12 @@ when its own fit measures it. (P1b measured the engine at ~2,070 ALM in-core, th
 its row: §10 "P1b result".)
 
 **Scenario E: the engine for MP2 and AC-3 only, no DTS (estimated 2026-10-02, at the
-maintainer's request).** Does the engine concept save area over v0.8.0 on its own merits?
+maintainer's request).** ⏩ The AC-3 half is now measured by an emulator
+(`docs/ac3_engine.md`, A1). The whole parse runs on the engine, bit-exact against the
+RTL on 30 streams, and the worst frame needs 36 % of real time with the IMDCT in
+series. Its microcode is 779 words (1,279 with DTS's program, so a 2K-deep ROM of 8
+M10K, where the table below assumed less). The ALM rows stay estimates until RTL and a
+fit. Does the engine concept save area over v0.8.0 on its own merits?
 The baseline is the per-entity fit of the menu-panscan build (2026-10-01, one feature
 after v0.8.0, with the same audio path). The removed rows are measured; the added rows
 are estimates.

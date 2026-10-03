@@ -314,6 +314,19 @@ AC-3's ops are numbered from 16, so **the vop field the RTL decodes widens from 
 
 The gate's worst frame, with ×1.25 headroom on the op charges and `imdct_512` in
 series, is **36.3 % of real time**.
+⚠ **What that figure is made of:**
+- **Sequencer cycles** (about 75 % of the frame) use DTS's RTL-calibrated instruction
+  costs. That calibration has not been checked on *this* program's instruction mix,
+  which is load-heavy loops, calls six deep, and `min` in hot loops.
+- **Op cycles** are structure-derived estimates × 1.25.
+- **`imdct_512`** is measured on the RTL.
+
+So the figure is less measured than DTS's 39.8 %, and an RTL bench would replace it.
+
+**`tools/test_ac3_isa.py` [1r] scores the engine against the RTL directly:** its
+coefficients, LFE, `blksw` and `dynrng` are compared with the `.gold` dumps, not only
+with the model. It is bit-exact on every stream, and a mutated program fails it (no
+rematrix: 153 values; the wrong zero tail: 288), so the check can fail.
 
 **Where the cycles go (profile, *Matrix Reloaded*):** bit allocation's microcode is
 about **70 % of the frame**, about 140K cycles (16 % of real time). It is the per-bin
@@ -338,7 +351,13 @@ channel loop.
   bit-allocation op (leak update + mask + bap fill) would remove about 200 words *and*
   most of the 140K cycles, but it costs ALMs, the binding resource, so only a fit can
   price it.
-- A table-driven per-channel field reader would trim `BLOCK` a little.
+- **The no-ALM cuts were measured, and they are small.** A shared per-channel field
+  reader for `BLOCK`'s five loops saves about 8 words. `floor(y/3) = (y·171) >> 9`
+  (exact for y < 256) replaces the exponent group-count loop, but it is a cycle cut,
+  not a word cut (+4 words, −330 cycles a channel-block). **So 1,024 words genuinely
+  needs the hardwired per-band op**, which makes the size question an ALM question.
+- `dvd/dts/ac3_ucode.mem` and `ac3_const.mem` are **emulator images**. No RTL reads
+  them yet, and nothing in `DVD.qsf` names them.
 - MP2 would be a third program in the same ROM.
 - Recommendation: accept the 2K ROM for now, and decide at the fit.
 

@@ -5,7 +5,11 @@ Claims (docs/ac3_engine.md):
   [1] the emulator, running dvd/dts/ac3.uasm, is bit-exact against
       tools/ac3_model.py on every block of every stream -- exponents, baps,
       coefficients, blksw, dynrng -- and refuses exactly the frames the model
-      refuses (the model is itself bit-exact against the RTL: test_ac3_model.py);
+      refuses;
+  [1r] and its coefficients, LFE, blksw and dynrng are bit-exact against the RTL
+      DIRECTLY (bench/ac3/golden_main.cpp dumps, regenerated from the current RTL):
+      not only through the model, so a convention error the model's snapshot and
+      the emulator's shared could not hide;
   [2] every frame fits BUDGET of real time, counting the op charges with their
       headroom factor and imdct_512 in series (13.5K cycles a block, measured on
       the RTL by bench/ac3/golden_main.cpp, for 3+ channels; 4.6K for stereo);
@@ -23,7 +27,7 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
 import ac3_isa as A          # noqa: E402
 import ac3_model as M        # noqa: E402
-from test_ac3_model import streams, features   # noqa: E402
+from test_ac3_model import streams, features, goldens   # noqa: E402
 
 FRAME_CYC = 27_000_000 * 1536 // 48000      # 864,000
 BUDGET = 0.60
@@ -43,6 +47,30 @@ def frame_cost(m, nch):
     return seq_and_ops + head + imdct
 
 
+def rtl_compare(m, gold_path):
+    """The emulator's blocks against the RTL's dump -> (mismatches, first, blocks)."""
+    eb = iter(m.blocks)
+    bad, first, n = 0, None, 0
+    for k, g in enumerate(M.read_golden(gold_path)):
+        for b, gb in enumerate(g['blocks']):
+            e = next(eb, None)
+            if e is None:
+                return bad, first, n          # the engine stopped (a refusal): [1] scores it
+            n += 1
+            for key in ('blksw', 'dynrng'):
+                if e[key] != gb[key]:
+                    bad += 1
+                    first = first or f'frame {k} block {b}: {key}'
+            chans = dict(enumerate(e['coeff']))
+            if e['lfe'] is not None:
+                chans[M.CH_LFE] = e['lfe']
+            for ch, vals in gb['coeff'].items():
+                if chans.get(ch) != vals:
+                    bad += 1
+                    first = first or f'frame {k} block {b} ch {ch}'
+    return bad, first, n
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument('--frames', type=int, default=24)
@@ -52,11 +80,17 @@ def main():
     print(f'[3] {"PASS" if rc == 0 else "FAIL"} the generated images match ac3.uasm')
     fails += rc != 0
     paths = streams()
+    gold = goldens(paths, a.frames)
     worst = (0.0, '')
     base_bad = {}
     for p in paths:
         m, nf, bad, first = A.emulate(p, a.frames)
         base_bad[p] = bad
+        rbad, rfirst, nrb = rtl_compare(m, gold[p])
+        okr = rbad == 0 and (nrb > 0 or 'refuse' in os.path.basename(p))
+        fails += not okr
+        if not okr:
+            print(f'[1r] FAIL {os.path.basename(p)}: {rbad} values differ from the RTL ({rfirst})')
         nch = max((M.NFCHANS[m.rec[0]] if m.rec[0] else 2), 1)
         frac = frame_cost(m, nch) / FRAME_CYC
         if frac > worst[0]:
