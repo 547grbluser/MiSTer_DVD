@@ -382,7 +382,7 @@ otherwise; `--red` runs its mutation arms).
 | SPU re-send guard per cell, `hl_mask` | ✅ | `subpicture.md` | `run_spu_newcell.sh` |
 | Highlight colours replace every class (flashlight) | ✅ | `subpicture.md` | `run_flashlight.sh` |
 | Highlight promotion model v2 | ✅ | `dvd/nav_pci.sv` header | `nav_pci_tb` |
-| Forced subtitles: FSTA_DSP units shown with subtitles off (SPRM2 stream, else first declared; libdvdnav) | 🔧 sim ⏳ HW (BHD @4:15) | `subpicture.md` "Forced subtitles" | `run_forced_subs.sh --red`, `check_forced_subs_wiring.py` |
+| Forced subtitles: FSTA_DSP units shown with subtitles off (SPRM2 stream, else first declared; libdvdnav) | ✅ HW (BHD @4:15 vs `main` control) | `subpicture.md` "Forced subtitles" | `run_forced_subs.sh --red`, `check_forced_subs_wiring.py` |
 
 ### Transport, HUD and input
 

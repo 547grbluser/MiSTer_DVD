@@ -22,7 +22,7 @@ predate later confirmations; the `CLAUDE.md` index carries the reconciled status
 
 ## Hardware status (THIS fork, verified 2026-06-21)
 
-- 🔧 **FORCED SUBTITLES (2026-10-03, branch `feature/forced-subs`; sim-proven, ⏳ HW).**
+- ✅ **FORCED SUBTITLES (2026-10-03, branch `feature/forced-subs`; HW-CONFIRMED 2026-10-04 against a `main` control arm).**
   Full record: `docs/subpicture.md` "Forced subtitles".
   - **Gap:** found by the 2026-10-01 *DVD Demystified* 3rd-edition audit. Units starting
     with `0x00` FSTA_DSP are shown by a set-top player even with subtitles off (translated
@@ -46,9 +46,20 @@ predate later confirmations; the `CLAUDE.md` index carries the reconciled status
   - **Gates:** `run_forced_subs.sh --red` (F1–F6 plus four exact-arm mutations, every other
     `spu_decode` bench); `check_forced_subs_wiring.py` (RED on `main`); `run_subpic.sh`
     green; Verilator full-design lint clean on the new lines.
+  - **HW (2026-10-04)**, Black Hawk Down, Disc Menus off. Each arm seeks to ~4:12 and takes
+    ~40 shots at ~1.3 s; a yellow-text count in the bottom letterbox bar is the score.
+    - **A** (`main` control, `DVD_mp2engine_20261003_2332`, subtitles off): 0 on every frame.
+    - **B** (`main`, English subtitles on): text from the first line onward. This shows the
+      instrument sees subtitles at these times.
+    - **C** (`DVD_forcedsubs_20261004_0400`, subtitles off): text on 3 frames only. They read
+      "This food is the property of Mohamed Farrah Aidid!" and "Go back to your homes!": the
+      two forced units at 255.5 s / 259.2 s, translating Somali megaphone speech. The English
+      cockpit dialogue after them stays hidden.
+    - **E** (forced-subs build, subtitles on): identical to B, frame for frame. Ordinary
+      subtitles are unchanged.
+  - **Build:** SEED 1, `clk_dec` 88.89 MHz at 100 °C and 90.43 MHz at −40 °C (gate 86.0).
+    38,763 ALMs vs the control's 38,791, i.e. free within fitter noise. M10K/DSP unchanged.
   - **Open:**
-    - HW test: BHD with subtitles off shows a line at ~4:15, against a `main` control arm
-      that shows none.
     - ⏳ Maintainer decision: forced stream after B8-off (SPRM2's, as now, vs the user's
       last track).
     - ⏳ Maintainer decision: the inherited 16-of-32 `subp_control` / 3-bit track bound.
