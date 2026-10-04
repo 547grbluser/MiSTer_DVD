@@ -41,8 +41,8 @@ predate later confirmations; the `CLAUDE.md` index carries the reconciled status
       already worked.
     - The Matrix's 146 white-rabbit FSTA units are all in HLI VOBUs and are correctly
       excluded.
-    - A 46-disc sample (6 picked, 40 random): results in `docs/subpicture.md` once the scan
-      completes.
+    - A 46-disc sample: **8 of the 40 random discs (20 %)** carry forced subtitles in a title,
+      so this is a common case.
   - **Gates:** `run_forced_subs.sh --red` (F1–F6 plus four exact-arm mutations, every other
     `spu_decode` bench); `check_forced_subs_wiring.py` (RED on `main`); `run_subpic.sh`
     green; Verilator full-design lint clean on the new lines.

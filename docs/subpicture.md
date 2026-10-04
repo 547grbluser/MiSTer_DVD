@@ -448,6 +448,12 @@ DCSQ table):
     ~95 % forced (e.g. 497/521), while 0x20–0x23 have none. Its menus SetSTN `0x43`
     (display ON, logical 3), so it already worked through the display-on path.
   - *A handful in some languages only.* Casino Royale: 0x21 has 3, 0x22 has 1, 0x20 has 0.
+- **Prevalence** (2026-10-03, 46 discs: 6 picked for foreign-language dialogue plus 40 at
+  random, seed 20261003; 0 scan errors):
+  - **8 of the 40 random discs (20 %)** carry forced-subtitle units in a title domain:
+    Tomb Raider, R.I.P.D., Winn-Dixie, French1, Salt, Air Bud, Dodgeball, blast.
+  - 3 of the 6 picked do (Babel, Black Hawk Down, Casino Royale).
+  - This is a common authoring feature, not an edge case.
 - No sampled disc marks *every* unit of a normal stream forced, the case that would put
   all subtitles on screen with subtitles off.
 
