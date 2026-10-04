@@ -22,6 +22,46 @@ predate later confirmations; the `CLAUDE.md` index carries the reconciled status
 
 ## Hardware status (THIS fork, verified 2026-06-21)
 
+- 🔧 **PLAYER PARAMETERS SPRM14/15/20 FROM THE SETUP, NOT CONSTANTS (feature/player-regs,
+  2026-10-04; sim + offline proven, ⏳ build + HIL).** Design: `docs/dvd_vm.md` "Player
+  parameters SPRM14/15/20". These are the *DVD Demystified* 3rd-edition audit's items 2 and 3.
+  - **Was:** `sprm_read` returned libdvdnav's constants: 14 = `0x0100` ("4:3 TV,
+    pan&scan" on every setup), 15 = `0x7CFC` (claims SDDS and karaoke), and 20 = `0x0001`.
+    That last one is **region 1**, which the docs had called "region free".
+  - **Now:** `dvd/player_regs.sv` (combinational) feeds new `dvd_vm` ports `cfg_sprm14/15/20`.
+    - SPRM20 is the lowest region the disc allows. The reader latches VMGI byte 0x23 into
+      the new `vmg_rmask` port through `S_VMG_CAT`, a 45-byte re-fetch of the resident
+      sector on the First Play and VMGM jump paths. It is cleared at reset and on every
+      mount. An all-prohibited mask falls back to region 1 and sets telemetry word 14
+      bit 9 (Main's `flags.rgn_allp`).
+    - SPRM14 is `0x0C00` on HDMI/progressive. On analog it follows Analog Aspect
+      (`aa_osd_sel`): Auto/Letterbox `0x0200`, Crop `0x0100`, Fit `0x0C00`.
+    - SPRM15 is `0x5800`, with the DTS bit set by `pass_mode | cb_tables_ok`.
+    - Decisions: user, 2026-10-01 (SPRM20) and 2026-10-04 (SPRM14).
+  - **Offline (library boot diff, `tools/dvd_vm_ref.py --player`, 1,530 images that parse):**
+    - **HDMI:** 23 discs change path, and all 23 are caused by SPRM14's 16:9 bit. 16 move
+      from a 4:3 intro VTS to a 16:9 one (HARTSWAR_169 VTS 4 → 3, SPECIES2 5 → 4,
+      WINDTALKERS 4 → 3, ...), with 16 of 16 targets 16:9 by their `VTS_V_ATTR`. The other
+      7 (Warner-style: ROAD_WARRIOR_16X9, THE_COLOR_PURPLE) pick a different cell or PGC in
+      the same menu, while ROAD_WARRIOR_4X3 does not change.
+    - **Analog Letterbox / Crop:** 0 changes. Discs test only bits 10–11, so bits 8–9 never
+      mattered on these discs, and neither did the new SPRM15 value.
+    - **SPRM20:** 5 images prohibit region 1 (PAL: THE_OFFICE_UK, Cluedo AUS, FAIRYTOPIA,
+      deal_or_no_deal, TIBET) and now read region 2 or 4. None of them changes boot path.
+    - **Region checks:** synthetic region-2 / region-4 players diverge on 335 / 352
+      region-1 discs (SPECIES2 reaches its dead-end VMGM PGC 3 still). This is the population
+      whose check the reported "allowed region" now passes. No physical region-2 disc
+      exists to show the mirror case on hardware.
+  - **Gates:** `bench/dvd/run_player_regs.sh --red` and `check_player_regs_wiring.py --red`
+    (RED on `main`). The reader regression gives 51/51 verdicts identical; the only change
+    is the new T10 line in `iso_reader_vm`. 17 traces are timing-only (the extra 45-cycle
+    fetch); `iso_reader_vm`'s fixture changed, and `zerocell` gains one counter transition
+    before `$finish`. Verilator: no new warnings. `lint_undriven` and `main/tests` pass.
+  - **Next:** the build, then HIL against a `main` control arm: HARTSWAR_169 on HDMI shows
+    the 16:9 intro, under Interlaced + Letterbox shows the 4:3 one, and a region-checking
+    region-1 disc boots as before.
+  - **Follow-up queued:** Analog Aspect on 4:3 progressive displays (`docs/roadmap.md`).
+
 - ✅ **CSS ENCRYPTED ON A DISC THAT DECRYPTS FINE: A RAW READ RAN INTO A VOB (issue #147,
   2026-10-04; Main only, HW-CONFIRMED against a v0.8.0 control arm, MERGED PR #153).** Full record: this entry and
   `docs/physical_disc.md` "Title keys per VOB".

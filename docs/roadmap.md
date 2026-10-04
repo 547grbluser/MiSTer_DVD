@@ -621,6 +621,34 @@ in `CONF_STR`. Design: `docs/cdda.md` "`.cue` sheets". ⛔ CHD still not support
 > **top gap confirmed = exact chapters/PTT (7/7 discs); interactive GPRM-counter/NVTMR promoted
 > above parental on measured prevalence (3/7 game discs).** Phase 3 = close gaps in that order.
 
+### 🔧 Player parameters SPRM14/15/20 from the setup, not constants (feature/player-regs, 2026-10-04 — see `docs/dvd_vm.md` "Player parameters SPRM14/15/20")
+
+The 3rd-edition audit's items 2 and 3. `dvd/player_regs.sv` gives each disc:
+- **SPRM20:** the first region the disc allows, from VMGI byte 0x23.
+- **SPRM14:** the TV shape the output settings describe.
+- **SPRM15:** AC-3 + MPEG, plus DTS when it can play.
+
+Sim, mutation and offline gates are green. On HDMI, the library boot diff moves 16 discs
+from a 4:3 intro VTS to its 16:9 copy, and 7 more to their 16:9 menu page.
+**Next:** the build, then HIL against a `main` control arm:
+1. HARTSWAR_169 on HDMI boots VTS 3 (16:9), not VTS 4.
+2. The same disc under Interlaced + Letterbox still boots VTS 4.
+3. A region-checking region-1 disc boots unchanged.
+
+The region-2 path stays offline-only (no physical vehicle).
+
+**Follow-up (user question, 2026-10-04):** Analog Aspect does nothing on Progressive, so a
+31 kHz 4:3 display (VGA CRT, 480p component) gets the bare anamorphic raster, and a 4:3 HDMI
+display has no Crop. Proposed:
+- Manual Letterbox/Crop apply in every mode.
+- Auto letterboxes on Progressive only when the ini routes the native raster to the analog
+  pins (`analog_want`).
+- Possibly rename the option.
+- SPRM14 follows automatically through `aa_live`.
+
+Needs HW checks of Letterbox under Film 24p, Bob/Blend → Letterbox, and `crt_ov_map` on
+the progressive raster.
+
 ### ✅ Subtitle tracks to the spec maximum (built in PR #152, HW-CONFIRMED 2026-10-04 — see `docs/track_selection.md` "32 subtitle tracks")
 
 DVD-Video allows 32 subtitle tracks. The core reaches **8** with the Subtitle button and

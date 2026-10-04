@@ -384,6 +384,7 @@ otherwise; `--red` runs its mutation arms).
 | Highlight promotion model v2 | ✅ | `dvd/nav_pci.sv` header | `nav_pci_tb` |
 | 32 subtitle tracks (spec max); Subtitle button steps over declared streams (`subp_decl`) | ✅ HW, MERGED PR #152 (Naked Gun 11, MOST 19; −192 ALM) | `track_selection.md` "32 subtitle tracks" | `run_subp32.sh --red`, `check_subp32_wiring.py` |
 | Forced subtitles: FSTA_DSP units shown with subtitles off (SPRM2 stream, else first declared; libdvdnav) | ✅ HW, MERGED PR #151 (BHD vs `main`) | `subpicture.md` "Forced subtitles" | `run_forced_subs.sh --red`, `check_forced_subs_wiring.py` |
+| Player parameters: SPRM20 = disc's first allowed region, SPRM14 from output/Analog Aspect, SPRM15 with DTS (`player_regs`) | 🔧 sim + offline ⏳ build, HIL | `dvd_vm.md` "Player parameters" | `run_player_regs.sh --red`, `check_player_regs_wiring.py` |
 
 ### Transport, HUD and input
 
@@ -472,12 +473,9 @@ otherwise; `--red` runs its mutation arms).
 - ❌ Chapters/PTT exactness (Phase 6, `VTS_PTT_SRPT`), UDF-only images, parental control,
   GPRM counter mode, dual-mono AC-3 (acmod 0, rejected deliberately).
 - ❌ Trick play (continuous 2×/4×): needs a flush-free I-frame splice (`docs/dvd_nav.md` §2d).
-- ⚠ `lates` counts one per refresh while a PGC still is held (`flags.still`), so boot and
-  menu windows over-report (`docs/decode_pacing.md` §2c). The Progressive lates and the
-  Thayer boot-FMV Interlaced lates are fixed by F1 + F2: 0 on the whole census set, and no
-  picture over its frame budget. F3/F4 stay recorded, not needed. The chroma-row fix
-  (PR #142) adds one late per ROGER playthrough at one marginal spot on
-  Progressive, accepted by maintainer decision; F3 is its structural fix.
+- ⚠ `lates` counts one per refresh while a PGC still is held, so boot/menu windows
+  over-report (`docs/decode_pacing.md` §2c). Real lates are 0 on the census set since F1 +
+  F2, bar one accepted ROGER late on Progressive from PR #142 (F3 is its structural fix).
 
 `docs/roadmap.md` is the canonical "what's next".
 

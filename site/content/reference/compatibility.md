@@ -76,6 +76,17 @@ seamless-branch interleaved cells, still frames, and audio/subtitle/angle/langua
 selection. Discs that pick the camera angle themselves — typically to show a title card
 or credits in your chosen language — are followed rather than overridden.
 
+A disc's own checks get honest answers about the player:
+
+- **Region.** The core reports a region the disc allows, so a disc from any region passes
+  its own region check, rather than showing its "wrong region" screen.
+- **TV shape.** Discs are told the shape of your TV from your output settings: widescreen
+  on HDMI, and on the analog output whatever **Analog Aspect** describes. Discs that carry
+  both a 4:3 and a 16:9 copy of an intro or menu therefore play the 16:9 one on a
+  widescreen setup.
+- **Audio.** Discs are told which audio formats the core can actually play (Dolby Digital,
+  MPEG audio, and DTS).
+
 Not implemented: **parental-control enforcement** and **UOP enforcement** (the flags a disc
 uses to forbid skipping something). In practice this means the core lets you skip things a
 set-top player would not.
