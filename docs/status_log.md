@@ -60,6 +60,22 @@ predate later confirmations; the `CLAUDE.md` index carries the reconciled status
       Ordinary subtitles are unchanged.
   - **Build:** SEED 1, `clk_dec` 88.89 MHz at 100 °C and 90.43 MHz at −40 °C (gate 86.0).
     38,763 ALMs vs the control's 38,791, i.e. free within fitter noise. M10K/DSP unchanged.
+  - **Pre-merge regression round (2026-10-04, on the `feature/subp-32` build, which
+    contains this branch), against a `main` control arm:**
+    - **Menu highlights, 11 discs** (`tools/hil_nav_test.py`'s menu-highlight arm list:
+      ATFIRSTSIGHT, T2 ×2, The Matrix, MiB, Tomb Raider, The Office, Akira, Scene It,
+      Harry Potter, Cluedo).
+      - Both builds: 11/11 armed + highlight on + SPU routed + drawn.
+      - 6 menu screenshots are pixel-identical. The rest differ only in animated
+        backgrounds, with the same highlighted button.
+      - ⚠ The suite's own fixed-sleep driver is STALE: it failed 8/11 arms on the
+        control too, sampling during intros. A driver that waits for the board's
+        `hl_btns_armed` bit was used instead. Fixing the suite is a follow-up.
+    - **Forced subtitles with Disc Menus ON:** Black Hawk Down via its menu's PLAY MOVIE,
+      subtitles off. "Sir.", "Keep Driving!", "I'm going to be late.", "Call you back."
+      appear (5:28–6:28); the English dialogue stays clean.
+    - **Disc-chosen display-on subtitle** (`vm_owns_route`): Babel via its menu, whose
+      SetSTN `0x43` subtitles show ("Three hundred cartridges.").
   - **What the HW test did and did not cover:** BHD never sets SPRM2, so silicon exercised
     the first-declared fallback, which returned logical 0. **The SPRM2 arm (`fs_vm_ok`) and a
     non-zero fallback are wiring-checked only.** They are common in practice: 131 library
