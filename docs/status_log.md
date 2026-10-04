@@ -22,6 +22,25 @@ predate later confirmations; the `CLAUDE.md` index carries the reconciled status
 
 ## Hardware status (THIS fork, verified 2026-06-21)
 
+- 🔧 **32 SUBTITLE TRACKS (2026-10-04, branch `feature/subp-32`, stacked on
+  `feature/forced-subs`; sim-proven, ⏳ build + HW).** Full record:
+  `docs/track_selection.md` "32 subtitle tracks".
+  - **Was:** the Subtitle button reached 8 tracks and the disc's own choice 16. **98 of
+    1,431 discs use tracks 9–16.**
+  - **Now:** all 32 (the DVD-Video maximum) on both paths, in the reader, `emu.sv`, the
+    map and the HUD. Both tables are in block RAM, so the flops and the 32:1 mux are not
+    paid. The Subtitle button steps over the PGC's **declared** streams. The IFO count is
+    a claim: 140 discs say 32, and Universal's copy-protection decoys declare 32 one-unit
+    streams. `dvd/subp_decl.sv` holds that logic.
+  - **Gates:** `run_subp32.sh --red` and `check_subp32_wiring.py` (RED on pre-32 code).
+    Reader regression: 51/51 verdicts identical to `main`. With the changed fields masked,
+    48/51 traces are identical, 2 differ only in sector-read order and valid timing, and 1
+    is timing-sensitive by construction (a `main`-reader control diverges earlier).
+    Verilator: no new warnings.
+  - **Next:** the build (ALM cost, the `subp_ctl_ram`/`s_lang_ram` altsyncram lines in
+    `DVD.map.rpt`), then HW on 24 Season 5 D1 (10 tracks) or *27 Dresses* (12): reach the
+    last track with its language, then `SUB OFF`.
+
 - ✅ **FORCED SUBTITLES (2026-10-03, branch `feature/forced-subs`; HW-CONFIRMED 2026-10-04 against a `main` control arm).**
   Full record: `docs/subpicture.md` "Forced subtitles".
   - **Gap:** found by the 2026-10-01 *DVD Demystified* 3rd-edition audit. Units starting

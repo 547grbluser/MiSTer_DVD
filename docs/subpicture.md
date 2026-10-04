@@ -466,9 +466,8 @@ its authored time. This is bounded by the existing ~700 ms hold bound, and the H
 matched the subtitles-on arm. The precise predecessor would be
 `c_valid && (!forced_only || c_forced)`.
 
-**Known bound, inherited and not widened here** (recorded per the spec-maximum rule;
-**maintainer decision 2026-10-04: widen to 32 on its own branch**, roadmap "Subtitle tracks
-to the spec maximum"): the reader keeps **16 of the PGC's 32** `subp_control`
+**Known bound — RESOLVED by `feature/subp-32` (2026-10-04): all 32 streams, see
+`docs/track_selection.md` "32 subtitle tracks".** The note below is the pre-32 record: the reader keeps **16 of the PGC's 32** `subp_control`
 entries (`subp_ctl_mem`), and the user track index is 3 bits.
 - SPRM2 values 16–31 are treated as undeclared and fall back. They do not alias onto
   0–15, which the old `[3:0]` truncation would have done.

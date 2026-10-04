@@ -85,11 +85,6 @@ set-top player would not.
 **Interactive DVD games are incomplete.** Some game discs mis-navigate their dispatcher
 logic, and individual minigames can misbehave. Film and TV discs are the supported path.
 
-**Only the first 8 subtitle tracks can be selected with the Subtitle button.** Most discs
-have fewer, but some — TV box sets and releases with many languages — carry 10 to 12. On
-those, tracks 9 and up cannot be chosen with the button. A track the disc picks itself from
-its own language menu still plays, up to its 16th track.
-
 **Some discs offer no subtitles in an alternate viewing mode.** A few titles build a second
 version of the film as its own program chain — The Matrix's "Follow the White Rabbit" is the
 best-known — and that version can declare a different subpicture stream from the main one, or
