@@ -22,6 +22,40 @@ predate later confirmations; the `CLAUDE.md` index carries the reconciled status
 
 ## Hardware status (THIS fork, verified 2026-06-21)
 
+- 🔧 **FORCED SUBTITLES (2026-10-03, branch `feature/forced-subs`; sim-proven, ⏳ HW).**
+  Full record: `docs/subpicture.md` "Forced subtitles".
+  - **Gap:** found by the 2026-10-01 *DVD Demystified* 3rd-edition audit. Units starting
+    with `0x00` FSTA_DSP are shown by a set-top player even with subtitles off (translated
+    foreign dialogue). `spu_decode` treated `0x00` like `0x01`, and with subtitles off
+    `emu.sv` routed no subpicture stream, so those lines never appeared.
+  - **Fix:**
+    - `spu_decode`: a per-unit forced flag, plus a `forced_only` input that gates visibility.
+    - `emu.sv`: `fs_route` routes the title's stream forced-only whenever no display-ON term
+      is active (`sp_disp_on`, the five terms `sp_route_en` already listed).
+    - The stream is SPRM2's if it names a declared stream 0..15, else the PGC's first
+      declared stream. This is libdvdnav's `vm_get_subp_active_stream`.
+  - **Measured** (`tools/spec_audit.py --deep`, new FSTA axis):
+    - Black Hawk Down (SPRM2 never set) carries 12 forced units in English 0x20, the first at
+      ~4:15 into the title. It is the HIL vehicle.
+    - Babel uses dedicated ~95 %-forced streams selected display-ON by its menus, so it
+      already worked.
+    - The Matrix's 146 white-rabbit FSTA units are all in HLI VOBUs and are correctly
+      excluded.
+    - A 46-disc sample (6 picked, 40 random): results in `docs/subpicture.md` once the scan
+      completes.
+  - **Gates:** `run_forced_subs.sh --red` (F1–F6 plus four exact-arm mutations, every other
+    `spu_decode` bench); `check_forced_subs_wiring.py` (RED on `main`); `run_subpic.sh`
+    green; Verilator full-design lint clean on the new lines.
+  - **Open:**
+    - HW test: BHD with subtitles off shows a line at ~4:15, against a `main` control arm
+      that shows none.
+    - ⏳ Maintainer decision: forced stream after B8-off (SPRM2's, as now, vs the user's
+      last track).
+    - ⏳ Maintainer decision: the inherited 16-of-32 `subp_control` / 3-bit track bound.
+  - **Tooling found on the way:** `tools/lint_undriven.sh` passes **vacuously** in a fresh
+    worktree. `build_id.v` is missing there, Verilator aborts, and the script greps only for
+    "not driven". Not fixed here.
+
 - ✅ **MP2 ON THE SHARED AUDIO ENGINE (2026-10-03: M0–M4 done, HW-confirmed on the rig,
   ✅ MERGED PR #150).** M2: the RTL, bit-exact op for op on all 89 gate streams, with 18
   mutations. M3: wired in, `mp2_decode` out of the build, the rate via MFS, long frames

@@ -320,6 +320,10 @@ while that popup is on screen to move to the next track, and keep pressing to st
 Once the popup has gone, the next press just shows the track again. Subtitles step
 through each track and then `SUB OFF`.
 
+`SUB OFF` works like a set-top player's subtitles-off: lines the disc marks as
+**forced** still appear. A film uses these to translate the odd line of foreign-language
+dialogue for viewers who have subtitles switched off.
+
 The popup always names the track that is actually playing, including one picked from the
 disc's own language menu.
 
