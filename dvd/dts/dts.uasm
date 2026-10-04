@@ -1,0 +1,742 @@
+; dts.uasm -- the DTS core decoder's microcode (docs/dts_decoder.md sec 10).
+;
+; One frame per pass, in tools/dts_fixed.py's StreamDecoder.decode order:
+; frame header and primary audio coding header (every check FFmpeg makes), then
+; per subframe the side information, the high-frequency VQ indices and the LFE
+; samples (read and dropped: D3), then per subsubframe
+;   XCLR -> XQ / XVQ (every channel) -> DSYNC -> ADPCM -> JOINT -> BFLY -> MIXSYN x8
+; and the frame's tail (time code, auxiliary data: embedded downmix coefficients
+; are ignored and counted, D3).
+;
+; Assembled by tools/dts_isa.py (--asm). `;MUT name: instr` marks a RED-arm
+; mutation of tools/test_dts_isa.py: that instruction replaces the line's own.
+;
+; Registers: r1-r7 scratch; r8-r15 vector-op arguments (scratch between vops).
+
+; ---------------------------------------------------------------- error codes
+.equ E_SYNC      1
+.equ E_DEFICIT   2
+.equ E_PCMBLK    3
+.equ E_FSIZE     4
+.equ E_AMODE     5
+.equ E_RATE      6
+.equ E_RESERVED  7
+.equ E_LFE       8
+.equ E_PCMRES    9
+.equ E_NCH       10
+.equ E_SUBBANDS  11
+.equ E_JOINT     12
+.equ E_SFSEL     13
+.equ E_BASEL     14
+.equ E_ABITS     15
+.equ E_SCALE     16
+.equ E_JSEL      17
+.equ E_JSCALE    18
+.equ E_DSYNC     19
+.equ E_LFESCALE  20
+.equ E_SUBOVF    21
+
+; ---------------------------------------------------------------- record RAM
+; frame scalars
+.equ F_CRC       0x000
+.equ F_NPB       0x001
+.equ F_AMODE     0x002
+.equ F_LOSSLESS  0x003
+.equ F_DRC       0x004
+.equ F_TS        0x005
+.equ F_AUX       0x006
+.equ F_SYNCSSF   0x007
+.equ F_LFE       0x008
+.equ F_PREDHIST  0x009
+.equ F_PERFECT   0x00A
+.equ F_SDF       0x00B
+.equ F_SDS       0x00C
+.equ F_NSF       0x00D
+.equ F_NCH       0x00E
+.equ F_NSSF      0x00F
+.equ F_SSF       0x010
+.equ F_SF        0x011
+.equ F_POS       0x012          ; subband samples used so far in the frame
+; per channel (8 slots each)
+.equ A_NSUB      0x020
+.equ A_VQS       0x028
+.equ A_JOINT     0x030
+.equ A_TMSEL     0x038
+.equ A_SFSEL     0x040
+.equ A_BASEL     0x048
+.equ A_NACT      0x050
+.equ A_NMIX      0x058
+.equ A_JSEL      0x060
+.equ A_QSEL      0x080          ; [ch*10 + n]
+.equ A_ADJ       0x0C0          ; [ch*10 + n]
+; per channel and band [ch*32 + band]: 5 x 32 = 160 words a table, packed at that
+; stride so the whole record ends at 0x600 and fits a 2K x 16 RAM (4 M10K; a
+; 256-word stride ended at 0x8A0 and needed 4K x 16, 8 M10K)
+.equ P_ABITS     0x100
+.equ P_TMODE     0x1A0
+.equ P_PMODE     0x240
+.equ P_PVQ       0x2E0
+.equ P_SC0       0x380          ; scale index; bit 8 = the 7-bit table
+.equ P_SC1       0x420
+.equ P_VQI       0x4C0
+.equ P_JSC       0x560          ; joint scale index (coded value + 64)
+.equ REC_END     0x600
+
+; ================================================================ the frame
+RESET:
+FRAME:
+        frame   r1
+        get     r2, 16
+        li      r3, 0x7FFE
+        bne     r2, r3, ESYNC
+        get     r2, 16
+        li      r3, 0x8001
+        bne     r2, r3, ESYNC
+        get     r2, 1                   ; normal frame flag (unused)
+        get     r2, 5
+        bnei    r2, 31, EDEFICIT        ; deficit samples must be 32
+        get     r2, 1
+        st      r2, F_CRC
+        get     r2, 7
+        addi    r2, r2, 1
+        andi    r3, r2, 7
+        bnei    r3, 0, EPCMBLK
+        st      r2, F_NPB
+        get     r2, 14
+        blti    r2, 95, EFSIZE          ; frame size - 1 < 95
+        get     r2, 6
+        bgei    r2, 10, EAMODE
+        st      r2, F_AMODE
+        get     r2, 4
+        bnei    r2, 13, ERATE           ; 48 kHz only: the core's output rate
+        get     r2, 5
+        seqi    r2, r2, 31              ; bit-rate code 31 = the lossless steps
+        st      r2, F_LOSSLESS
+        get     r2, 1
+        bnei    r2, 0, ERESERVED
+        get     r2, 1
+        st      r2, F_DRC
+        get     r2, 1
+        st      r2, F_TS
+        get     r2, 1
+        st      r2, F_AUX
+        get     r2, 1                   ; HDCD
+        get     r2, 3                   ; extension type
+        get     r2, 1                   ; extension present (the core only)
+        get     r2, 1
+        st      r2, F_SYNCSSF
+        get     r2, 2
+        beqi    r2, 3, ELFE
+        st      r2, F_LFE
+        get     r2, 1
+        st      r2, F_PREDHIST
+        ld      r3, F_CRC
+        beqi    r3, 0, H_NOCRC
+        get     r2, 16
+H_NOCRC:
+        get     r2, 1
+        st      r2, F_PERFECT
+        get     r2, 4                   ; encoder revision
+        get     r2, 2                   ; copy history
+        get     r2, 3                   ; source PCM resolution
+        ld      r3, C_BPS[r2]
+        beqi    r3, 0, EPCMRES
+        get     r2, 1
+        st      r2, F_SDF
+        get     r2, 1
+        st      r2, F_SDS
+        get     r2, 4                   ; dialogue normalisation
+
+; ---------------------------------------------------------------- coding header
+        get     r2, 4
+        addi    r2, r2, 1
+        st      r2, F_NSF
+        get     r2, 3
+        addi    r2, r2, 1
+        ld      r3, F_AMODE
+        ld      r3, C_CHANNELS[r3]
+        bne     r2, r3, ENCH
+        st      r2, F_NCH
+        mov     r7, r2                  ; r7 = nch throughout the header
+        li      r4, 0
+CH_NSUB:
+        get     r2, 5
+        addi    r2, r2, 2
+        bgei    r2, 33, ESUBBANDS
+        st      r2, A_NSUB[r4]
+        addi    r4, r4, 1
+        blt     r4, r7, CH_NSUB
+        li      r4, 0
+CH_VQS:
+        get     r2, 5
+        addi    r2, r2, 1
+        st      r2, A_VQS[r4]
+        addi    r4, r4, 1
+        blt     r4, r7, CH_VQS
+        li      r4, 0
+CH_JOINT:
+        get     r2, 3
+        blt     r7, r2, EJOINT          ; index > nch
+        st      r2, A_JOINT[r4]
+        addi    r4, r4, 1
+        blt     r4, r7, CH_JOINT
+        li      r4, 0
+CH_TMSEL:
+        get     r2, 2
+        st      r2, A_TMSEL[r4]
+        addi    r4, r4, 1
+        blt     r4, r7, CH_TMSEL
+        li      r4, 0
+CH_SFSEL:
+        get     r2, 3
+        beqi    r2, 7, ESFSEL
+        st      r2, A_SFSEL[r4]
+        addi    r4, r4, 1
+        blt     r4, r7, CH_SFSEL
+        li      r4, 0
+CH_BASEL:
+        get     r2, 3
+        beqi    r2, 7, EBASEL
+        st      r2, A_BASEL[r4]
+        addi    r4, r4, 1
+        blt     r4, r7, CH_BASEL
+        ; quantiser-index codebook selectors: for n, for ch
+        li      r5, 0                   ; n
+QS_N:
+        ld      r6, C_SEL_NBITS[r5]
+        li      r4, 0
+QS_CH:
+        getr    r2, r6
+        call    CH10                    ; r1 = ch*10 + n
+        st      r2, A_QSEL[r1]
+        addi    r4, r4, 1
+        blt     r4, r7, QS_CH
+        addi    r5, r5, 1
+        blti    r5, 10, QS_N
+        ; scale-factor adjustment indices: for n, for ch, where the selector is Huffman
+        li      r5, 0
+ADJ_N:
+        ld      r6, C_GROUP_SIZE[r5]
+        li      r4, 0
+ADJ_CH:
+        call    CH10
+        ld      r2, A_QSEL[r1]
+        li      r3, 0
+        bge     r2, r6, ADJ_ST
+        get     r3, 2
+ADJ_ST:
+        st      r3, A_ADJ[r1]
+        addi    r4, r4, 1
+        blt     r4, r7, ADJ_CH
+        addi    r5, r5, 1
+        blti    r5, 10, ADJ_N
+        ld      r3, F_CRC
+        beqi    r3, 0, CH_NACT0
+        get     r2, 16
+        ; the active band count: own, or the joint source's if larger
+CH_NACT0:
+        li      r4, 0
+CH_NACT:
+        ld      r2, A_NSUB[r4]
+        ld      r3, A_JOINT[r4]
+        beqi    r3, 0, CH_NACT_ST
+        ld      r3, A_NSUB-1[r3]
+        max     r2, r2, r3
+CH_NACT_ST:
+        st      r2, A_NACT[r4]
+        addi    r4, r4, 1
+        blt     r4, r7, CH_NACT
+        ; predictor history off: clear every channel's
+        ld      r3, F_PREDHIST
+        bnei    r3, 0, SF_START
+        li      r8, 0
+HCLR_ALL:
+        li      r9, 0
+        vop     HCLR
+        addi    r8, r8, 1
+        blti    r8, 5, HCLR_ALL
+
+; ================================================================ subframes
+SF_START:
+        st      r0, F_SF
+        st      r0, F_POS
+SF_LOOP:
+        ld      r7, F_NCH
+        get     r2, 2
+        addi    r2, r2, 1
+        st      r2, F_NSSF
+        get     r2, 3                   ; partial subsubframe sample count
+        ; subband-sample buffer overflow (FFmpeg's check)
+        ld      r3, F_NSSF
+        shli    r3, r3, 3
+        ld      r2, F_POS
+        add     r2, r2, r3
+        ld      r3, F_NPB
+        blt     r3, r2, ESUBOVF
+        ; prediction modes, every band below the channel's count
+        li      r4, 0
+PM_CH:
+        ld      r6, A_NSUB[r4]
+        shli    r1, r4, 5
+        li      r5, 0
+PM_B:
+        get     r2, 1
+        st      r2, P_PMODE[r1+r5]
+        addi    r5, r5, 1
+        blt     r5, r6, PM_B
+        addi    r4, r4, 1
+        blt     r4, r7, PM_CH
+        ; prediction coefficient VQ addresses
+        li      r4, 0
+PV_CH:
+        ld      r6, A_NSUB[r4]
+        shli    r1, r4, 5
+        li      r5, 0
+PV_B:
+        ld      r2, P_PMODE[r1+r5]
+        beqi    r2, 0, PV_NEXT
+        get     r2, 12
+        st      r2, P_PVQ[r1+r5]
+PV_NEXT:
+        addi    r5, r5, 1
+        blt     r5, r6, PV_B
+        addi    r4, r4, 1
+        blt     r4, r7, PV_CH
+        ; bit allocation, bands below the VQ start
+        li      r4, 0
+BA_CH:
+        ld      r6, A_VQS[r4]
+        ld      r3, A_BASEL[r4]
+        shli    r1, r4, 5
+        li      r5, 0
+BA_B:
+        bgei    r3, 5, BA_RAW
+        vlc     r2, B_BIT_ALLOCATION_0[r3]
+        jmp     BA_CHK
+BA_RAW:
+        subi    r2, r3, 1
+        getr    r2, r2
+BA_CHK:
+        bgei    r2, 27, EABITS
+        st      r2, P_ABITS[r1+r5]
+        addi    r5, r5, 1
+        blt     r5, r6, BA_B
+        addi    r4, r4, 1
+        blt     r4, r7, BA_CH
+        ; transition modes (only with more than one subsubframe); cleared first
+        li      r4, 0
+TM_CH:
+        ld      r6, A_VQS[r4]
+        ld      r3, A_TMSEL[r4]
+        shli    r1, r4, 5
+        li      r5, 0
+TM_B:
+        li      r2, 0
+        bge     r5, r6, TM_ST           ; bands from the VQ start: 0
+        ld      r8, F_NSSF
+        bgei    r8, 2, TM_HAVE
+        jmp     TM_ST
+TM_HAVE:
+        ld      r8, P_ABITS[r1+r5]
+        beqi    r8, 0, TM_ST
+        vlc     r2, B_TRANSITION_MODE_0[r3]
+TM_ST:
+        st      r2, P_TMODE[r1+r5]
+        addi    r5, r5, 1
+        blti    r5, 32, TM_B
+        addi    r4, r4, 1
+        blt     r4, r7, TM_CH
+        ; scale factors: running index per channel
+        li      r4, 0
+SC_CH:
+        ld      r6, A_VQS[r4]
+        ld      r3, A_SFSEL[r4]
+        shli    r1, r4, 5
+        li      r9, 0                   ; the running index
+        li      r5, 0
+SC_B:
+        bge     r5, r6, SC_VQ
+        ld      r2, P_ABITS[r1+r5]
+        beqi    r2, 0, SC_NEXT
+        call    SCALE
+        st      r2, P_SC0[r1+r5]
+        ld      r8, P_TMODE[r1+r5]
+        beqi    r8, 0, SC_NEXT
+        call    SCALE
+        st      r2, P_SC1[r1+r5]
+SC_NEXT:
+        addi    r5, r5, 1
+        jmp     SC_B
+SC_VQ:
+        ld      r6, A_NSUB[r4]
+SC_VQ_B:
+        bge     r5, r6, SC_CH_NEXT
+        call    SCALE
+        st      r2, P_SC0[r1+r5]
+        addi    r5, r5, 1
+        jmp     SC_VQ_B
+SC_CH_NEXT:
+        addi    r4, r4, 1
+        blt     r4, r7, SC_CH
+        ; joint scale-factor codebook selectors
+        li      r4, 0
+JS_CH:
+        ld      r2, A_JOINT[r4]
+        beqi    r2, 0, JS_NEXT
+        get     r2, 3
+        beqi    r2, 7, EJSEL
+        st      r2, A_JSEL[r4]
+JS_NEXT:
+        addi    r4, r4, 1
+        blt     r4, r7, JS_CH
+        ; joint scale factors: bands from the channel's count to its source's
+        li      r4, 0
+JF_CH:
+        ld      r6, A_JOINT[r4]
+        beqi    r6, 0, JF_CH_NEXT
+        ld      r6, A_NSUB-1[r6]        ; the source's count
+        ld      r5, A_NSUB[r4]
+        ld      r3, A_JSEL[r4]
+        shli    r1, r4, 5
+JF_B:
+        bge     r5, r6, JF_CH_NEXT
+        bgei    r3, 5, JF_RAW
+        vlc     r2, B_SCALE_FACTOR_0[r3]
+        jmp     JF_IDX
+JF_RAW:
+        addi    r2, r3, 1
+        getr    r2, r2
+JF_IDX:
+        addi    r2, r2, 64
+        bgei    r2, 129, EJSCALE
+        blti    r2, 0, EJSCALE
+        st      r2, P_JSC[r1+r5]
+        addi    r5, r5, 1
+        jmp     JF_B
+JF_CH_NEXT:
+        addi    r4, r4, 1
+        blt     r4, r7, JF_CH
+        ld      r3, F_DRC
+        beqi    r3, 0, SF_NODRC
+        get     r2, 8
+SF_NODRC:
+        ld      r3, F_CRC
+        beqi    r3, 0, SF_AUDIO
+        get     r2, 16
+
+; ---------------------------------------------------------------- audio data
+SF_AUDIO:
+        ; the high-frequency VQ indices
+        li      r4, 0
+VI_CH:
+        ld      r5, A_VQS[r4]
+        ld      r6, A_NSUB[r4]
+        shli    r1, r4, 5
+VI_B:
+        bge     r5, r6, VI_CH_NEXT
+        get     r2, 10
+        st      r2, P_VQI[r1+r5]
+        addi    r5, r5, 1
+        jmp     VI_B
+VI_CH_NEXT:
+        addi    r4, r4, 1
+        blt     r4, r7, VI_CH
+        ; LFE: 2 * lfe * nssf samples of 8 bits and a scale index -- read, not mixed
+        ld      r3, F_LFE
+        beqi    r3, 0, SSF_START
+        ld      r2, F_NSSF
+        shli    r3, r3, 1
+        mov     r6, r0
+LFE_MUL:                                ; r6 = (2 * lfe) * nssf
+        add     r6, r6, r3
+        subi    r2, r2, 1
+        bnei    r2, 0, LFE_MUL
+LFE_Q:
+        get     r2, 8
+        subi    r6, r6, 1
+        bnei    r6, 0, LFE_Q
+        get     r2, 8
+        bgei    r2, 128, ELFESCALE
+
+SSF_START:
+        st      r0, F_SSF
+SSF_LOOP:
+        vop     XCLR
+        ld      r7, F_NCH
+        ld      r14, F_LOSSLESS
+        ; sample codes, bands below the VQ start, every channel
+        li      r4, 0
+XQ_CH:
+        ld      r6, A_VQS[r4]
+        shli    r1, r4, 5
+        li      r5, 0
+XQ_B:
+        bge     r5, r6, XQ_CH_NEXT
+        ld      r10, P_ABITS[r1+r5]
+        beqi    r10, 0, XQ_NEXT
+        mov     r8, r4
+        mov     r9, r5
+        ; the scale: the second after the transient subsubframe
+        ld      r12, P_SC0[r1+r5]
+        ld      r2, P_TMODE[r1+r5]
+        beqi    r2, 0, XQ_SEL
+        ld      r3, F_SSF
+        blt     r3, r2, XQ_SEL
+        ld      r12, P_SC1[r1+r5]       ;MUT transient: ld r12, P_SC0[r1+r5]
+XQ_SEL:
+        li      r11, 0
+        li      r13, 0
+        bgei    r10, 11, XQ_GO          ; abits > 10: raw codes, no selector
+        mov     r2, r4
+        shli    r2, r2, 3
+        add     r2, r2, r4
+        add     r2, r2, r4              ; ch*10
+        add     r2, r2, r10
+        ld      r11, A_QSEL-1[r2]       ; selector of book abits-1
+        ld      r13, A_ADJ-1[r2]
+XQ_GO:
+        vop     XQ
+XQ_NEXT:
+        addi    r5, r5, 1
+        jmp     XQ_B
+XQ_CH_NEXT:
+        addi    r4, r4, 1
+        blt     r4, r7, XQ_CH
+        ; VQ bands
+        li      r4, 0
+XV_CH:
+        ld      r5, A_VQS[r4]
+        ld      r6, A_NSUB[r4]
+        shli    r1, r4, 5
+XV_B:
+        bge     r5, r6, XV_CH_NEXT
+        mov     r8, r4
+        mov     r9, r5
+        ld      r10, P_VQI[r1+r5]
+        ld      r11, F_SSF              ;MUT vq_slice: li r11, 0
+        ld      r12, P_SC0[r1+r5]
+        vop     XVQ
+        addi    r5, r5, 1
+        jmp     XV_B
+XV_CH_NEXT:
+        addi    r4, r4, 1
+        blt     r4, r7, XV_CH
+        ; DSYNC after the last subsubframe, or after every one with sync_ssf
+        ld      r2, F_SSF
+        addi    r2, r2, 1
+        ld      r3, F_NSSF
+        beq     r2, r3, DS_CHK
+        ld      r3, F_SYNCSSF
+        beqi    r3, 0, AD_START
+DS_CHK:
+        get     r2, 16
+        bnei    r2, -1, EDSYNC
+        ; ADPCM, every band below the channel's count
+AD_START:
+        li      r4, 0
+AD_CH:
+        ld      r6, A_NSUB[r4]
+        shli    r1, r4, 5
+        li      r5, 0
+AD_B:
+        mov     r8, r4
+        mov     r9, r5
+        ld      r10, P_PVQ[r1+r5]
+        ld      r11, P_PMODE[r1+r5]     ;MUT no_adpcm: li r11, 0
+        vop     ADPCM
+        addi    r5, r5, 1
+        blt     r5, r6, AD_B
+        addi    r4, r4, 1
+        blt     r4, r7, AD_CH
+        ; joint intensity
+        li      r4, 0
+JO_CH:
+        ld      r10, A_JOINT[r4]
+        beqi    r10, 0, JO_CH_NEXT
+        subi    r10, r10, 1             ; the source channel
+        ld      r6, A_NSUB[r10]
+        ld      r5, A_NSUB[r4]
+        shli    r1, r4, 5
+JO_B:
+        bge     r5, r6, JO_CH_NEXT
+        mov     r8, r4
+        mov     r9, r5
+        ld      r11, P_JSC[r1+r5]       ;MUT no_joint: li r11, 64
+        vop     JOINT
+        addi    r5, r5, 1
+        jmp     JO_B
+JO_CH_NEXT:
+        addi    r4, r4, 1
+        blt     r4, r7, JO_CH
+        ; the downmix bounds start at the active counts
+        li      r4, 0
+NM_CH:
+        ld      r2, A_NACT[r4]
+        st      r2, A_NMIX[r4]
+        addi    r4, r4, 1
+        blti    r4, 5, NM_CH
+        ; sum/difference: front if (sumdiff_front and amode > 0) or amode == 3
+        ld      r3, F_AMODE
+        beqi    r3, 3, BF_FRONT
+        beqi    r3, 0, BF_SURR
+        ld      r2, F_SDF
+        beqi    r2, 0, BF_SURR
+BF_FRONT:
+        ld      r8, C_IDX_L[r3]
+        ld      r9, C_IDX_R[r3]
+        call    BFLY_PAIR
+BF_SURR:
+        ld      r3, F_AMODE
+        blti    r3, 8, MS_START
+        ld      r2, F_SDS
+        beqi    r2, 0, MS_START
+        ld      r8, C_IDX_LS[r3]
+        ld      r9, C_IDX_RS[r3]
+        call    BFLY_PAIR
+        ; mix and synthesise the subsubframe's 8 sample times
+MS_START:
+        li      r8, 0
+MS_J:
+        ld      r9, F_AMODE
+        ld      r10, A_NMIX
+        ld      r11, A_NMIX+1
+        ld      r12, A_NMIX+2
+        ld      r13, A_NMIX+3
+        ld      r14, A_NMIX+4
+        ld      r15, F_PERFECT
+        vop     MIXSYN
+        addi    r8, r8, 1
+        blti    r8, 8, MS_J
+        ; next subsubframe
+        ld      r2, F_POS
+        addi    r2, r2, 8
+        st      r2, F_POS
+        ld      r2, F_SSF
+        addi    r2, r2, 1
+        st      r2, F_SSF
+        ld      r3, F_NSSF
+        blt     r2, r3, SSF_LOOP
+        ; next subframe
+        ld      r2, F_SF
+        addi    r2, r2, 1
+        st      r2, F_SF
+        ld      r3, F_NSF
+        blt     r2, r3, SF_LOOP
+
+; ---------------------------------------------------------------- frame tail
+        ; bands past each channel's active count lose their history
+        ld      r7, F_NCH
+        li      r4, 0
+END_H:
+        mov     r8, r4
+        ld      r9, A_NACT[r4]
+        vop     HCLR
+        addi    r4, r4, 1
+        blt     r4, r7, END_H
+        ; time code
+        ld      r3, F_TS
+        beqi    r3, 0, AUX
+        get     r2, 16
+        get     r2, 16
+AUX:
+        ld      r3, F_AUX
+        beqi    r3, 0, DONE
+        get     r2, 6                   ; aux byte count (not trusted)
+        bpos    r2
+        andi    r2, r2, 31
+        li      r3, 32
+        sub     r3, r3, r2
+        andi    r3, r3, 31              ; bits to the next 32-bit boundary
+        blti    r3, 17, AUX_AL
+        get     r2, 16
+        subi    r3, r3, 16
+AUX_AL:
+        getr    r2, r3
+        get     r2, 16
+        li      r3, 0x9A11
+        bne     r2, r3, DONE            ; no aux sync: nothing to ignore
+        get     r2, 16
+        li      r3, 0x05A0
+        bne     r2, r3, DONE
+        get     r2, 1                   ; decode time stamp
+        beqi    r2, 0, AUX_DMIX
+        get     r2, 16
+        get     r2, 16
+        get     r2, 15
+AUX_DMIX:
+        get     r2, 1
+        beqi    r2, 0, DONE
+        li      r8, CNT_DMIX_IGNORED    ; D3: the AC-3 rule is used; counted
+        vop     CNT
+DONE:
+        fend
+        jmp     FRAME
+
+; ================================================================ subroutines
+; r1 = r4*10 + r5  (channel, codebook n)
+CH10:
+        shli    r1, r4, 3
+        add     r1, r1, r4
+        add     r1, r1, r4
+        add     r1, r1, r5
+        ret
+
+; the next scale index into r2, the running index in r9, selector r3.
+; Selector 0-4: a Huffman delta; 5: 6 bits; 6: 7 bits (the 7-bit table, bit 8 set).
+SCALE:
+        bgei    r3, 5, SCALE_RAW
+        vlc     r2, B_SCALE_FACTOR_0[r3]
+        add     r9, r9, r2
+        blti    r9, 0, ESCALE
+        bgei    r9, 64, ESCALE
+        mov     r2, r9
+        ret
+SCALE_RAW:
+        addi    r2, r3, 1
+        getr    r9, r2
+        bgei    r3, 6, SCALE_7
+        bgei    r9, 64, ESCALE
+        mov     r2, r9
+        ret
+SCALE_7:
+        ori     r2, r9, 0x100
+        ret
+
+; sum/difference of channels r8, r9; both then mix to the larger active count
+BFLY_PAIR:
+        blti    r8, 0, BP_RET
+        blti    r9, 0, BP_RET
+        vop     BFLY
+        ld      r2, A_NACT[r8]
+        ld      r3, A_NACT[r9]
+        max     r2, r2, r3              ;MUT mix_own_bound: ld r2, A_NACT[r8]
+        st      r2, A_NMIX[r8]
+        st      r2, A_NMIX[r9]
+BP_RET:
+        ret
+
+; ================================================================ errors
+; A branch to ERRV + code refuses the frame with that code (the `err` instruction's
+; effect, without a one-word stub per code: the program stays within 512 words, two
+; M10K instead of four). ERRV is the assembler's error-vector base.
+.equ ESYNC       ERRV + E_SYNC
+.equ EDEFICIT    ERRV + E_DEFICIT
+.equ EPCMBLK     ERRV + E_PCMBLK
+.equ EFSIZE      ERRV + E_FSIZE
+.equ EAMODE      ERRV + E_AMODE
+.equ ERATE       ERRV + E_RATE
+.equ ERESERVED   ERRV + E_RESERVED
+.equ ELFE        ERRV + E_LFE
+.equ EPCMRES     ERRV + E_PCMRES
+.equ ENCH        ERRV + E_NCH
+.equ ESUBBANDS   ERRV + E_SUBBANDS
+.equ EJOINT      ERRV + E_JOINT
+.equ ESFSEL      ERRV + E_SFSEL
+.equ EBASEL      ERRV + E_BASEL
+.equ EABITS      ERRV + E_ABITS
+.equ ESCALE      ERRV + E_SCALE
+.equ EJSEL       ERRV + E_JSEL
+.equ EJSCALE     ERRV + E_JSCALE
+.equ EDSYNC      ERRV + E_DSYNC
+.equ ELFESCALE   ERRV + E_LFESCALE
+.equ ESUBOVF     ERRV + E_SUBOVF
