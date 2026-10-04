@@ -271,7 +271,7 @@ and two new ROMs, N 2,048 × 16 and D 512 × 18). `dts_seq` and `dts_top` take a
 - **M10K:** −10 against the previous build. `mp2_decode`'s 37 are gone. Its 16-block PCM
   FIFO stays as the codebook host, and N, D, the widened ring and X are new.
 
-**HIL** (the .236 rig; `.sim`-local script, three clips cut from the local media).
+**HIL** (the HIL rig; a `.sim`-local script, three clips cut from the local media).
 Each clip ran through the old build first, the `ac3engine` build with `mp2_decode`, as
 the control, then the new build. Each capture was then cross-correlated with the
 other build's.
