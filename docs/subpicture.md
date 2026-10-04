@@ -457,6 +457,14 @@ DCSQ table):
 - No sampled disc marks *every* unit of a normal stream forced, the case that would put
   all subtitles on screen with subtitles off.
 
+**Caveat, recorded and not fixed (needs a rebuild):** the COMMIT contract's contiguity
+clamp (`spu_contig`) treats any committed unit as on screen. Under `forced_only`, a
+committed-but-HIDDEN non-forced unit therefore still counts as the predecessor. A forced
+unit that follows it, if the display-order hold is cut short, is shown at `stc` instead of
+its authored time. This is bounded by the existing ~700 ms hold bound, and the HW timing
+matched the subtitles-on arm. The precise predecessor would be
+`c_valid && (!forced_only || c_forced)`.
+
 **Known bound, inherited and not widened here** (recorded per the spec-maximum rule;
 maintainer decision pending): the reader keeps **16 of the PGC's 32** `subp_control`
 entries (`subp_ctl_mem`), and the user track index is 3 bits.

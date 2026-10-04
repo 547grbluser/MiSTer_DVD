@@ -55,11 +55,19 @@ predate later confirmations; the `CLAUDE.md` index carries the reconciled status
       "This food is the property of Mohamed Farrah Aidid!" and "Go back to your homes!": the
       two forced units at 255.5 s / 259.2 s, translating Somali megaphone speech. The English
       cockpit dialogue after them stays hidden.
-    - **E** (forced-subs build, subtitles on): identical to B, frame for frame. Ordinary
-      subtitles are unchanged.
+    - **E** (forced-subs build, subtitles on): the same lines over the same window as B (the
+      shots are offset by the ~1 s cadence, so the scores track rather than match exactly).
+      Ordinary subtitles are unchanged.
   - **Build:** SEED 1, `clk_dec` 88.89 MHz at 100 °C and 90.43 MHz at −40 °C (gate 86.0).
     38,763 ALMs vs the control's 38,791, i.e. free within fitter noise. M10K/DSP unchanged.
+  - **What the HW test did and did not cover:** BHD never sets SPRM2, so silicon exercised
+    the first-declared fallback, which returned logical 0. **The SPRM2 arm (`fs_vm_ok`) and a
+    non-zero fallback are wiring-checked only.** They are common in practice: 131 library
+    discs SetSTN a non-zero stream with display off. The named vehicle is **Casino Royale**:
+    its menus SetSTN `0x1`/`0x2` (display off), and its forced units are in 0x21 (3) and
+    0x22 (1). Testing it means driving its language menu on the rig.
   - **Open:**
+    - ⏳ HW: the SPRM2 arm on Casino Royale (above).
     - ⏳ Maintainer decision: forced stream after B8-off (SPRM2's, as now, vs the user's
       last track).
     - ⏳ Maintainer decision: the inherited 16-of-32 `subp_control` / 3-bit track bound.
