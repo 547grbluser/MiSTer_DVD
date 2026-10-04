@@ -14,7 +14,8 @@
 // SET_COLOR now captured (Phase-1 disc menus): the four 4-bit palette indices are
 // output as col0..col3; the caller looks the RGB up in pgc_palette (fed the PGC
 // IFO palette @164). SET_CONTR alpha honoured as before. Single decode buffer / one
-// SPU on screen. CHG_COLCON and FSTA_DSP-as-menu-highlight are still out of scope.
+// SPU on screen. CHG_COLCON is still out of scope. FSTA_DSP (0x00) marks a unit
+// FORCED; the forced_only input shows only those (forced subtitles, 2026-10-03).
 //
 // FIT DISCIPLINE (see memory dvd-iso-navigator): the SPU byte buffer and the
 // bitmap are SYNCHRONOUS single-read-port BRAMs read sequentially / one-address-
@@ -56,6 +57,15 @@ module spu_decode #(
     input  wire        clk,           // clk_sys 27 MHz
     input  wire        rst_n,
     input  wire        enable,        // O[15]; when low, nothing is shown
+    // FORCED-ONLY (2026-10-03, feature/forced-subs; docs/subpicture.md "Forced
+    // subtitles"). High while emu routes the title's subpicture stream with the
+    // subtitle DISPLAY off -- the set-top player's "subtitles off": only a unit
+    // whose display-control table carries 0x00 FSTA_DSP (forced start) is shown.
+    // Every unit is still decoded and committed, so turning subtitles on shows
+    // the current line at once. Ref: libdvdnav vm_get_subp_active_stream (bit 7
+    // = "only let Forced display show"), VLC spudec b_forcedonly. Tie 1'b0 for
+    // the pre-existing behaviour (FSTA_DSP == STA_DSP, every unit shown).
+    input  wire        forced_only,
 
     // Interlaced (CRT 480i, O[14]) render mode. In interlaced output syncgen encodes
     // the ABSOLUTE frame line directly in v_pos (= {v_cntr, ~odd_field}), so q_y already
@@ -212,6 +222,7 @@ module spu_decode #(
     reg  [3:0]  w_c0, w_c1, w_c2, w_c3;    // SET_COLOR palette indices (into PGC palette)
     reg  [32:0] w_show, w_hide;
     reg         w_has_show, w_has_hide, w_has_area, w_has_xa;
+    reg         w_forced;      // this unit's DCSQT carried a 0x00 FSTA_DSP
 
     // committed params (what the renderer uses)
     reg  [11:0] c_sx, c_ex, c_sy, c_ey;
@@ -219,6 +230,7 @@ module spu_decode #(
     reg  [3:0]  c_c0, c_c1, c_c2, c_c3;    // committed SET_COLOR palette indices
     reg  [32:0] c_show, c_hide;
     reg         c_valid;
+    reg         c_forced;      // committed unit is forced (see forced_only)
     reg  [32:0] c_pts;         // PTS of the committed SPU (menu re-send discriminator)
 
     // ------------------------------------------------------------------
@@ -303,7 +315,11 @@ module spu_decode #(
     // subpicture is shown the whole time the menu is up (until a new SPU replaces it
     // or the flush clears c_valid), so drop the timed window for menu_mode. Subtitles
     // (menu_mode=0) keep the exact STC window — their show/hide timing is authored.
-    wire visible = enable && c_valid &&
+    // forced_only hides a committed NON-forced unit; it never shows anything that
+    // `enable` and the window would not (menus never assert it -- emu gates it to
+    // the title domain, where FSTA_DSP is used for in-title HLI graphics only on a
+    // display-ON SetSTN stream, which is not the forced route).
+    wire visible = enable && c_valid && (!forced_only || c_forced) &&
                    (menu_mode || ((stc >= c_show) && (stc < c_hide)));
     assign sp_active = visible;
 
@@ -352,6 +368,8 @@ module spu_decode #(
         if (!rst_n) begin
             state    <= S_IDLE;
             c_valid  <= 1'b0;
+            c_forced <= 1'b0;
+            w_forced <= 1'b0;
             c_pts    <= 33'd0;
             guard_open <= 1'b0;
             newcell_load <= 1'b0;
@@ -466,6 +484,7 @@ module spu_decode #(
                         end else begin
                             w_has_show <= 1'b0; w_has_hide <= 1'b0;
                             w_has_area <= 1'b0; w_has_xa <= 1'b0;
+                            w_forced   <= 1'b0;
                             dcsq_off <= dcsqt_sa;
                             rd_ptr   <= dcsqt_sa;
                             ret      <= D_DLY0;
@@ -491,10 +510,16 @@ module spu_decode #(
             D_CMD: begin
                 cur_op <= gb; pcnt <= 3'd0;
                 case (gb)
-                    8'h00, 8'h01: begin  // (F)STA_DSP -> show
+                    8'h00: begin         // FSTA_DSP -> show, and mark the unit FORCED
                         w_show <= pts_latched + ({17'd0, dcsq_delay} << 10);
                         w_has_show <= 1'b1;
+                        w_forced   <= 1'b1;
                         ret <= D_CMD; state <= GETB0;   // no params; next opcode
+                    end
+                    8'h01: begin         // STA_DSP -> show
+                        w_show <= pts_latched + ({17'd0, dcsq_delay} << 10);
+                        w_has_show <= 1'b1;
+                        ret <= D_CMD; state <= GETB0;
                     end
                     8'h02: begin         // STP_DSP -> hide
                         w_hide <= pts_latched + ({17'd0, dcsq_delay} << 10);
@@ -706,6 +731,7 @@ module spu_decode #(
                 c_show  <= (spu_contig && !spu_due) ? stc : w_show_eff;
                 c_hide  <= w_has_hide ? w_hide : 33'h1_FFFF_FFFF;  // stay if no STP_DSP
                 c_valid <= 1'b1;
+                c_forced <= w_forced;
                 c_pts   <= pts_latched;    // remember this unit's PTS (menu re-send guard)
                 guard_open <= 1'b0;        // the new cell's unit is on screen: guard again
                 state   <= S_IDLE;
