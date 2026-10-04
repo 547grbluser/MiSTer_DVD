@@ -179,7 +179,7 @@ A linked list of **DCSQ**s. Each DCSQ:
 **Commands:**
 | opcode | name | params | meaning |
 |----|----|----|----|
-| `0x00` | FSTA_DSP | — | forced start display (menu highlights) |
+| `0x00` | FSTA_DSP | — | **forced** start display: shown even with subtitles off — see "Forced subtitles" below (also used by menu and in-title button graphics) |
 | `0x01` | STA_DSP  | — | **start** display |
 | `0x02` | STP_DSP  | — | **stop** display |
 | `0x03` | SET_COLOR | 2 B | 4× 4-bit palette indices for the 4 subpicture colours |
@@ -395,6 +395,95 @@ multi-player option disappears."*
 
 ✅ **HW gate passed** (status line at the top of this section).
 
+## Forced subtitles (2026-10-03, branch `feature/forced-subs`; ✅ HW-CONFIRMED 2026-10-04)
+
+**What it is.** A DVD marks a subtitle unit *forced* by starting it with `0x00` FSTA_DSP
+instead of `0x01` STA_DSP. A set-top player with subtitles **off** still decodes the
+title's subpicture stream and shows the forced units: typically a translated line of
+foreign-language dialogue that the film's own audience was meant to read. Before this,
+`spu_decode` treated `0x00` exactly like `0x01`, and with subtitles off `emu.sv` routed no
+subpicture stream at all, so those lines never appeared. Found by the 2026-10-01
+*DVD Demystified* 3rd-edition audit (3rd ed. Table 9.13 SPRM2, Table 9.3 "forced caption").
+
+**Reference.** libdvdnav `vm_get_subp_active_stream`: in the title domain, with SPRM2's
+display bit (bit 6) clear, it still resolves SPRM2's stream number through
+`subp_control`. When that number names no declared stream (the default SPRM2 is 62,
+"none"), it falls back to the **first declared** stream. It returns the result with
+bit 7 set, meaning "only let Forced display show". VLC's `spudec` honours that as
+`b_forcedonly`: it keeps the units whose parse saw `0x00`.
+
+**What the core does.**
+- `spu_decode`: `0x00` sets a per-unit `w_forced`, committed as `c_forced`. The new
+  `forced_only` input gates `visible` to forced units. Every unit is still decoded and
+  committed, so pressing Subtitle while a non-forced line is up shows it at once.
+- `emu.sv`: `sp_disp_on` names the five display-ON routing terms that `sp_route_en`
+  already listed:
+  - `sub_on`;
+  - a menu domain;
+  - a SetSTN display-on;
+  - `in_title_hli` (the white rabbit);
+  - `sp_menu_early` (Scene It).
+- `fs_route = ~sp_disp_on & pgc_ctl_valid & pgc_dom_tt & (|subp_declared)` is the forced
+  route. It routes `fs_log`, which is SPRM2's stream when it names a declared stream 0..15,
+  else the first declared stream. It resolves through `subp_stream_map` like SPRM2, and
+  drives `spu_decode.forced_only`. Because `fs_route` is the complement of the display-ON
+  terms, it cannot change anything a display-on path shows.
+- **Disc Menus off** works too: there is no VM, SPRM2 stays 62, and the fallback takes the
+  first declared stream, which is libdvdnav's default.
+- **Stream choice after the user turns subtitles off (B8):** SPRM2's stream (the disc's
+  choice), not the stream the user was last on. This matches libdvdnav, and was **decided by
+  the maintainer 2026-10-04**. `SUB OFF` is reached by stepping past the last track, so "the
+  user's last track" would be the disc's final language.
+
+**Measured** (`tools/spec_audit.py --deep`, which now reassembles each SPU unit and walks its
+DCSQ table):
+- A `0x00` unit is classed as an **in-title button graphic** when the VOBU it starts in has
+  a live HLI (`hli_ss` with `btn_ns > 0`), and as a **forced subtitle** otherwise. The Matrix
+  validates the split: 146 FSTA units in its white-rabbit title set, all in HLI VOBUs; 0
+  forced subtitles in the feature.
+- **Three authoring styles seen:**
+  - *Forced lines inside every normal stream.* Black Hawk Down: 12/1,410 units in English
+    0x20 are forced (the first at 255.5 s), with 65–67 in each other language. SPRM2 is
+    never set, so only the fallback shows them. **This is the HIL vehicle.**
+  - *A dedicated forced stream.* Babel: logical 2/3 map to physical 0x24–0x27, which are
+    ~95 % forced (e.g. 497/521), while 0x20–0x23 have none. Its menus SetSTN `0x43`
+    (display ON, logical 3), so it already worked through the display-on path.
+  - *A handful in some languages only.* Casino Royale: 0x21 has 3, 0x22 has 1, 0x20 has 0.
+- **Prevalence** (2026-10-03, 46 discs: 6 picked for foreign-language dialogue plus 40 at
+  random, seed 20261003; 0 scan errors):
+  - **8 of the 40 random discs (20 %)** carry forced-subtitle units in a title domain:
+    Tomb Raider, R.I.P.D., Winn-Dixie, French1, Salt, Air Bud, Dodgeball, blast.
+  - 3 of the 6 picked do (Babel, Black Hawk Down, Casino Royale).
+  - This is a common authoring feature, not an edge case.
+- No sampled disc marks *every* unit of a normal stream forced, the case that would put
+  all subtitles on screen with subtitles off.
+
+**Caveat, recorded and not fixed (needs a rebuild):** the COMMIT contract's contiguity
+clamp (`spu_contig`) treats any committed unit as on screen. Under `forced_only`, a
+committed-but-HIDDEN non-forced unit therefore still counts as the predecessor. A forced
+unit that follows it, if the display-order hold is cut short, is shown at `stc` instead of
+its authored time. This is bounded by the existing ~700 ms hold bound, and the HW timing
+matched the subtitles-on arm. The precise predecessor would be
+`c_valid && (!forced_only || c_forced)`.
+
+**Known bound, inherited and not widened here** (recorded per the spec-maximum rule;
+**maintainer decision 2026-10-04: widen to 32 on its own branch**, roadmap "Subtitle tracks
+to the spec maximum"): the reader keeps **16 of the PGC's 32** `subp_control`
+entries (`subp_ctl_mem`), and the user track index is 3 bits.
+- SPRM2 values 16–31 are treated as undeclared and fall back. They do not alias onto
+  0–15, which the old `[3:0]` truncation would have done.
+- Widening costs +16×32 flops plus a 32:1 read at ~3 % ALM headroom. Streams 16–31 are
+  unreachable until then.
+
+**Gates.**
+- `bench/dvd/run_forced_subs.sh --red`:
+  - `spu_forced_tb` arms F1–F6, on the real Matrix unit and its one-byte forced variant;
+  - every other `spu_decode` bench;
+  - four mutations, each tripping exactly its own arms.
+- `tools/check_forced_subs_wiring.py`: reads the `emu.sv` seam. It is RED on `main` and on
+  four mutations.
+- `bench/dvd/run_subpic.sh`: unchanged, including the white-rabbit re-send chain.
+
 ## v1 scope & decisions to make (write them down as you go)
 
 - **Palette (the main deferral):** the real 4 colours + alpha come from the **IFO PGC
@@ -414,7 +503,8 @@ multi-player option disappears."*
   route? does the chroma fringe stay gone?).
 - **OSD control:** add `CONF_STR` options — subtitle **on/off** + **track select** (static
   list like `O68 Audio Track`; smart per-disc enumeration needs IFO → follow-up).
-- **CHG_COLCON** (karaoke wipes) and **forced/menu highlights** (FSTA_DSP): out of v1 scope.
+- **CHG_COLCON** (karaoke wipes): out of v1 scope. *(FSTA_DSP forced subtitles: shipped
+  2026-10-03, see "Forced subtitles" above.)*
 
 ## Verification discipline (repo rule)
 

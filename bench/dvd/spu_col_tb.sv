@@ -18,7 +18,7 @@ module spu_col_tb;
 
     spu_decode #(.BMP_N(BMP_N), .STRIDE(STRIDE), .SPU_CAP(SPU_CAP)) dut (
         .new_cell(1'b0),   // 2026-09-18: menu re-send guard opener (no NAV here)
-        .clk(clk), .rst_n(rst_n), .enable(enable), .interlaced(1'b0),
+        .clk(clk), .rst_n(rst_n), .enable(enable), .forced_only(1'b0), .interlaced(1'b0),
         .sp_byte(sp_byte), .sp_valid(sp_valid), .sp_frame_start(sp_frame_start),
         .sp_pts(sp_pts), .sp_pts_valid(sp_pts_valid),
         .stc(stc), .q_x(q_x), .q_y(q_y), .q_idx(q_idx), .q_inside(q_inside),

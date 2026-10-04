@@ -484,6 +484,13 @@ Subtitles are separate from captions and are drawn by the core, so they work on 
 **B8** to see the current setting, and again while the popup is up to change it; `SUB OFF` means they are disabled. Some discs author menu subpictures
 with zero contrast, which is intentional on their part.
 
+### A subtitle appears even though subtitles are off
+
+That is a **forced** subtitle. A disc can mark individual lines to be shown whatever the
+subtitle setting, usually to translate a few lines of foreign-language dialogue, and a
+set-top player shows them too. They come from the subtitle track the disc chose, or from its
+first track if it chose none. Turn subtitles on with **B8** to see the full track instead.
+
 ### A menu button highlight or a subtitle graphic is drawn wrongly
 
 !!! info "Fixed in v0.7.0"

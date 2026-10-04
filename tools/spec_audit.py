@@ -321,15 +321,73 @@ def _video_ts_vob(nav):
     return None
 
 
+def spu_has_fsta(unit):
+    """True if a complete SPU unit's display-control table carries a 0x00
+    FSTA_DSP (forced start) command. Walks the DCSQ chain exactly like
+    dvd/spu_decode.sv: DCSQT start = u16 @2; each DCSQ = delay u16, next u16,
+    commands until 0xFF; the last DCSQ points at itself. Bounded so a
+    malformed unit cannot loop."""
+    n = len(unit)
+    if n < 4:
+        return False
+    off = (unit[2] << 8) | unit[3]
+    seen = set()
+    while off + 4 <= n and off not in seen and len(seen) < 64:
+        seen.add(off)
+        nxt = (unit[off+2] << 8) | unit[off+3]
+        q = off + 4
+        while q < n:
+            c = unit[q]
+            if c == 0xFF:
+                break
+            if c == 0x00:
+                return True
+            if c in (0x01, 0x02):
+                q += 1
+            elif c in (0x03, 0x04):
+                q += 3
+            elif c == 0x05:
+                q += 7
+            elif c == 0x06:
+                q += 5
+            elif c == 0x07:                      # CHG_COLCON: u16 size incl. itself
+                if q + 3 > n:
+                    break
+                q += 1 + ((unit[q+1] << 8) | unit[q+2])
+            else:
+                break                            # unknown command: stop this DCSQ
+        if nxt == off:
+            break
+        off = nxt
+    return False
+
+
 def scan_domain(f, extents):
     """Scan a domain's VOB extents (in stream order) for SPU unit sizes and
     NAV-pack HLI features. Mirrors css_scan's pack walk + spu_ref's SPU unit
     assembly (units concatenate per substream by SPDSZ = the SPU's first u16)
     and nav_extract's PCI offsets (PCI data @0x2D; hl_gi @0x60 PCI-relative)."""
     st = {}                            # substream -> bytes remaining in unit
+    # FORCED-SUBTITLE axis (2026-10-03, feature/forced-subs): reassemble each
+    # unit (ub) to read its tail DCSQ table, and classify a unit carrying 0x00
+    # FSTA_DSP by whether the VOBU it STARTED in has a live HLI. With an HLI it
+    # is an in-title button graphic (the Matrix white-rabbit class); without, it
+    # is a forced subtitle -- shown by a set-top player with subtitles OFF.
+    ub = {}                            # substream -> bytearray of the open unit
+    ub_hli = {}                        # substream -> HLI live where the unit began
+    cur_hli = False                    # the most recent NAV pack had a live HLI
     r = {"max_spu": 0, "max_spu_sub": 0, "max_spu_at": 0, "spu_units": 0,
          "spu_trunc": 0, "nav": 0, "hli": 0, "btngr_sites": 0, "btngr_max": 0,
-         "dsp_ty": set(), "foac": 0}
+         "dsp_ty": set(), "foac": 0,
+         "fsta_units": 0, "fsta_hli_units": 0, "fsta_subs": set()}
+
+    def unit_done(sub, data):
+        if spu_has_fsta(data):
+            if ub_hli.get(sub):
+                r["fsta_hli_units"] += 1
+            else:
+                r["fsta_units"] += 1
+                r["fsta_subs"].add(sub)
     pos = 0                            # running domain-relative sector index
     CHUNK = 4096 * SEC                 # 8 MB
     for lba, size in extents:
@@ -352,6 +410,8 @@ def scan_domain(f, extents):
                         and buf[o+0x29] == 0xBF and buf[o+0x2C] == 0x00):
                     r["nav"] += 1
                     pci = o + 0x2D
+                    cur_hli = (((buf[pci+0x60] << 8 | buf[pci+0x61]) & 3) != 0
+                               and (buf[pci+0x71] & 0x3F) != 0)
                     if ((buf[pci+0x60] << 8 | buf[pci+0x61]) & 3) != 0:
                         r["hli"] += 1
                         # Gate the button-feature axes on btn_ns > 0: junk-HLI
@@ -402,8 +462,16 @@ def scan_domain(f, extents):
                                         r["max_spu_sub"] = sub
                                         r["max_spu_at"] = pos
                                     st[sub] = max(spdsz - chunk, 0)
+                                    ub[sub] = bytearray(buf[pay+1:pend])
+                                    ub_hli[sub] = cur_hli
+                                    if st[sub] == 0:
+                                        unit_done(sub, ub.pop(sub))
                             else:                            # continuation chunk
                                 st[sub] = max(st.get(sub, 0) - chunk, 0)
+                                if sub in ub:
+                                    ub[sub] += buf[pay+1:pend]
+                                    if st[sub] == 0:
+                                        unit_done(sub, ub.pop(sub))
                     p += 6 + ln
                 pos += 1
     return r
@@ -434,6 +502,11 @@ def audit_deep(nav, d, verbose=False):
             print(" max_spu=%d nav=%d hli=%d trunc=%d"
                   % (r["max_spu"], r["nav"], r["hli"], r["spu_trunc"]))
         r["dsp_ty"] = sorted(r["dsp_ty"])
+        r["fsta_subs"] = sorted(r["fsta_subs"])
+        if verbose and (r["fsta_units"] or r["fsta_hli_units"]):
+            print("      %s FSTA_DSP units: %d forced-subtitle (subs %s), %d in HLI VOBUs"
+                  % (label, r["fsta_units"], ",".join("0x%02X" % x for x in r["fsta_subs"]),
+                     r["fsta_hli_units"]))
         d["deep"][label] = r
         if r["max_spu"] > SPEC_SPU:
             F.append(("WARN", "spu_size",

@@ -51,7 +51,7 @@ module spu_newcell_tb;
     wire [3:0]   a0,a1,a2,a3,c0,c1,c2,c3;
 
     spu_decode #(.HOLD_CYCLES(63000)) dut (
-        .clk(clk), .rst_n(rst_n), .enable(1'b1), .interlaced(1'b0),
+        .clk(clk), .rst_n(rst_n), .enable(1'b1), .forced_only(1'b0), .interlaced(1'b0),
         .menu_mode(1'b1), .new_cell(new_cell), .newcell_load(nl),
         .sp_byte(sp_byte), .sp_valid(sp_valid), .sp_frame_start(sp_frame_start),
         .sp_pts(sp_pts), .sp_pts_valid(sp_pts_valid),

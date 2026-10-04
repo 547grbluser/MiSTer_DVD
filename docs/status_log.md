@@ -22,6 +22,85 @@ predate later confirmations; the `CLAUDE.md` index carries the reconciled status
 
 ## Hardware status (THIS fork, verified 2026-06-21)
 
+- ✅ **FORCED SUBTITLES (2026-10-03, branch `feature/forced-subs`; HW-CONFIRMED 2026-10-04 against a `main` control arm).**
+  Full record: `docs/subpicture.md` "Forced subtitles".
+  - **Gap:** found by the 2026-10-01 *DVD Demystified* 3rd-edition audit. Units starting
+    with `0x00` FSTA_DSP are shown by a set-top player even with subtitles off (translated
+    foreign dialogue). `spu_decode` treated `0x00` like `0x01`, and with subtitles off
+    `emu.sv` routed no subpicture stream, so those lines never appeared.
+  - **Fix:**
+    - `spu_decode`: a per-unit forced flag, plus a `forced_only` input that gates visibility.
+    - `emu.sv`: `fs_route` routes the title's stream forced-only whenever no display-ON term
+      is active (`sp_disp_on`, the five terms `sp_route_en` already listed).
+    - The stream is SPRM2's if it names a declared stream 0..15, else the PGC's first
+      declared stream. This is libdvdnav's `vm_get_subp_active_stream`.
+  - **Measured** (`tools/spec_audit.py --deep`, new FSTA axis):
+    - Black Hawk Down (SPRM2 never set) carries 12 forced units in English 0x20, the first at
+      ~4:15 into the title. It is the HIL vehicle.
+    - Babel uses dedicated ~95 %-forced streams selected display-ON by its menus, so it
+      already worked.
+    - The Matrix's 146 white-rabbit FSTA units are all in HLI VOBUs and are correctly
+      excluded.
+    - A 46-disc sample: **8 of the 40 random discs (20 %)** carry forced subtitles in a title,
+      so this is a common case.
+  - **Gates:** `run_forced_subs.sh --red` (F1–F6 plus four exact-arm mutations, every other
+    `spu_decode` bench); `check_forced_subs_wiring.py` (RED on `main`); `run_subpic.sh`
+    green; Verilator full-design lint clean on the new lines.
+  - **HW (2026-10-04)**, Black Hawk Down, Disc Menus off. Each arm seeks to ~4:12 and takes
+    ~40 shots at ~1.3 s; a yellow-text count in the bottom letterbox bar is the score.
+    - **A** (`main` control, `DVD_mp2engine_20261003_2332`, subtitles off): 0 on every frame.
+    - **B** (`main`, English subtitles on): text from the first line onward. This shows the
+      instrument sees subtitles at these times.
+    - **C** (`DVD_forcedsubs_20261004_0400`, subtitles off): text on 3 frames only. They read
+      "This food is the property of Mohamed Farrah Aidid!" and "Go back to your homes!": the
+      two forced units at 255.5 s / 259.2 s, translating Somali megaphone speech. The English
+      cockpit dialogue after them stays hidden.
+    - **E** (forced-subs build, subtitles on): the same lines over the same window as B (the
+      shots are offset by the ~1 s cadence, so the scores track rather than match exactly).
+      Ordinary subtitles are unchanged.
+  - **Build:** SEED 1, `clk_dec` 88.89 MHz at 100 °C and 90.43 MHz at −40 °C (gate 86.0).
+    38,763 ALMs vs the control's 38,791, i.e. free within fitter noise. M10K/DSP unchanged.
+  - **Pre-merge regression round (2026-10-04, on the `feature/subp-32` build, which
+    contains this branch), against a `main` control arm:**
+    - **Menu highlights, 11 discs** (`tools/hil_nav_test.py`'s menu-highlight arm list:
+      ATFIRSTSIGHT, T2 ×2, The Matrix, MiB, Tomb Raider, The Office, Akira, Scene It,
+      Harry Potter, Cluedo).
+      - Both builds: 11/11 armed + highlight on + SPU routed + drawn.
+      - 6 menu screenshots are pixel-identical. The rest differ only in animated
+        backgrounds, with the same highlighted button.
+      - ⚠ The suite's own fixed-sleep driver is STALE: it failed 8/11 arms on the
+        control too, sampling during intros. A driver that waits for the board's
+        `hl_btns_armed` bit was used instead. Fixing the suite is a follow-up.
+    - **Forced subtitles with Disc Menus ON:** Black Hawk Down via its menu's PLAY MOVIE,
+      subtitles off. "Sir.", "Keep Driving!", "I'm going to be late.", "Call you back."
+      appear (5:28–6:28); the English dialogue stays clean.
+    - **Disc-chosen display-on subtitle** (`vm_owns_route`): Babel via its menu, whose
+      SetSTN `0x43` subtitles show ("Three hundred cartridges.").
+  - **What the HW test did and did not cover:** BHD never sets SPRM2, so silicon exercised
+    the first-declared fallback, which returned logical 0. **The SPRM2 arm (`fs_vm_ok`) and a
+    non-zero fallback are wiring-checked only.** They are common in practice: 131 library
+    discs SetSTN a non-zero stream with display off. The named vehicle is **Casino Royale**:
+    its menus SetSTN `0x1`/`0x2` (display off), and its forced units are in 0x21 (3) and
+    0x22 (1). Testing it means driving its language menu on the rig.
+  - **Open:**
+    - ⏳ HW: the SPRM2 arm on Casino Royale (above).
+  - **Decisions (maintainer, 2026-10-04):**
+    - **Forced stream after B8-off = the disc's choice** (SPRM2, else first declared), as
+      built. The alternative, the user's last track, was rejected. `SUB OFF` is reached by
+      stepping *past the last track*, so "last track" would almost always be the disc's
+      final language. Fixing that needs a remembered pre-cycle track for a rare benefit.
+    - **Subtitle track limit → the spec maximum of 32, on its own branch** (fall back to 16
+      if it does not fit). Measured over 1,431 title-PGC subtitle tables:
+      - **98 discs use slots 9–16**, which the B8 button cannot reach today (3-bit
+        `sub_idx`, reader clamps `subp_ntracks` to 8).
+      - 20 discs claim slots past 16. Nineteen claim all 32 (Furious 7, Jurassic World,
+        Lucy…), probably one authoring house flagging every slot; a VOB scan would confirm.
+      - The manual now states the 8-track button limit (`reference/compatibility.md`).
+      - Roadmap: "Subtitle tracks to the spec maximum".
+  - **Tooling found on the way:** `tools/lint_undriven.sh` passes **vacuously** in a fresh
+    worktree. `build_id.v` is missing there, Verilator aborts, and the script greps only for
+    "not driven". Not fixed here.
+
 - ✅ **MP2 ON THE SHARED AUDIO ENGINE (2026-10-03: M0–M4 done, HW-confirmed on the rig,
   ✅ MERGED PR #150).** M2: the RTL, bit-exact op for op on all 89 gate streams, with 18
   mutations. M3: wired in, `mp2_decode` out of the build, the rate via MFS, long frames
