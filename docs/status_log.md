@@ -45,6 +45,8 @@ predate later confirmations; the `CLAUDE.md` index carries the reconciled status
     short chunks, so the next one lands on the VOB start, takes the cached SEEK_KEY at the
     key block and is scanned. This also closes the same hole on the synchronous path. A
     core window straddling an IFO→VOB edge could hit it there too, but rarely.
+    A burst that crosses the edge now reports `2 chunks` in a `slow read` line of
+    `/tmp/dvdcss.log`, so a user's log shows the clamp firing.
   - **Gate:** `main/tests/run_tests.sh --red`. `dvd_css_test` [20] uses the disc's real
     layout: the 5768+32 burst carries 0 scrambled sectors (20 before the fix), the raw
     read stops at 11, and there is one SEEK_KEY at 5779. [20b] runs the same edge through
