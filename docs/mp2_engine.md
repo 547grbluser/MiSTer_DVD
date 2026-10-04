@@ -240,7 +240,12 @@ and two new ROMs, N 2,048 × 16 and D 512 × 18). `dts_seq` and `dts_top` take a
 - **Results so far:** `run_mp2.sh`, including the full chain (VOB → `ps_demux` →
   reframers → ring → `dvd_audio_decode`: 13,824 pairs bit-exact against the model),
   `run_vcd.sh` and `run_wav.sh` pass, as do `check_dts_wiring.py` and
-  `test_mp2_isa.py`. The rest of the regression set is running.
+  `test_mp2_isa.py`. **The whole regression set is green** on `d349c56` plus the anchor
+  fix (`64f3b55`): `run_stc_freerun`, `run_aud_retime`, `run_dts_dec --red` (D1 and D6's
+  anchors re-pointed at M3's rewritten lines), `run_cb_copy --red`, `run_mp2_eng --red`,
+  `run_mp2_ab --red` (all 89 streams, 12 frames each, pair for pair against
+  `mp2_decode`), `run_dts_seq`, `run_ac3_seq`, `run_ac3_ab`, `run_dts`, `test_mp2_isa`,
+  `check_dts_wiring` and `lint_undriven`.
 
 ## M4: fit and HIL (2026-10-03)
 
