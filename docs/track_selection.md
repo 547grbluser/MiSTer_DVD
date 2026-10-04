@@ -786,8 +786,13 @@ declared set still show the stream's own number.
   - three mutations, each caught.
 - `tools/check_subp32_wiring.py` is RED on the pre-32 code, with 31 findings.
 
-**HW vehicle.** A disc with more than 8 tracks: 24 Season 5 Disc 1 (10) or *27 Dresses*
-(12). The Subtitle button should reach the last track with its language, then `SUB OFF`.
+**HW vehicle.** It needs a disc whose MAIN FEATURE PGC declares more than 8 tracks; a
+VTS-wide count is not enough, since *27 Dresses* claims 12 but its feature declares 3.
+- 11 library discs qualify, e.g. **The Naked Gun** (85 min, 11 tracks:
+  en zh es fr ja ko zh th es fr ja), *Capote* (10), *Courageous* (10), and *MOST* (33 min,
+  19 tracks, past 16).
+- Expected: the Subtitle button walks `SUB 1/11 EN` … `SUB 11/11 JA`, then `SUB OFF`. The
+  pre-32 core stops at 8.
 
 ## Follow-ups
 

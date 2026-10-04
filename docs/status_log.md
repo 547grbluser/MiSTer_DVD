@@ -38,8 +38,9 @@ predate later confirmations; the `CLAUDE.md` index carries the reconciled status
     is timing-sensitive by construction (a `main`-reader control diverges earlier).
     Verilator: no new warnings.
   - **Next:** the build (ALM cost, the `subp_ctl_ram`/`s_lang_ram` altsyncram lines in
-    `DVD.map.rpt`), then HW on 24 Season 5 D1 (10 tracks) or *27 Dresses* (12): reach the
-    last track with its language, then `SUB OFF`.
+    `DVD.map.rpt`), then HW on **The Naked Gun** (feature declares 11 tracks): the button
+    reaches `SUB 11/11 JA`, then `SUB OFF`; a `main` control arm stops at 8. (*MOST*
+    declares 19, which covers past 16.)
 
 - ✅ **FORCED SUBTITLES (2026-10-03, branch `feature/forced-subs`; HW-CONFIRMED 2026-10-04 against a `main` control arm).**
   Full record: `docs/subpicture.md` "Forced subtitles".
