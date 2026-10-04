@@ -1,0 +1,305 @@
+; mp2.uasm -- MPEG-1 Layer II on the shared audio engine (docs/mp2_engine.md, M1).
+;
+; One frame a pass, as tools/mp2_ref.py's MP2Decoder.decode_frame (bit-exact with
+; dvd/mp2/mp2_decode.sv): the header and the length check, the table selection, the
+; allocation, scfsi and scalefactors into the record, then 12 granules. A granule's
+; codes are read here (grouped codes split by subtraction, the low digit first, as the
+; model and mp2_decode take them), each sample dequantised and scaled into X by one
+; MDQ, then three MSYN: the matrix, the window and 32 PCM pairs per slot. MFS hands the
+; header's sampling frequency to dts_top (the output NCO) before any of the frame's PCM.
+;
+; Assembled by tools/mp2_isa.py (after DTS's and AC-3's programs, in one ROM).
+; Registers: r1-r7 scratch, r8-r15 op arguments.
+
+; ---------------------------------------------------------------- error codes
+.equ E_SYNC      1                 ; no 12-bit sync
+.equ E_ID        2                 ; not MPEG-1 Layer II
+.equ E_BRATE     3                 ; free format or the forbidden index 15
+.equ E_SRATE     4                 ; the reserved sampling frequency
+.equ E_LEN       5                 ; the descriptor is shorter than the header's length
+
+; ---------------------------------------------------------------- record RAM
+.equ F_NCH       0x000             ; 1 (mono) or 2
+.equ F_MONO      0x001
+.equ F_BOUND     0x002             ; the first intensity-coded subband (sblimit if none)
+.equ F_SBLIM     0x003
+.equ F_TSET      0x004             ; 0: tables B.2a / B.2b, 1: B.2c / B.2d
+.equ F_SR        0x005             ; the sampling-frequency index (MFS exports it)
+.equ F_GR        0x006             ; the granule (0..11)
+.equ F_SCFP      0x007             ; SCF + 64 x the granule's part
+.equ T_X         0x008             ; [k] the codes as x16, ch 0's reused by ch 1 above the bound
+.equ ALLOC       0x040             ; [ch*32 + sb] the class 1..17, 0 = no samples
+.equ SCFSI       0x080             ; [ch*32 + sb]
+.equ SCF         0x100             ; [part*64 + ch*32 + sb] the scalefactor index
+
+; ---------------------------------------------------------------- the frame
+RESET:
+        vop     RCLR                    ; V ring and the window's sums: zero, as mp2_decode's init
+FRAME:
+        frame   r1                      ; r1 = the frame's length in bytes
+        get     r2, 12
+        li      r3, 0xFFF
+        bne     r2, r3, ESYNC
+        get     r2, 1                   ; ID
+        bnei    r2, 1, EID
+        get     r2, 2                   ; layer: 2 = Layer II
+        bnei    r2, 2, EID
+        get     r6, 1                   ; protection_bit (0: a CRC follows the header)
+        get     r2, 4                   ; bitrate index
+        beqi    r2, 0, EBRATE
+        beqi    r2, 15, EBRATE
+        get     r3, 2                   ; sampling frequency
+        beqi    r3, 3, ESRATE
+        st      r3, F_SR
+        get     r4, 1                   ; padding
+        shli    r5, r3, 4               ; the header's length, 144000 x bitrate / fs + padding
+        add     r5, r5, r2
+        ld      r5, C_MP2LEN[r5]
+        add     r5, r5, r4
+        blt     r1, r5, ELEN            ; shorter (truncated): refused  ;MUT lenexact: bne r1, r5, ELEN
+        beq     r1, r5, H_LEN
+        li      r8, CNT_DMIX_IGNORED    ; longer: mp2_reframer appends what follows a frame
+        vop     CNT                     ; until the next sync; decoded, the rest drained (FEND)
+H_LEN:                                  ; and counted, as mp2_decode hunts past it
+        mov     r8, r3                  ; the rate, to the NCO: before the frame's PCM, so the
+        vop     MFS                     ; drain gate never opens on a stale one
+        get     r4, 1                   ; private
+        get     r4, 2                   ; mode
+        get     r5, 2                   ; mode_extension
+        get     r7, 4                   ; copyright, original, emphasis
+        bnei    r6, 0, H_NOCRC          ;MUT nocrc: jmp H_NOCRC
+        get     r7, 16                  ; crc_check (not checked, as mp2_decode)
+H_NOCRC:
+        li      r6, 2
+        bnei    r4, 3, H_ST
+        li      r6, 1                   ;MUT mono2: li r6, 2
+H_ST:   st      r6, F_NCH
+        seqi    r7, r4, 3
+        st      r7, F_MONO
+
+; ---- the allocation table (mp2_ref.table_select): r2 bitrate index, r3 fs, r7 mono
+        beqi    r7, 0, TS_ST
+        beqi    r2, 1, TS_LO            ; mono 32 / 48 kbit/s
+        beqi    r2, 2, TS_LO
+        li      r6, 6                   ; mono: 96 kbit/s and up is "high"
+        jmp     TS_AB
+TS_ST:  beqi    r2, 4, TS_LO            ; two channels: 64 / 96 kbit/s (32 / 48 a channel)
+        beqi    r2, 6, TS_LO
+        li      r6, 10                  ; 192 kbit/s and up (96 a channel)
+TS_AB:  st      r0, F_TSET
+        li      r1, 27                  ; B.2a
+        beqi    r3, 1, TS_DONE          ; 48 kHz: always B.2a
+        blt     r2, r6, TS_DONE
+        li      r1, 30                  ; B.2b: 44.1 / 32 kHz, 96 kbit/s a channel and up ;MUT b2b: li r1, 27
+        jmp     TS_DONE
+TS_LO:  li      r6, 1
+        st      r6, F_TSET
+        li      r1, 8                   ; B.2c
+        bnei    r3, 2, TS_DONE
+        li      r1, 12                  ; B.2d: 32 kHz ;MUT b2d: li r1, 8
+TS_DONE:
+        st      r1, F_SBLIM
+        bnei    r4, 1, BND_ALL          ; joint stereo: bound = min(4 (ext + 1), sblimit)
+        addi    r6, r5, 1
+        shli    r6, r6, 2
+        min     r1, r6, r1
+BND_ALL:
+        st      r1, F_BOUND
+
+; ---- allocation (sb outer, ch inner; one shared allocation above the bound)
+        li      r1, 0
+AL_SB:  call    SBINFO                  ; r3 = the subband's class list, r4 = nbal
+        ld      r5, F_BOUND
+        bge     r1, r5, AL_SH           ;MUT nobound: nop
+        li      r2, 0
+AL_CH:  getr    r5, r4
+        add     r5, r5, r3
+        ld      r5, 0[r5]               ; the class
+        shli    r6, r2, 5
+        add     r6, r6, r1
+        st      r5, ALLOC[r6]
+        addi    r2, r2, 1
+        ld      r6, F_NCH
+        blt     r2, r6, AL_CH
+        jmp     AL_NX
+AL_SH:  getr    r5, r4
+        add     r5, r5, r3
+        ld      r5, 0[r5]
+        st      r5, ALLOC[r1]
+        st      r5, ALLOC+32[r1]
+AL_NX:  addi    r1, r1, 1
+        ld      r6, F_SBLIM
+        blt     r1, r6, AL_SB
+
+; ---- scfsi
+        li      r1, 0
+SI_SB:  li      r2, 0
+SI_CH:  shli    r6, r2, 5
+        add     r6, r6, r1
+        ld      r5, ALLOC[r6]
+        beqi    r5, 0, SI_NX
+        get     r5, 2
+        st      r5, SCFSI[r6]
+SI_NX:  addi    r2, r2, 1
+        ld      r5, F_NCH
+        blt     r2, r5, SI_CH
+        addi    r1, r1, 1
+        ld      r5, F_SBLIM
+        blt     r1, r5, SI_SB
+
+; ---- scalefactors: scfsi 0 a b c, 1 a a c, 2 a a a, 3 a c c
+        li      r1, 0
+SF_SB:  li      r2, 0
+SF_CH:  shli    r6, r2, 5
+        add     r6, r6, r1
+        ld      r5, ALLOC[r6]
+        beqi    r5, 0, SF_NX
+        ld      r5, SCFSI[r6]
+        get     r3, 6
+        st      r3, SCF[r6]
+        beqi    r5, 2, SF_2
+        get     r4, 6
+        beqi    r5, 0, SF_0
+        beqi    r5, 1, SF_1
+        st      r4, SCF+64[r6]          ;MUT scfsi3: st r3, SCF+64[r6]
+        st      r4, SCF+128[r6]
+        jmp     SF_NX
+SF_1:   st      r3, SCF+64[r6]
+        st      r4, SCF+128[r6]
+        jmp     SF_NX
+SF_0:   st      r4, SCF+64[r6]
+        get     r4, 6
+        st      r4, SCF+128[r6]
+        jmp     SF_NX
+SF_2:   st      r3, SCF+64[r6]
+        st      r3, SCF+128[r6]
+SF_NX:  addi    r2, r2, 1
+        ld      r5, F_NCH
+        blt     r2, r5, SF_CH
+        addi    r1, r1, 1
+        ld      r5, F_SBLIM
+        blt     r1, r5, SF_SB
+
+; ---- 12 granules. X's sample region is zeroed once a frame: the allocation holds
+;      for the whole frame, so an unallocated subband's samples stay 0 in every slot
+        vop     XCLR                    ;MUT noclr: nop
+        st      r0, F_GR
+GR:     ld      r5, F_GR
+        shri    r5, r5, 2               ; the part (scalefactor third)
+        shli    r5, r5, 6
+        addi    r5, r5, SCF
+        st      r5, F_SCFP
+        li      r1, 0
+GS_SB:  li      r2, 0
+GS_CH:  shli    r6, r2, 5
+        add     r6, r6, r1              ; ch*32 + sb
+        ld      r3, ALLOC[r6]
+        beqi    r3, 0, GS_NX
+        mov     r11, r3                 ; MDQ a3: the class
+        ld      r12, F_SCFP
+        add     r12, r12, r6
+        ld      r12, 0[r12]             ; a4: the scalefactor index
+        ld      r10, C_MP2D16[r3]       ; a2: 2^(15 - dsh)
+        ld      r7, C_MP2CB[r3]
+        andi    r4, r7, 31              ; the code's bits
+        shri    r7, r7, 8               ; 16 - nb
+        beqi    r2, 0, GS_RD            ; intensity: ch 1 above the bound takes ch 0's codes
+        ld      r5, F_BOUND
+        bge     r1, r5, GS_ISSUE        ;MUT ownint: nop
+GS_RD:  ld      r5, C_MP2CA[r3]
+        beqi    r5, 0, GS_UNG
+        getr    r4, r4                  ; a grouped code: three base-n digits
+        shri    r3, r5, 8               ; n^2
+        andi    r5, r5, 255             ; n
+        li      r9, 0                   ; d2 = code / n^2
+GD_2:   blt     r4, r3, GD_1
+        sub     r4, r4, r3
+        addi    r9, r9, 1
+        jmp     GD_2
+GD_1:   li      r8, 0                   ; d1 = rem / n, d0 = rem % n
+GD_1L:  blt     r4, r5, GD_0
+        sub     r4, r4, r5
+        addi    r8, r8, 1
+        jmp     GD_1L
+GD_0:   shl     r4, r4, r7              ; x16 = (q << (16 - nb)) ^ 0x8000: the MSB inverted,
+        xori    r4, r4, -32768          ; the code a signed fraction of 16 bits
+        st      r4, T_X                 ;MUT hifirst: st r4, T_X+2
+        shl     r8, r8, r7
+        xori    r8, r8, -32768
+        st      r8, T_X+1
+        shl     r9, r9, r7
+        xori    r9, r9, -32768
+        st      r9, T_X+2               ;MUT hifirst: st r9, T_X
+        jmp     GS_ISSUE
+GS_UNG: getr    r5, r4                  ; three codes of nb bits
+        shl     r5, r5, r7
+        xori    r5, r5, -32768
+        st      r5, T_X
+        getr    r5, r4
+        shl     r5, r5, r7
+        xori    r5, r5, -32768
+        st      r5, T_X+1
+        getr    r5, r4
+        shl     r5, r5, r7
+        xori    r5, r5, -32768
+        st      r5, T_X+2
+GS_ISSUE:
+        mov     r8, r6                  ; a0: X at {k, ch, sb}; a1: x16
+        ld      r9, T_X
+        vop     MDQ
+        addi    r8, r6, 64
+        ld      r9, T_X+1
+        vop     MDQ
+        addi    r8, r6, 128
+        ld      r9, T_X+2
+        vop     MDQ
+GS_NX:  addi    r2, r2, 1
+        ld      r5, F_NCH
+        blt     r2, r5, GS_CH
+        addi    r1, r1, 1
+        ld      r5, F_SBLIM
+        blt     r1, r5, GS_SB
+        li      r8, 0                   ; the three slots: a0 k, a1 mono
+        ld      r9, F_MONO
+        vop     MSYN
+        li      r8, 1
+        vop     MSYN
+        li      r8, 2
+        vop     MSYN
+        ld      r5, F_GR
+        addi    r5, r5, 1
+        st      r5, F_GR
+        blti    r5, 12, GR
+        fend                            ; the ancillary data
+        jmp     FRAME
+
+; ---------------------------------------------------------------- subroutines
+; SBINFO: r1 the subband -> r3 its class list (const address, indexed by the allocation
+; code), r4 the allocation's bits. Clobbers r5.
+SBINFO: ld      r5, F_TSET
+        bnei    r5, 0, SBI_CD
+        li      r3, C_L0                ; B.2a / B.2b
+        li      r4, 4
+        blti    r1, 3, SBI_R
+        li      r3, C_L1
+        blti    r1, 11, SBI_R
+        li      r3, C_L2
+        li      r4, 3
+        blti    r1, 23, SBI_R
+        li      r3, C_L3
+        li      r4, 2
+SBI_R:  ret
+SBI_CD: li      r3, C_L4                ; B.2c / B.2d
+        li      r4, 4
+        blti    r1, 2, SBI_R
+        li      r3, C_L5
+        li      r4, 3
+        ret
+
+; ================================================================ errors
+; A branch to ERRV + code refuses the frame with that code (tools/dts_isa.py).
+.equ ESYNC      ERRV + E_SYNC
+.equ EID        ERRV + E_ID
+.equ EBRATE     ERRV + E_BRATE
+.equ ESRATE     ERRV + E_SRATE
+.equ ELEN       ERRV + E_LEN

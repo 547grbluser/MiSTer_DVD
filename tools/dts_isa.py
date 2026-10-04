@@ -63,7 +63,7 @@ import dts_tables as T   # noqa: E402
 
 REPO = os.path.dirname(HERE)
 UASM = os.path.join(REPO, 'dvd', 'dts', 'dts.uasm')
-UMEM = os.path.join(REPO, 'dvd', 'dts', 'engine_ucode.mem')    # both programs (DTS, AC-3)
+UMEM = os.path.join(REPO, 'dvd', 'dts', 'engine_ucode.mem')    # the programs (DTS, AC-3, MP2)
 CMEM = os.path.join(REPO, 'dvd', 'dts', 'engine_const.mem')
 HMEM = os.path.join(REPO, 'dvd', 'dts', 'dts_huff_lo.mem')      # nodes 0..2047
 HMEM_HI = os.path.join(REPO, 'dvd', 'dts', 'dts_huff_hi.mem')   # nodes 2048..: see huff_mem_words
@@ -80,6 +80,7 @@ FN = {n: i for i, n in enumerate(FNS)}
 CONDS = ['eq', 'ne', 'lt', 'ge']
 VOPS = ['xclr', 'xq', 'xvq', 'adpcm', 'joint', 'bfly', 'mixsyn', 'hclr', 'cnt']
 VOP = {n: i for i, n in enumerate(VOPS)}
+VOP['rclr'] = 28                  # shared with MP2 (tools/mp2_isa.py): zero the ring and b2
 MEM_REC, MEM_CONST = 0x0000, 0x1000
 REC_WORDS = 0x0800
 STACK_DEPTH = 8
@@ -380,7 +381,7 @@ CYC = {
     'xclr': 1284, 'hclr': 4, 'hclr_band': 4, 'joint': 14, 'bfly': 1027, 'cnt': 2,
     'vop': 2, 'xq_setup': 10, 'xq_setup_huff': 12, 'xq_tail': 3, 'xvq': 16,
     'adpcm_plain': 12, 'adpcm_pred': 47,
-    'mixsyn': 96, 'mixsyn_side': 1131,
+    'mixsyn': 96, 'mixsyn_side': 1131, 'rclr': 2048 + 3,
 }
 CB_LATENCY = 20       # the codebook port's request-to-row latency (cycles), P2 measures it
 
@@ -488,10 +489,15 @@ class Machine:
     # -- vector ops ----------------------------------------------------------
     def vop(self, op):
         a = [self.reg[i] for i in range(8, 16)]
-        name = VOPS[op]
+        name = VOPS[op] if op < len(VOPS) else {VOP['rclr']: 'rclr'}[op]
         c0, b0 = self.cycles, self.bitpos
         op_t = 0
-        if name == 'xclr':
+        if name == 'rclr':                # the rings and carried sums; the offsets stay
+            for s in self.synth:
+                s.buf = [0] * 512
+                s.buf2 = [0] * 32
+            op_t = CYC['rclr']
+        elif name == 'xclr':
             for ch in range(NCH_MAX):
                 for b in range(32):
                     self.X[ch][b] = [0] * 8
@@ -808,24 +814,29 @@ def cb_host_images():
 def write_mems(check=False):
     words, labels, _ = assemble(open(UASM).read())
     import ac3_isa as A                          # the second program in the same ROM
+    import mp2_isa as P                          # ... and the third (docs/mp2_engine.md)
     awords, alabels = A.load_program()
-    allw = words + awords[len(words):]
-    allc = CONST + A.CONST
+    pwords, plabels = P.load_program()
+    assert pwords[:len(awords)] == awords and awords[:len(words)] == words
+    allw = pwords
+    allc = CONST + A.CONST + P.CONST
     assert len(allw) <= ERR_BASE and len(allc) <= 1024
     files = {UMEM: [f'{w:010x}' for w in allw],
              CMEM: [f'{w:04x}' for w in allc],
              HMEM: [f'{w:05x}' for w in huff_mem_words()[:2048]],
              HMEM_HI: [f'{w:05x}' for w in huff_mem_words()[2048:]],
              RMEM: [f'{r:03x}' for r in HUFF_ROOTS],
-             USVH: ucode_svh(allw, labels, alabels, len(allc)) + A.svh_lines()}
+             USVH: ucode_svh(allw, labels, alabels, len(allc)) + A.svh_lines() + P.svh_lines(plabels)}
     import dts_vecrom as V                       # the vector engine's ROMs
     files.update({
         os.path.join(VDIR, 'dts_vconst.mem'): [f'{w:06x}' for w in V.vconst_words()],
         os.path.join(VDIR, 'dts_win.mem'): [f'{w:06x}' for w in V.window_words()],
         # the IMDCT program, then AC-3's dither-LFSR table at 768 (dts_vec IP_DITH)
         os.path.join(VDIR, 'dts_iprog.mem'): [f'{w:05x}' for w in A.iprog_words(V.prog_words())],
-        os.path.join(VDIR, 'dts_icoef.mem'): [f'{c & 0x7FFFFFF:07x}' for c in V.ICOEF],
+        # the IMDCT's coefficients, then MP2's C and SCF (tools/mp2_isa.py icoef_words)
+        os.path.join(VDIR, 'dts_icoef.mem'): [f'{c & 0x7FFFFFF:07x}' for c in P.icoef_words(V.ICOEF)],
         os.path.join(VDIR, 'dts_vec.svh'): V.vec_svh()})
+    files.update({os.path.join(VDIR, n): w for n, w in P.vec_files().items()})
     # D4: the codebooks as the power-up contents of three FIFOs, and their checksum
     lpcm, mp2, ring, csum = cb_host_images()
     files.update({
@@ -846,7 +857,7 @@ def write_mems(check=False):
         else:
             os.makedirs(os.path.dirname(path), exist_ok=True)
             open(path, 'w').write(text)
-    print(f'dts_isa: {len(words)} DTS + {len(allw) - len(words)} AC-3 = {len(allw)} microcode '
+    print(f'dts_isa: {len(words)} DTS + {len(awords) - len(words)} AC-3 + {len(allw) - len(awords)} MP2 = {len(allw)} microcode '
           f'words; {len(allc)} constant words; '
           f'{len(HUFF_NODES)} Huffman nodes, {len(HUFF_ROOTS)} book roots')
     if check:

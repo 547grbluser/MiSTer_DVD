@@ -34,6 +34,20 @@
 //                active bands' bins, L and R read before either is written
 //   op 25 IMDCT  the block's coefficients are ready: imdct_req until imdct_done, X's
 //                read port the caller's (coef_ra -> coef_q, one cycle)
+//
+// MP2's ops (docs/mp2_engine.md M2; tools/mp2_isa.py Machine, which proves each against
+// tools/mp2_ref.py's own functions on every op). The samples live in X at {k, ch, sb}
+// (27 bits: |S| < 2^25), V in the ring at {ch, i} (2 x 1,024, 31 bits: |V| <= 2^30);
+// neither ever saturates (proved there), so neither op clips.
+//   op 26 MDQ    a0 X address, a1 x16, a2 d16, a3 class, a4 scalefactor index:
+//                S = floor(floor((x16 C + d16 C) / 2^7) SCF / 2^20), C and SCF from icoef
+//   op 27 MSYN   a0 k, a1 mono: per channel (channel 0 only
+//                if mono) the offset -= 64; the matrix, 2,048 MACs, V = floor(sum / 2^14)
+//                into the ring; the window in two passes of 512 (V is 31 bits): the low
+//                halves into b2 as floor(sum / 2^16), then the high halves on top of it,
+//                floor(sum / 2), clip24, the PCM stage; then 32 pairs out (mono: L twice)
+//   op 28 RCLR   zero the ring and b2 (DTS's and MP2's RESET: the two share them)
+//   op 29 MFS    no vector work (as CNT): dts_top latches a0, the stream's rate
 // A refusal mid-AQ / AQC (abort, the sequencer's err_valid) ends the op WITHOUT done,
 // after the item in flight and the one still pending: the emulator stepped the dither
 // LFSR for every item the sequencer emitted. The LFSR (power-up 1) lives here; its
@@ -110,18 +124,24 @@ module dts_vec (
     logic [23:0] vk    [0:VK_WORDS-1];
     logic [23:0] win   [0:1023];
     logic [19:0] iprog [0:1023];             // the IMDCT program; AC-3's dither table at 768
-    logic [26:0] icoef [0:ICOEF_WORDS-1];
+    logic [26:0] icoef [0:255];              // the IMDCT's; MP2's C at 128, SCF at 160
+    logic [15:0] mn    [0:2047];             // MP2 N (Q1.14) {i, k}
+    logic [17:0] mw    [0:511];              // MP2 D (Q2.16)
     initial begin
         $readmemh("dvd/dts/dts_vconst.mem", vk);
         $readmemh("dvd/dts/dts_win.mem", win);
         $readmemh("dvd/dts/dts_iprog.mem", iprog);
         $readmemh("dvd/dts/dts_icoef.mem", icoef);
+        $readmemh("dvd/dts/dts_mp2n.mem", mn);
+        $readmemh("dvd/dts/dts_mp2d.mem", mw);
     end
 
     // ------------------------------------------------------------------ RAMs
-    (* ramstyle = "M10K" *) logic [24:0] xb   [0:2047];   // X {ch, band, j}: 25 bits (a butterflied band)
+    (* ramstyle = "M10K" *) logic [26:0] xb   [0:2047];   // X {ch, band, j}: 25 bits (a butterflied
+                                                          // band); MP2's samples 27
     (* ramstyle = "M10K" *) logic [23:0] hb   [0:1023];   // ADPCM history {ch, band, k}, k 0 the oldest
-    (* ramstyle = "M10K" *) logic [23:0] ring [0:1023];   // IMDCT rings {side, i}
+    (* ramstyle = "M10K" *) logic [31:0] ring [0:2047];   // IMDCT rings {0, side, i}, 24 bits;
+                                                          // MP2's V {ch, i}, 31 bits
     // the four small buffers share one M10K (each alone took a block): their phases
     // never overlap -- the IMDCT scratch (mix, IMDCT), the window's carried sums
     // (window) and the PCM pairs (written by the window's outputs, read by the emit):
@@ -130,14 +150,14 @@ module dts_vec (
     //   128..191 pcm {side, i}     the 32 PCM pairs, 16 bits (L then R)
     (* ramstyle = "M10K" *) logic [28:0] sm [0:255];
     initial begin                    // as the emulator: every buffer starts at zero
-        for (int n = 0; n < 2048; n++) xb[n] = 25'd0;
-        for (int n = 0; n < 1024; n++) begin hb[n] = 24'd0; ring[n] = 24'd0; end
+        for (int n = 0; n < 2048; n++) begin xb[n] = 27'd0; ring[n] = 32'd0; end
+        for (int n = 0; n < 1024; n++) hb[n] = 24'd0;
         for (int n = 0; n < 256; n++) sm[n] = 29'd0;
     end
 
-    logic [10:0] xb_ra;  logic [24:0] xb_q;
+    logic [10:0] xb_ra;  logic [26:0] xb_q;
     logic  [9:0] hb_ra;  logic [23:0] hb_q;
-    logic  [9:0] rg_ra;  logic [23:0] rg_q;
+    logic [10:0] rg_ra;  logic [31:0] rg_q;
     logic  [5:0] b2_ra, sc_ra;
     logic  [7:0] sm_ra;  logic [28:0] sm_q;
     logic  [4:0] pb_ra;
@@ -148,12 +168,15 @@ module dts_vec (
     logic  [8:0] vk_ra;  logic [23:0] vk_q;
     logic  [9:0] wn_ra;  logic [23:0] wn_q;
     logic  [9:0] ip_ra;  logic [19:0] ip_q;
-    logic  [6:0] ic_ra;  logic [26:0] ic_q;
+    logic  [7:0] ic_ra;  logic [26:0] ic_q;
+    logic [10:0] mn_ra;  logic [15:0] mn_q;
+    logic  [8:0] mw_ra;  logic [17:0] mw_q;
 
     // stage-Y write controls (the issue-side controls, registered)
     logic        x_xb_we, x_hb_we, x_rg_we, x_b2_we, x_sc_we, x_p_we, x_mag_en;
     logic [10:0] x_xb_wa;
-    logic  [9:0] x_hb_wa, x_rg_wa;
+    logic  [9:0] x_hb_wa;
+    logic [10:0] x_rg_wa;
     logic  [5:0] x_b2_wa, x_sc_wa, x_p_wa;
     logic signed [55:0] res;
     // the PCM stage: res registered, then rounded to s16 and saturated
@@ -164,11 +187,11 @@ module dts_vec (
     wire  signed [15:0] p_s16 = (p_rnd > 25'sd32767) ? 16'sh7FFF :
                                 (p_rnd < -25'sd32768) ? 16'sh8000 : p_rnd[15:0];
 
-    assign coef_q = xb_q;
+    assign coef_q = xb_q[24:0];
     always_ff @(posedge clk) begin
-        xb_q <= xb[xb_ra];    if (x_xb_we) xb[x_xb_wa] <= res[24:0];
+        xb_q <= xb[xb_ra];    if (x_xb_we) xb[x_xb_wa] <= res[26:0];
         hb_q <= hb[hb_ra];    if (x_hb_we) hb[x_hb_wa] <= res[23:0];
-        rg_q <= ring[rg_ra];  if (x_rg_we) ring[x_rg_wa] <= res[23:0];
+        rg_q <= ring[rg_ra];  if (x_rg_we) ring[x_rg_wa] <= res[31:0];
         sm_q <= sm[sm_ra];
         if (x_sc_we)      sm[{2'b00, x_sc_wa}] <= res[28:0];
         else if (x_b2_we) sm[{2'b01, x_b2_wa}] <= res[28:0];
@@ -177,6 +200,8 @@ module dts_vec (
         wn_q <= win[wn_ra];
         ip_q <= iprog[ip_ra];
         ic_q <= icoef[ic_ra];
+        mn_q <= mn[mn_ra];
+        mw_q <= mw[mw_ra];
     end
 
     // ------------------------------------------------------------------ state
@@ -187,6 +212,8 @@ module dts_vec (
         V_AD0, V_AD1, V_AD2, V_AD3,
         V_BF,
         V_MX, V_IPS, V_IP, V_WIN, V_WINW, V_EMIT, V_EMITL, V_EMITW,
+        // MP2
+        V_MQ0, V_MQ1, V_MQ2, V_MQ3, V_MQ4, V_MS0, V_MM, V_MWIN, V_MWW,
         // AC-3
         V_AW, V_AD, V_CSC, V_CCH, V_CD1, V_CD2, V_CMUL, V_CZ, V_RM, V_IM
     } vstate_t;
@@ -205,7 +232,8 @@ module dts_vec (
     logic  [2:0] aj, as;                     // ADPCM sample, issue step (0..4)
     logic [24:0] bf_a, bf_c;                 // BFLY: X[p], X[q] of the element
     logic        side;
-    logic  [8:0] off0, off1;                 // the rings' offsets (FFmpeg's synth offset)
+    logic  [9:0] off0, off1;                 // the rings' offsets (FFmpeg's synth offset,
+                                             // [8:0]); MP2's voff, all ten bits
     logic [28:0] mag;                        // the mixed column's sum of |v|
     logic        pshift;                     // the IMDCT pre-shift is 2 (else 0)
     logic  [2:0] nch;
@@ -222,7 +250,8 @@ module dts_vec (
     logic  [8:0] w, w_d;                     // window element {q, i, tap}
     logic        w_go;
 
-    wire  [8:0] off = side ? off1 : off0;
+    wire  [8:0] off  = side ? off1[8:0] : off0[8:0];
+    wire  [9:0] moff = side ? off1 : off0;
 
     // AC-3: the item at the port, the bin being scattered, the LFSR
     localparam [5:0] OP_AQ = 6'd21, OP_AQC = 6'd22, OP_CZERO = 6'd23, OP_REMAT = 6'd24,
@@ -250,9 +279,9 @@ module dts_vec (
 
     // sign extensions (named, no casts)
     wire signed [26:0] xq27   = {{3{xq_code[23]}}, xq_code};
-    wire signed [26:0] xb27   = {{2{xb_q[24]}}, xb_q};
+    wire signed [26:0] xb27   = {{2{xb_q[24]}}, xb_q[24:0]};
     wire signed [26:0] sc27   = {{3{sc_q[23]}}, sc_q};
-    wire signed [26:0] rg27   = {{3{rg_q[23]}}, rg_q};
+    wire signed [26:0] rg27   = {{3{rg_q[23]}}, rg_q[23:0]};
     wire signed [26:0] wn27   = {{3{wn_q[23]}}, wn_q};
     wire signed [26:0] vk27   = {3'd0, vk_q};
     wire signed [26:0] sreg27 = {3'd0, sreg};
@@ -304,6 +333,24 @@ module dts_vec (
     wire  [8:0] mx_g = VK_GAIN + {2'd0, a1[3:0], 3'd0} + {4'd0, a1[3:0], 1'b0} +
                        {5'd0, mb_c, 1'b0} + {8'd0, side};
 
+    // MP2: MSYN's matrix element k = {i, kk}; its window element {pass, j, tap}, as read
+    // (k) and as issued (k_d). D[j + 64 (t / 2) + 32 (t % 2)] is D[{t, j}]; the ring
+    // index voff + j + 128 (t / 2) + 96 (t % 2) is voff + {t[3:1], t[0], t[0], j}
+    localparam [5:0] OP_MDQ = 6'd26, OP_MSYN = 6'd27, OP_RCLR = 6'd28;
+    wire  [4:0] mw_j  = k[8:4];
+    wire  [3:0] mw_t  = k[3:0];
+    wire        mwd_p = k_d[9];
+    wire  [4:0] mwd_j = k_d[8:4];
+    wire  [3:0] mwd_t = k_d[3:0];
+    wire  [9:0] mw_rg = moff + {mw_t[3:1], mw_t[0], mw_t[0], mw_j};
+    wire  [9:0] mm_rg = moff + {4'd0, k_d[10:5]};
+    wire        m_mono = (vop == OP_MSYN) && a1[0];
+    wire signed [26:0] mn27  = {{11{mn_q[15]}}, mn_q};
+    wire signed [26:0] mw27  = {{9{mw_q[17]}}, mw_q};
+    wire signed [26:0] vlo27 = {11'd0, rg_q[15:0]};
+    wire signed [26:0] vhi27 = {{11{rg_q[31]}}, rg_q[31:16]};
+    wire signed [26:0] s27   = xb_q;
+
     // ------------------------------------------------------------------ the datapath
     logic signed [26:0] ma, mb;
     logic               acc_clr, acc_en, direct, trunc, preclip, neg, sat24, mag_en;
@@ -312,7 +359,8 @@ module dts_vec (
     logic         [5:0] rsh;
     logic               xb_we, hb_we, rg_we, b2_we, sc_we, p_wi;
     logic        [10:0] xb_wa;
-    logic         [9:0] hb_wa, rg_wa;
+    logic         [9:0] hb_wa;
+    logic        [10:0] rg_wa;
     logic         [5:0] b2_wa, sc_wa, p_wai;
     logic signed [53:0] x_prod;
     logic               x_acc_clr, x_acc_en, x_direct, x_trunc, x_preclip, x_neg, x_sat24;
@@ -372,26 +420,29 @@ module dts_vec (
         xb_we = 1'b0; hb_we = 1'b0; rg_we = 1'b0; b2_we = 1'b0; sc_we = 1'b0; p_wi = 1'b0;
         xb_wa = {a0[2:0], a1[4:0], k_d[2:0]};
         hb_wa = {a0[2:0], a1[4:0], k_d[1:0]};
-        rg_wa = {side, off + {4'd0, o_idx}};
+        rg_wa = {1'b0, side, off + {4'd0, o_idx}};
         b2_wa = {side, wd_q[0], wd_i};
         sc_wa = {!o_stage[0], o_idx};
         p_wai = {side, wd_q[0], wd_i};
         xb_ra = {a0[2:0], a1[4:0], k[2:0]};
         hb_ra = {a0[2:0], a1[4:0], k[1:0]};
-        rg_ra = {side, w_rg};
+        rg_ra = {1'b0, side, w_rg};
         b2_ra = {side, w_q[0], w_i};
         sc_ra = ip_q[5:0];
         pb_ra = k[4:0];
         // the shared small-buffer RAM's one read: the scratch (IMDCT), the carried
         // sums (window) or a PCM word (emit)
-        pb_r = (st == V_EMITL) || (st == V_EMITW);
+        pb_r = ((st == V_EMITL) || (st == V_EMITW)) && !m_mono;   // MP2 mono: L twice
         sm_ra = (st == V_WIN) ? {2'b01, b2_ra} :
+                (st == V_MWIN) ? {2'b01, side, mw_j} :
                 (st == V_EMIT || st == V_EMITL || st == V_EMITW) ? {2'b10, pb_r, pb_ra} :
                 {2'b00, sc_ra};
         vk_ra = q_sidx;
         wn_ra = {a7[0], w_t, w_q, w_i};
         ip_ra = (st == V_IPS) ? 10'd0 : (ip_bub || ip_final) ? ip_d : ip_d + 10'd1;
-        ic_ra = ip_q[12:6];
+        ic_ra = {1'b0, ip_q[12:6]};
+        mn_ra = k[10:0];
+        mw_ra = {mw_t, mw_j};
         xq_ready = (st == V_XQ7) || (st == V_AW);
         imdct_req = (st == V_IM);
         case (st)
@@ -401,6 +452,10 @@ module dts_vec (
                 if (dv) case (vop)
                     OP_XCLR: begin direct = 1'b1; xb_we = 1'b1; xb_wa = k_d[10:0]; end
                     OP_HCLR: begin direct = 1'b1; hb_we = 1'b1; hb_wa = {a0[2:0], k_d[6:0]}; end
+                    OP_RCLR: begin                      // the ring, and b2 in its first 64
+                        direct = 1'b1; rg_we = 1'b1; rg_wa = k_d[10:0];
+                        b2_we = (k_d < 12'd64); b2_wa = k_d[5:0];
+                    end
                     OP_XVQ: begin                       // clip23((v x scale + 8) >> 4)
                         ma = vq27; mb = sreg27; rsh = 6'd4; sat24 = 1'b1; xb_we = 1'b1;
                     end
@@ -435,7 +490,7 @@ module dts_vec (
                     3'd2: begin ma = hs2; mb = cs1; end
                     3'd3: begin                 // clip23(x + clip23(norm(pred, 13)))
                         ma = hs3; mb = cs0; rsh = 6'd13; preclip = 1'b1; sat24 = 1'b1;
-                        addend = {{31{xb_q[24]}}, xb_q};
+                        addend = {{31{xb_q[24]}}, xb_q[24:0]};
                         xb_we = 1'b1; xb_wa = {a0[2:0], a1[4:0], aj};
                     end
                     default: ;
@@ -455,10 +510,10 @@ module dts_vec (
                 xb_ra = k[0] ? {a1[2:0], k[9:2]} : {a0[2:0], k[9:2]};
                 direct = 1'b1;
                 if (k[1:0] == 2'd2) begin
-                    dsrc = {{31{bf_a[24]}}, bf_a} + {{31{xb_q[24]}}, xb_q};
+                    dsrc = {{31{bf_a[24]}}, bf_a} + {{31{xb_q[24]}}, xb_q[24:0]};
                     xb_we = 1'b1; xb_wa = {a0[2:0], k[9:2]};
                 end else if (k[1:0] == 2'd3) begin
-                    dsrc = {{31{bf_a[24]}}, bf_a} - {{31{bf_c[24]}}, bf_c};
+                    dsrc = {{31{bf_a[24]}}, bf_a} - {{31{bf_c[24]}}, bf_c};   // BFLY: X[p] - X[q]
                     xb_we = 1'b1; xb_wa = {a1[2:0], k[9:2]};
                 end
             end
@@ -549,7 +604,7 @@ module dts_vec (
                 direct = 1'b1; sat24 = 1'b1;
                 if (rb < a1[7:0] && r_act) begin
                     if (rph == 2'd2) begin
-                        dsrc = {{31{bf_a[24]}}, bf_a} + {{31{xb_q[24]}}, xb_q};
+                        dsrc = {{31{bf_a[24]}}, bf_a} + {{31{xb_q[24]}}, xb_q[24:0]};
                         xb_we = 1'b1; xb_wa = {3'd0, rb};
                     end else if (rph == 2'd3) begin
                         dsrc = {{31{bf_a[24]}}, bf_a} - {{31{bf_c[24]}}, bf_c};
@@ -558,6 +613,49 @@ module dts_vec (
                 end
             end
             V_IM: xb_ra = coef_ra;
+            // ---- MP2: MDQ -- C read, x16 C and d16 C into one sum, floored by 7; then x SCF
+            V_MQ0: ic_ra = MP2_IC_C + {3'd0, a3[4:0]};
+            V_MQ1: begin
+                ic_ra = MP2_IC_C + {3'd0, a3[4:0]};
+                ma = {{11{a1[15]}}, a1}; mb = {10'd0, ic_q[16:0]}; acc_en = 1'b1;
+            end
+            V_MQ2: begin
+                ic_ra = MP2_IC_SCF + {2'd0, a4[5:0]};
+                ma = {11'd0, a2}; mb = {10'd0, ic_q[16:0]};
+                acc_clr = 1'b0; acc_en = 1'b1; rsh = 6'd7; trunc = 1'b1;
+            end
+            V_MQ3: ic_ra = MP2_IC_SCF + {2'd0, a4[5:0]};          // the floor lands (ss)
+            V_MQ4: begin                        // floor(q x SCF / 2^20): never clips (|S| < 2^25)
+                ic_ra = MP2_IC_SCF + {2'd0, a4[5:0]};
+                ma = ss[26:0]; mb = {5'd0, ic_q[21:0]}; rsh = 6'd20; trunc = 1'b1;
+                xb_we = 1'b1; xb_wa = a0[10:0];
+            end
+            // ---- MP2: MSYN's matrix, V[i] = floor(sum_k N[i][k] S[k] / 2^14) (|V| <= 2^30)
+            V_MM: begin
+                xb_ra = {3'd0, a0[1:0], side, k[4:0]};
+                if (dv) begin
+                    ma = mn27; mb = s27; acc_clr = (k_d[4:0] == 5'd0); acc_en = 1'b1;
+                    if (k_d[4:0] == 5'd31) begin
+                        rsh = 6'd14; trunc = 1'b1; rg_we = 1'b1; rg_wa = {side, mm_rg};
+                    end
+                end
+            end
+            // ---- MP2: MSYN's window, the low halves into b2, then the high halves on top
+            V_MWIN: begin
+                rg_ra = {side, mw_rg};
+                if (dv) begin
+                    ma = mw27; mb = mwd_p ? vhi27 : vlo27;
+                    acc_clr = (mwd_t == 4'd0); acc_en = 1'b1;
+                    init = mwd_p ? {{27{b2_q[28]}}, b2_q} : 56'sd0;
+                    if (mwd_t == 4'd15) begin
+                        trunc = 1'b1;
+                        if (!mwd_p) begin rsh = 6'd16; b2_we = 1'b1; b2_wa = {side, mwd_j}; end
+                        else begin
+                            rsh = 6'd1; sat24 = 1'b1; p_wi = 1'b1; p_wai = {side, mwd_j};
+                        end
+                    end
+                end
+            end
             default: ;
         endcase
     end
@@ -573,7 +671,7 @@ module dts_vec (
              st == V_CD2 || st == V_CMUL) && abort) ab <= 1'b1;
         if (!rst_n) begin
             st <= V_IDLE; pcm_valid <= 1'b0; cb_got <= 1'b0;
-            off0 <= 9'd0; off1 <= 9'd0;
+            off0 <= 10'd0; off1 <= 10'd0;
             lfsr <= 16'd1;
         end else case (st)
             V_IDLE: if (start) begin
@@ -628,6 +726,9 @@ module dts_vec (
                         if (args[31:16] > 16'd13) st <= V_RM; else st <= V_DONE;
                     end
                     OP_IMDCT: st <= V_IM;
+                    OP_MDQ: st <= V_MQ0;
+                    OP_MSYN: begin side <= 1'b0; st <= V_MS0; end
+                    OP_RCLR: begin lcnt <= 12'd2048; st <= V_LOOP; end
                     default: st <= V_DONE;          // CNT
                 endcase
             end
@@ -670,8 +771,8 @@ module dts_vec (
                 if (rb >= a1[7:0]) st <= V_DRAIN;
                 else if (!r_act) rb <= rb + 8'd1;
                 else begin
-                    if (rph == 2'd1) bf_a <= xb_q;      // L, read in phase 0
-                    if (rph == 2'd2) bf_c <= xb_q;      // R, read in phase 1
+                    if (rph == 2'd1) bf_a <= xb_q[24:0];      // L, read in phase 0
+                    if (rph == 2'd2) bf_c <= xb_q[24:0];      // R, read in phase 1
                     rph <= rph + 2'd1;
                     if (rph == 2'd3) rb <= rb + 8'd1;
                 end
@@ -741,8 +842,8 @@ module dts_vec (
             end
             // ---- BFLY
             V_BF: begin
-                if (k[1:0] == 2'd1) bf_a <= xb_q;   // X[p], read in phase 0
-                if (k[1:0] == 2'd2) bf_c <= xb_q;   // X[q], read in phase 1
+                if (k[1:0] == 2'd1) bf_a <= xb_q[24:0];   // X[p], read in phase 0
+                if (k[1:0] == 2'd2) bf_c <= xb_q[24:0];   // X[q], read in phase 1
                 k <= k + 12'd1;
                 if (k == 12'd1023) st <= V_DRAIN;
             end
@@ -795,12 +896,12 @@ module dts_vec (
                 k <= k + 12'd1;
                 if (k == 12'd1) begin
                     if (!side) begin
-                        off0 <= off0 - 9'd32;
+                        off0 <= off0 - 10'd32;
                         side <= 1'b1; mb_b <= 5'd0; mb_c <= 3'd0; mx_go <= 1'b1; mag <= 29'd0;
                         dv <= 1'b0;
                         st <= V_MX;
                     end else begin
-                        off1 <= off1 - 9'd32;
+                        off1 <= off1 - 10'd32;
                         k <= 12'd0;
                         st <= V_EMIT;
                     end
@@ -812,6 +913,38 @@ module dts_vec (
                 pcm_l <= pl_hold; pcm_r <= sm_q[15:0]; pcm_valid <= 1'b1;
                 k <= k + 12'd1;
                 if (k == 12'd31) st <= V_DONE; else st <= V_EMIT;
+            end
+            // ---- MP2: MDQ
+            V_MQ0: st <= V_MQ1;                     // C is read
+            V_MQ1: st <= V_MQ2;
+            V_MQ2: st <= V_MQ3;
+            V_MQ3: begin ss <= res[46:0]; st <= V_MQ4; end
+            V_MQ4: st <= V_DRAIN;
+            // ---- MP2: MSYN, a channel: the offset, the matrix, the window
+            V_MS0: begin
+                if (side) off1 <= off1 - 10'd64; else off0 <= off0 - 10'd64;
+                k <= 12'd0; dv <= 1'b0;
+                st <= V_MM;
+            end
+            V_MM: begin
+                dv <= (k < 12'd2048);
+                k_d <= k;
+                if (k < 12'd2048) k <= k + 12'd1;
+                else if (!dv) begin k <= 12'd0; st <= V_MWIN; end   // the last V lands now
+            end
+            V_MWIN: begin
+                dv <= (k < 12'd1024);
+                k_d <= k;
+                if (k < 12'd1024) k <= k + 12'd1;
+                else if (!dv) begin k <= 12'd0; st <= V_MWW; end
+            end
+            V_MWW: begin                            // the last PCM word lands
+                k <= k + 12'd1;
+                if (k == 12'd1) begin
+                    k <= 12'd0;
+                    if (!side && !a1[0]) begin side <= 1'b1; st <= V_MS0; end
+                    else st <= V_EMIT;
+                end
             end
             default: st <= V_IDLE;
         endcase

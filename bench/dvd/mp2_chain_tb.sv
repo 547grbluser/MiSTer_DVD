@@ -1,7 +1,7 @@
 // mp2_chain_tb.sv — full-chain MP2 test: a DVD-spec VOB (MPEG-2 PS, MP2 audio
 // on stream_id 0xC0) through the REAL pipeline
 //     ps_demux -> ac3_reframer -> dts_reframer -> mp2_reframer -> audio_ring
-//     -> dvd_audio_decode (mp2_decode inside)
+//     -> dvd_audio_decode (MP2 on the audio engine, out of the LPCM FIFO)
 // with the PCM output compared BIT-EXACT against tools/mp2_ref.py's decode of
 // the same audio ES. Proves the emu.sv wiring contract end to end: 0xC0
 // routing + track select, PES-granular->frame-granular start regeneration,
@@ -23,7 +23,7 @@
 //   iverilog -g2012 -I dvd/ac3 -o bench/dvd/mp2_chain_sim \
 //     dvd/ps_demux.sv dvd/ac3_reframer.sv dvd/dts_reframer.sv dvd/mp2_reframer.sv \
 //     dvd/audio_ring.sv dvd/dvd_audio_decode.sv dvd/lpcm_unpack.sv \
-//     dvd/mp2/mp2_decode.sv dvd/ac3/*.sv bench/dvd/mp2_chain_tb.sv
+//     dvd/dts/cb_host_ram.sv dvd/dts/*.sv dvd/audio_engine.sv dvd/ac3/*.sv bench/dvd/mp2_chain_tb.sv
 //   vvp bench/dvd/mp2_chain_sim
 
 `timescale 1ns/1ps
@@ -204,7 +204,8 @@ module mp2_chain_tb;
 
     // capture: the mp2 core's aud_valid marks each new pair landing in the
     // output latch one cycle later
-    wire mp2_avalid = dut.mp2_aud_valid;
+    // MP2 decodes on the audio engine and plays out of the LPCM FIFO (docs/mp2_engine.md M3)
+    wire mp2_avalid = dut.lpcm_aud_valid;
     logic mp2_avalid_d;
     always @(posedge clk) mp2_avalid_d <= mp2_avalid;
 

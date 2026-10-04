@@ -28,7 +28,7 @@ python3 tools/dts_golden.py "$T2" --out "$GEN/r1" --frames 3 --refuse 1 > "$GEN/
 python3 tools/dts_golden.py "$SHA" --out "$GEN/sh" --frames 3 > "$GEN/sh.glog" || { cat "$GEN/sh.glog"; exit 1; }
 python3 tools/ac3_golden.py tools/streams/tone_5p1_48k_192k.ac3 --out "$GEN/ac3" --frames 3 > "$GEN/ac3.glog" || { cat "$GEN/ac3.glog"; exit 1; }
 SRC="dvd/ac3/*.sv dvd/dts/dts_seq.sv dvd/dts/dts_vec.sv dvd/dts/dts_top.sv dvd/audio_engine.sv
-     dvd/lpcm_unpack.sv dvd/mp2/mp2_decode.sv dvd/dvd_audio_decode.sv"
+     dvd/lpcm_unpack.sv dvd/dts/cb_host_ram.sv dvd/dvd_audio_decode.sv"
 TB=bench/dvd/dts_dec_tb.sv
 ARMS=("T2|+stem=$ROOT/$GEN/t2" "L150|+stem=$ROOT/$GEN/t2 +cblat=150" "SH|+stem=$ROOT/$GEN/sh"
       "R1|+stem=$ROOT/$GEN/r1" "SW|+stem=$ROOT/$GEN/t2 +ac3=$ROOT/$GEN/ac3" "OFF|+stem=$ROOT/$GEN/t2 +notables")
@@ -73,7 +73,7 @@ PYEOF
     rm -rf "$d"
   }
   D=dvd/dvd_audio_decode.sv; E=dvd/audio_engine.sv
-  mut D1 "+stem=$ROOT/$GEN/t2" $D ".quant    ((cdda_mode || dts_active) ? 2'd0 : lpcm_quant)," ".quant    (cdda_mode ? 2'd0 : lpcm_quant)," "\[(pcm|count|hang)\]" &
+  mut D1 "+stem=$ROOT/$GEN/t2" $D ".quant    ((cdda_mode || eng_pcm) ? 2'd0 : lpcm_quant)," ".quant    (cdda_mode ? 2'd0 : lpcm_quant)," "\[(pcm|count|hang)\]" &
   mut D2 "+stem=$ROOT/$GEN/t2" $D "(ser_k == 2'd0) ? ser_pair[31:24] : (ser_k == 2'd1) ? ser_pair[23:16]" "(ser_k == 2'd0) ? ser_pair[23:16] : (ser_k == 2'd1) ? ser_pair[31:24]" "\[pcm\]" &
   mut D3 "+stem=$ROOT/$GEN/t2 +notables" $D "wire         dts_ok_frame = (cur_type == T_DTS) && dts_tables_ok;" "wire         dts_ok_frame = (cur_type == T_DTS);" "\[off\]" &
   wait
@@ -88,7 +88,7 @@ PYEOF
   #   -- which itself waits for pcm_out's drain. So the engine is already idle at FRAME.
   # The [ac3] arm (every AC-3 block decoded across the change) scores the consequence.
   mut D5 "+stem=$ROOT/$GEN/t2" $D "            else if (dts_tables_ok) cur_codec <= T_LPCM;" "" "\[out\]" &
-  mut D6 "+stem=$ROOT/$GEN/t2 +ac3=$ROOT/$GEN/ac3" $D "            if (eng_frame) eng_codec_req <= (cur_type == T_AC3);" "" "\[(pcm|count|hang)\]" &
+  mut D6 "+stem=$ROOT/$GEN/t2 +ac3=$ROOT/$GEN/ac3" $D "            if (eng_frame) eng_codec_req <= (cur_type == T_AC3) ? 2'd1 : (cur_type == T_MP2) ? 2'd2 : 2'd0;" "" "\[(pcm|count|hang)\]" &
   wait
   for f in "$RES"/*; do grep -v MUTFAIL "$f"; grep -q MUTFAIL "$f" && fail=1; done
   rm -rf "$RES"

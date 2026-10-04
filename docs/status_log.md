@@ -22,9 +22,33 @@ predate later confirmations; the `CLAUDE.md` index carries the reconciled status
 
 ## Hardware status (THIS fork, verified 2026-06-21)
 
-- 🔧 **THE AC-3 PARSE ON THE SHARED AUDIO ENGINE (scenario E; 2026-10-03: A0–A2d done,
-  not wired; branch `feature/ac3-engine` from `feature/dts-decode`, `CORE_VERSION
-  dev-ac3engine`, not pushed).** Full record: `docs/ac3_engine.md`.
+- ✅ **MP2 ON THE SHARED AUDIO ENGINE (2026-10-03: M0–M4 done, HW-confirmed on the rig,
+  ✅ MERGED PR #150).** M2: the RTL, bit-exact op for op on all 89 gate streams, with 18
+  mutations. M3: wired in, `mp2_decode` out of the build, the rate via MFS, long frames
+  decoded and counted. M4: −825 ALM by entity (fit 38,791 ALM, SEED 1), and on the rig
+  the VCD and two DVD MP2 tracks correlate 0.9994 / 0.9986 / 0.9998 with `mp2_decode`'s,
+  0 refused. By ear (the maintainer), every codec on the build is clean: the full VCD, the DVD
+  MP2 clips, AC-3 5.1, T2's DTS ↔ AC-3 switching, and the MP2 → DTS handoff. The record is
+  `docs/mp2_engine.md` M2–M4.
+- (earlier) **MP2 ON THE SHARED AUDIO ENGINE (2026-10-03: M0 + M1 done; now PR #150).** Full record: `docs/mp2_engine.md`.
+  - **Why:** `mp2_decode` is the last hardwired decoder: 839 ALM, 37 M10K and 5 DSP in
+    core. The estimate for the move is −400 … −600 ALM, as headroom. The risk is VCD,
+    whose audio is all MP2, so the bar is bit identity with `mp2_decode`, A/B.
+  - **M0:** a gate corpus of 17 real windows (three DVDs, three VCDs) and 72 synthetic
+    `twolame` streams covering every rate, mode, table and CRC case. `mp2_ref.py` ==
+    `mp2_decode` on all 89 (`bench/dvd/run_mp2_model.sh`).
+  - **M1:** `dvd/dts/mp2.uasm` (236 words) and `tools/mp2_isa.py`, bit-exact on all 89.
+    MDQ and MSYN are each computed the RTL's way and the model's way, so the
+    decomposition is proved on every op. Both saturations are provably dead. The
+    window splits V (31 bits) into two passes joined through DTS's carried-sum buffer,
+    so no product shift is needed. The worst frame is 54 % of real time, including 1.25×
+    headroom on the modelled ops. Gate: `tools/test_mp2_isa.py`, with 9 RED arms that
+    all bite and 6 refusal cases.
+  - **Next:** M2, the RTL. `codec` becomes 2 bits, DTS's RESET also clears the ring, X
+    widens to 27 bits, and the ring becomes 2,048 × 32. Then an A/B bench against
+    `mp2_decode`.
+- ✅ **THE AC-3 PARSE ON THE SHARED AUDIO ENGINE (scenario E; 2026-10-03: A0–A2d, then W1
+  wired in; ✅ MERGED PR #149).** Full record: `docs/ac3_engine.md`.
   - **Ask (maintainer):** measure whether moving the AC-3 parse (and later MP2) onto the
     microcoded engine built for DTS saves ALMs over today's hardwired decoder.
     `docs/dts_decoder.md` §4 estimated −1,000 … −1,450 ALM, with the AC-3 row the least
@@ -62,7 +86,7 @@ predate later confirmations; the `CLAUDE.md` index carries the reconciled status
     - recombine saturation: no stream reaches it.
 
 - ✅ **IN-FABRIC DTS CORE DECODER (2026-10-03: P2 + P3 built, in core, and PLAYING on the
-  rig on `feature/ac3-engine`, not merged).** HIL: *Ultimate T2*'s DTS track at −32 dBFS
+  rig; ✅ MERGED PR #149, P0/P1 PR #148).** HIL: *Ultimate T2*'s DTS track at −32 dBFS
   (silent before), correlation 0.922 with its AC-3 track over the same passage,
   telemetry `dts_ok 1`, checksum = `CB_SUM`, 0 refused. P2: the codebooks are copied at
   configuration from three FIFOs' power-up contents into DDR3 over `ram2`
@@ -71,7 +95,7 @@ predate later confirmations; the `CLAUDE.md` index carries the reconciled status
   --red`, `check_dts_wiring.py`). Telemetry words 25–30. The manual and README now
   describe DTS decode. `docs/dts_decoder.md` "P2 + P3 result". Earlier entry:
   (2026-10-02: the engine RTL built and fitted
-  standalone, not wired; branch `feature/dts-decode`, `CORE_VERSION dev-dtsdecode`).
+  standalone, not wired; now PR #148).
   Full plan: `docs/dts_decoder.md`.
   - **Ask (maintainer):** decode DTS so a DTS track plays on a plain TV, not only through a
     receiver. Today `T_DTS` is a discard in `dvd_audio_decode` (`Decode PCM` is silent).

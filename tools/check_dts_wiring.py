@@ -9,7 +9,8 @@ Claims:
   [copy]   emu instantiates dts_cb_mem on clk_sys, its DDR3 port on DDRAM2_*, reading the
            ring's out_byte; the three hosts carry the generated codebook images (the
            ring's CB_INIT, dvd_audio_decode's LPCM_INIT / MP2_INIT, which reach
-           lpcm_unpack's and mp2_decode's CB_INIT); the copy advances only on
+           lpcm_unpack's and cb_host_ram's CB_INIT: mp2_decode's old FIFO, kept when
+           MP2 moved onto the engine); the copy advances only on
            aud_rst_n (hosts_ready)
   [hold]   while it copies the audio path is idle: no ring writes, the decoder parked,
            and it reads the hosts in copy mode; once after it the hosts are reset
@@ -125,14 +126,14 @@ def main():
     ok('.LPCM_INIT("dvd/dts/cb_host_lpcm.mem")' in ad and '.MP2_INIT("dvd/dts/cb_host_mp2.mem")' in ad,
        'the decoder carries cb_host_lpcm.mem / cb_host_mp2.mem')
     lp = instance(dec, 'lpcm_unpack', 'lpcm_unpack_inst')
-    mp = instance(dec, 'mp2_decode', 'mp2_decode_inst')
+    mp = instance(dec, 'cb_host_ram', 'cb_host_mp2_inst')
     ok('.CB_INIT(LPCM_INIT)' in lp and '.CB_INIT(MP2_INIT)' in mp,
-       '...which reach lpcm_unpack and mp2_decode')
+       '...which reach lpcm_unpack and cb_host_ram')
     for p in ('cb_lpcm_step', 'cb_mp2_step', 'cb_lpcm_q', 'cb_mp2_q'):
         ok(conn(ad, p) is not None and conn(ad, p) == conn(cb, p.replace('cb_', 'cp_')),
            f"the decoder's {p} is the copier's")
     ok(conn(lp, 'cp_step') == 'cb_lpcm_step' and conn(lp, 'cp_mode') == 'cb_cp_mode', 'lpcm_unpack in copy mode')
-    ok(conn(mp, 'cp_step') == 'cb_mp2_step' and conn(mp, 'cp_q') == 'cb_mp2_q', 'mp2_decode in copy mode')
+    ok(conn(mp, 'cp_step') == 'cb_mp2_step' and conn(mp, 'cp_q') == 'cb_mp2_q', 'cb_host_ram in copy mode')
     for f in ('cb_host_ring.mem', 'cb_host_lpcm.mem', 'cb_host_mp2.mem', 'dts_cb.svh'):
         ok(os.path.exists(os.path.join(REPO, 'dvd', 'dts', f)), f'dvd/dts/{f} exists')
 

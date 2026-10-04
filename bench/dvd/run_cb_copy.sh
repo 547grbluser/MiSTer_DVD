@@ -17,7 +17,7 @@ red=0; [ "${1:-}" = "--red" ] && red=1
 echo "== GREEN: the host images and the checksum are current =="
 python3 tools/dts_isa.py --asm --check | sed 's/^/  /' || fail=1
 python3 tools/dts_golden.py --codebooks "$GEN/cb" > /dev/null || { echo "FAIL codebooks"; exit 1; }
-SRC="dvd/audio_ring.sv dvd/lpcm_unpack.sv dvd/mp2/mp2_decode.sv dvd/ac3/bit_fifo.sv dvd/ac3/bit_reader.sv dvd/dts/dts_cb_mem.sv"
+SRC="dvd/audio_ring.sv dvd/lpcm_unpack.sv dvd/dts/cb_host_ram.sv dvd/dts/dts_cb_mem.sv"
 TB=bench/dvd/cb_copy_tb.sv
 build() {   # dir tb -> sim
   (cd "$1" && iverilog -g2012 -I dvd/ac3 -o sim $SRC "$2" 2>build.log) || { cat "$1/build.log"; return 1; }
@@ -29,8 +29,8 @@ run() {     # dir args... -> log
 mkdir -p "$GEN/w/dvd/dts" "$GEN/w/dvd/ac3" "$GEN/w/dvd/mp2" "$GEN/w/bench/dvd"
 stage() {   # dir: a private copy of the sources (mutations edit it)
   rm -rf "$1"; mkdir -p "$1/dvd/dts" "$1/dvd/ac3" "$1/dvd/mp2" "$1/bench/dvd"
-  cp dvd/audio_ring.sv dvd/lpcm_unpack.sv "$1/dvd/"; cp dvd/mp2/mp2_decode.sv "$1/dvd/mp2/"
-  cp dvd/ac3/*.sv dvd/ac3/*.svh "$1/dvd/ac3/"; cp dvd/dts/dts_cb_mem.sv dvd/dts/dts_cb.svh dvd/dts/cb_host_*.mem "$1/dvd/dts/"
+  cp dvd/audio_ring.sv dvd/lpcm_unpack.sv "$1/dvd/"
+  cp dvd/ac3/*.sv dvd/ac3/*.svh "$1/dvd/ac3/"; cp dvd/dts/dts_cb_mem.sv dvd/dts/cb_host_ram.sv dvd/dts/dts_cb.svh dvd/dts/cb_host_*.mem "$1/dvd/dts/"
   cp $TB "$1/bench/dvd/"
 }
 stage "$GEN/w"; build "$GEN/w" $TB || exit 1
@@ -74,7 +74,7 @@ PYEOF
             copied <= 1'b0; cst <= C_STEP; phase <= 2'd0; row <= 12'd0; first <= 1'b1; s1 <= 32'd0; s2 <= 32'd0;
             ddr_read <= 1'b0; rd_pend <= 1'b0;" "\[once\]" &
   mut M2 w "" $CB "if (!copied && cst == C_STEP && !first)" "if (!copied && cst == C_STEP)" "\[copy\]" &
-  mut M3 w "" dvd/mp2/mp2_decode.sv "if (pcm_pop || cp_step) pcm_rp" "if (pcm_pop) pcm_rp" "\[copy\]" &
+  mut M3 w "" dvd/dts/cb_host_ram.sv "else if (cp_step) rp <= rp + 1'b1;" "else if (1'b0) rp <= rp + 1'b1;" "\[copy\]" &
   mut M4 c1 "+expect_bad" $CB "tables_ok <= ((s2 ^ s1) == CB_SUM);" "tables_ok <= 1'b1;" "\[copy\]" &
   wait
   mut M5 w "" $CB "if (phase == 2'd2) acc <= {cp_ring_q, acc[63:8]};" "if (phase == 2'd2) acc <= {acc[55:0], cp_ring_q};" "\[copy\]" &

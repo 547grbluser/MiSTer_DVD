@@ -21,9 +21,10 @@
 // taken branch to an error vector (pc[10:5] == UC_ERRV, the ROM's top 32 words) is ERR
 // with code pc[4:0]: the program carries no one-word stub per error code.
 //
-// TWO PROGRAMS, ONE ROM (docs/ac3_engine.md A2): DTS's at 0 and AC-3's after it
-// (engine_ucode.mem, 2K deep). `codec` picks the entry point at reset and the
-// restart point after a refusal; it must only change while the engine is reset.
+// THREE PROGRAMS, ONE ROM (docs/ac3_engine.md A2, docs/mp2_engine.md M2): DTS's at 0,
+// AC-3's after it, MP2's after that (engine_ucode.mem, 2K deep). `codec` picks the
+// entry point at reset and the restart point after a refusal; it must only change
+// while the engine is reset.
 //
 // The Huffman unit walks a binary tree, one code bit a cycle (53 of the 62 core books
 // are not canonical, docs/dts_decoder.md D2): a node is {right, left}, an entry
@@ -53,7 +54,7 @@
 module dts_seq (
     input  wire          clk,
     input  wire          rst_n,
-    input  wire          codec,              // 0 DTS, 1 AC-3 (change only in reset)
+    input  wire    [1:0] codec,              // 0 DTS, 1 AC-3, 2 MP2 (change only in reset)
 
     // frames: a descriptor, then fr_len bytes
     input  wire   [15:0] fr_len,
@@ -131,8 +132,8 @@ module dts_seq (
     state_t state;
 
     logic [10:0] pc, npc, rom_addr;
-    wire  [10:0] uc_reset = codec ? UC_AC3_RESET : UC_DTS_RESET;
-    wire  [10:0] uc_frame = codec ? UC_AC3_FRAME : UC_DTS_FRAME;
+    wire  [10:0] uc_reset = codec[1] ? UC_MP2_RESET : codec[0] ? UC_AC3_RESET : UC_DTS_RESET;
+    wire  [10:0] uc_frame = codec[1] ? UC_MP2_FRAME : codec[0] ? UC_AC3_FRAME : UC_DTS_FRAME;
     logic [39:0] ir;
     logic [15:0] rf [0:15];
     logic [10:0] stack [0:7];

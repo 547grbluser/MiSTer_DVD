@@ -2,7 +2,8 @@
 // then fetched (dvd/dts/dts_cb_mem.sv; docs/dts_decoder.md D4 rule 3)
 //
 // The REAL hosts, with the core's init files: audio_ring (32 KB, the VQ codebook),
-// lpcm_unpack and mp2_decode (4096 x 32 each, the ADPCM codebook's halves), the copier,
+// lpcm_unpack and cb_host_ram (4096 x 32 each, the ADPCM codebook's halves; cb_host_ram
+// is mp2_decode's old FIFO, kept when MP2 moved onto the engine), the copier,
 // and a DDR3 model whose waitrequest and read latency are random (+busy=N %, +lat=N).
 // Scores:
 //   [copy]  after the copy, every one of the 8,192 rows in DDR3 equals the codebook
@@ -60,10 +61,8 @@ module cb_copy_tb;
         .full(), .afull(), .aud_ce(1'b0), .audio_l(lpcm_l), .audio_r(lpcm_r), .aud_valid(),
         .cp_mode, .cp_step(lpcm_step));
 
-    mp2_decode #(.PCM_AW(12), .CB_INIT("dvd/dts/cb_host_mp2.mem")) u_mp2 (
-        .clk, .rst(!rst_n || host_rst), .wr_en(1'b0), .wr_data(8'd0), .full(), .aud_ce(1'b0),
-        .audio_l(), .audio_r(), .aud_valid(), .synced(), .err_unsupported(), .fs_o(),
-        .dbg_s_nz(), .dbg_pcm_nz(), .cp_step(mp2_step), .cp_q(mp2_q));
+    cb_host_ram #(.AW(12), .CB_INIT("dvd/dts/cb_host_mp2.mem")) u_mp2 (
+        .clk, .rst(!rst_n || host_rst), .cp_step(mp2_step), .cp_q(mp2_q));
 
     // ---- the copier
     logic        tables_ok, cb_req, cb_sel, cb_valid;
@@ -146,9 +145,9 @@ module cb_copy_tb;
             $fatal(1, "FAIL [copy] %0d rows differ or were not written exactly once; %0d writes, %0d outside the region",
                    bad, writes, stray);
         if (!tables_ok) $fatal(1, "FAIL [copy] the rows are right but tables_ok is low (sum %08x)", sum_seen);
-        if (u_ring.rd_ptr !== '0 || u_lpcm.rptr !== '0 || u_mp2.pcm_rp !== '0)
+        if (u_ring.rd_ptr !== '0 || u_lpcm.rptr !== '0 || u_mp2.rp !== '0)
             $fatal(1, "FAIL [after] the hosts' read pointers after the copy: ring %0d lpcm %0d mp2 %0d",
-                   u_ring.rd_ptr, u_lpcm.rptr, u_mp2.pcm_rp);
+                   u_ring.rd_ptr, u_lpcm.rptr, u_mp2.rp);
         $display("cb_copy_tb: 8192 rows copied in %0d cycles, checksum %08x, tables_ok", t, sum_seen);
 
         // [fetch]
