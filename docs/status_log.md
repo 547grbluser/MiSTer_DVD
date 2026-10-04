@@ -23,7 +23,7 @@ predate later confirmations; the `CLAUDE.md` index carries the reconciled status
 ## Hardware status (THIS fork, verified 2026-06-21)
 
 - ✅ **CSS ENCRYPTED ON A DISC THAT DECRYPTS FINE: A RAW READ RAN INTO A VOB (issue #147,
-  2026-10-04; Main only, HW-CONFIRMED against a v0.8.0 control arm, not yet merged).** Full record: this entry and
+  2026-10-04; Main only, HW-CONFIRMED against a v0.8.0 control arm, MERGED PR #153).** Full record: this entry and
   `docs/physical_disc.md` "Title keys per VOB".
   - **Field report (v0.8.0):** "Queen - On Fire: Live at the Bowl" (PAL), RPC-II drive with
     no region. `CSS ENCRYPTED` and mute from the first menu, a clean picture, and no `key:`
