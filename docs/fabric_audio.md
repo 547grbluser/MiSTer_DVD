@@ -28,7 +28,8 @@ mpg_streamer → ps_stream_fifo → ps_demux ─┬─ video → mpeg2video (unc
                                                  ▼
                               dvd_audio_decode.sv  (dvd/dvd_audio_decode.sv)
                                 ├─ dispatch FSM (pop descriptor, route len bytes)
-                                ├─ AC-3 (type 0) → ac3_front + pcm_out  (dvd/ac3/*)
+                                ├─ AC-3 (type 0) → audio_engine + pcm_out (dvd/audio_engine.sv:
+                                │     the microcoded engine's AC-3 program + dvd/ac3/imdct_512)
                                 ├─ LPCM (type 2) → lpcm_unpack          (dvd/lpcm_unpack.sv)
                                 ├─ DTS (1)/unknown (3) → consumed & discarded
                                 ├─ aud_ce: 48 kHz fractional NCO from clk_sys
@@ -52,7 +53,9 @@ Drains `audio_ring`'s read side. `S_IDLE` waits for `frame_valid`, latches
 `frame_len`/`frame_type`; `S_POP` pulses `frame_pop` (consume the descriptor);
 `S_ROUTE` consumes **exactly `frame_len`** bytes from the committed byte stream,
 routing each byte to the codec sink chosen by `frame_type`:
-- `0` AC-3  → `ac3_front.wr_en/wr_data`
+- `0` AC-3  → `audio_engine` (since 2026-10-03; was `ac3_front.wr_en/wr_data`): the
+  descriptor at `S_POP`, then the bytes on the engine's `in_ready`
+  (`docs/ac3_engine.md` "W1")
 - `2` LPCM  → `lpcm_unpack.wr_en/wr_data`
 - `1` DTS / `3` unknown → consumed and dropped (no sink)
 
@@ -238,6 +241,11 @@ full substream_id, or by type+track).
 and durable design decisions for the decoder itself: `docs/ac3_decoder.md`; full
 module/interface/fixed-point contract: `docs/ac3_decoder_architecture.md`.)
 
+- ⏩ **Since 2026-10-03 the AC-3 front end is `audio_engine`** (`docs/ac3_engine.md` "W1"):
+  it takes whole frames (no sync search, no 4 KB FIFO), refuses a frame it cannot
+  decode instead of halting, and starts `imdct_512` on `pcm_done`, latching the block's
+  side information. The bullets below describe the `ac3_front` it replaced; the
+  `pcm_out` handshake is unchanged.
 - `ac3_front #(.FIFO_DEPTH(4096))` self-syncs on `0x0B77`; output PCM is Q8.23.
 - `pcm_out #(.FIFO_AW(9))` converts Q8.23 → s16 (round-half-toward-+∞, saturate)
   and paces to `aud_ce`. Block handshake: `ac3_front.imdct_done → pcm_out.start`;

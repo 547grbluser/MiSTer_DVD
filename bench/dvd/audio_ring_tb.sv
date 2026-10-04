@@ -31,7 +31,7 @@ module audio_ring_tb;
     logic [32:0] a_fpts = 0; logic a_fpts_v = 0;          // per-frame PTS feed
     wire  [32:0] a_frame_pts; wire a_frame_pts_v;          // read-side PTS
 
-    audio_ring #(.BYTE_DEPTH(64), .FRAME_DEPTH(8)) dut_a (
+    audio_ring #(.BYTE_DEPTH(64), .FRAME_DEPTH(8)) dut_a ( .cp_step(1'b0),
         .clk(clk), .rst_n(rst_n),
         .aud_byte(a_byte), .aud_valid(a_valid), .aud_type(a_type),
         .aud_frame_start(a_fs), .drop_pulse(1'b0),
@@ -50,7 +50,7 @@ module audio_ring_tb;
     logic        b_frame_valid; logic [15:0] b_frame_len; logic [1:0] b_frame_type; logic b_frame_pop;
     logic [15:0] b_frames_avail, b_bytes_avail, b_ovf;
 
-    audio_ring #(.BYTE_DEPTH(8), .FRAME_DEPTH(4)) dut_b (
+    audio_ring #(.BYTE_DEPTH(8), .FRAME_DEPTH(4)) dut_b ( .cp_step(1'b0),
         .clk(clk), .rst_n(rst_n),
         .aud_byte(b_byte), .aud_valid(b_valid), .aud_type(b_type),
         .aud_frame_start(b_fs), .drop_pulse(1'b0),

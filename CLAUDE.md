@@ -163,8 +163,9 @@ A post-mortem of the abandoned Stage B deinterlacer (2026-09-21), kept because a
 none of what it taught is about deinterlacing. Three things in it change how the next
 feature should be designed:
 
-- ★ **A whole idle 64-bit DDR3 port (`ram2`) is available**, proven idle in this fork
-  (ALSA compiled out, no `MISTER_FB`). ⛔ NOT ascal's `vbuf`, which is the busiest port.
+- ★ **A 64-bit DDR3 port (`ram2`) was free** (ALSA compiled out, no `MISTER_FB`); since
+  2026-10-03 it carries the DTS codebooks, lightly, so a new master must SHARE it (add an
+  arbiter). ⛔ NOT ascal's `vbuf`, which is the busiest port.
 - ★★ **The scarce memory resource is ARBITRATION OCCUPANCY, not bandwidth.** Measured
   three ways, most sharply: the same traffic cost 2.7 dropped frames/s sharing `ram1`
   with the decoder and **exactly zero** on its own port. So when a new master hurts the
@@ -239,7 +240,7 @@ MiSTer_DVD/
 │   ├── roadmap.md             ← phased implementation plan
 │   ├── references.md          ← key repos, specs, libraries
 │   └── hw_budget_and_lessons.md  ← ★ READ BEFORE ANY DDR3 OR NEW-FEATURE WORK:
-│                                   the FREE ram2 port, fabric headroom, and the
+│                                   the ram2 port (now the DTS codebooks), headroom, and the
 │                                   verification rules a failed feature earned
 ├── mkdocs.yml                 ← docs_dir=site/content, site_dir=.site-build
 ├── site/                      ← USER MANUAL (source, not build output)
@@ -443,7 +444,8 @@ otherwise; `--red` runs its mutation arms).
 | Mid-play load: full flush trio + decoder soft reset | ✅ | `av_sync.md` | `flush_ctl_tb` |
 | CSS-encrypted detect/warn/mute, density bucket (issue #59) | ✅ | `fabric_audio.md` | `run_css.sh` |
 | Non-seamless cell-join audio: in-band re-time (no display-time flush), seamless stamp, second-field PTS (PR #141) | ✅ | `nonseamless_audio.md` | `run_aud_retime.sh --red`, `run_pts_assoc.sh`, `check_aud_rephase_wiring.py` |
-| In-fabric DTS core decode (stereo, `Decode PCM`): microcoded engine, codebooks in bitstream-initialised FIFOs copied to DDR3 | 🔧 P0 + P1 built, not wired: `dvd/dts/` RTL bit-exact vs the emulator on 34 streams; standalone fit 2,227 ALM / 31 M10K / 1 DSP / 35.8 MHz at −40 °C; worst frame 39.8 % of real time over 61,678 census frames; branch `feature/dts-decode`; ⏳ next: maintainer decision (it does not fit the ALM spare alone, so P4's AC-3 reclaim orders P2/P3) | `dts_decoder.md` | `run_dts_seq.sh --red`, `run_dts.sh --red`, `tools/test_dts_isa.py` |
+| In-fabric DTS core decode (stereo, `Decode PCM`): the shared audio engine, codebooks in three FIFOs' power-up contents copied to DDR3 (`ram2`) | ✅ HW (T2's DTS track plays, 0.922 correlation with its AC-3 track); not merged; branch `feature/ac3-engine`; ⏳ by-ear on more DTS discs | `dts_decoder.md` "P2 + P3 result" | `run_dts_dec.sh --red`, `run_cb_copy.sh --red`, `run_dts_seq.sh --red`, `run_dts.sh --red`, `check_dts_wiring.py` |
+| AC-3 parse on the shared audio engine (scenario E): the DTS engine running a second program | 🔧 W1 wired in (`dvd/audio_engine.sv` replaces `ac3_front`): bit-identical block for block on 30 streams; in core −290 ALM for the front end, SEED 1 closes; AC-3 audible on the rig; branch `feature/ac3-engine`; the post-switch "tail" was a capture artifact (closed); DTS P2/P3 done | `ac3_engine.md` | `run_ac3_ab.sh`, `run_ac3.sh --red`, `run_ac3_seq.sh --red`, `tools/test_ac3_isa.py` |
 | Hard flush resets the audio reframers and realigns the demux: no stale PTS (~1.2 s hold, ~2.5 s silence) after a backward jump, no stray-sync click at the landing; pre-existing, not a regression | ✅ HW (0/68 vs 7/78), MERGED PR #143 | `dvd_nav.md` §2h "The stale audio PTS" | `run_seek_rf_pts.sh --red`, `check_rf_flush_wiring.py` |
 
 ### Formats and physical media (mostly the custom Main, `main/`)
@@ -491,7 +493,8 @@ Each of these cost at least one hardware round. The story is in `docs/status_log
 - **Quartus 17 can miscompile silently:** `N'(expr)` size casts and recently added
   `function`s. When sim says correct and silicon says broken, A/B against an older build of
   our own. After any edit near a memory's write sites, grep `DVD.map.rpt` for its
-  "Inferred altsyncram" line.
+  "Inferred altsyncram" line. It also rejects default port values (error 10231), and a
+  module parameter named `INIT_FILE` leaks into the module's OTHER inferred RAMs.
 - **Benches:** `$fatal`, not `$finish` (vvp exits 0 otherwise); runners require the PASS
   marker; assert against the *consumer's* contract, not the producer's belief; every claim
   gets a mutation that must fail *exactly* its own arm.

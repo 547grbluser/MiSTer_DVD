@@ -58,7 +58,7 @@ done
 mkdir -p "$OUT"
 OUT="$(cd "$OUT" && pwd)"
 
-AUDIO_CHAIN="dvd/dvd_audio_decode.sv dvd/lpcm_unpack.sv dvd/mp2/mp2_decode.sv $(ls dvd/ac3/*.sv | tr '\n' ' ')"
+AUDIO_CHAIN="dvd/dvd_audio_decode.sv dvd/lpcm_unpack.sv dvd/mp2/mp2_decode.sv $(ls dvd/ac3/*.sv | tr "\n" " ") dvd/dts/dts_seq.sv dvd/dts/dts_vec.sv dvd/dts/dts_top.sv dvd/audio_engine.sv"
 
 # label | bench | reader instance | extra iverilog args | vvp plusargs | extra sources
 ARMS=$(cat <<EOF

@@ -24,7 +24,7 @@ WHAT IS PINNED
   dvd_telem.sv   src[17..20] = dec_{disp,starve,back,ref}; word 16 = DUTY_MAGIC.
   DVD.qsf        names dvd/dec_duty.sv (a file it does not name is invisible to
                  Quartus and to tools/lint_undriven.sh).
-  dvd_ctl.cpp    reads 25 words; trusts 17..20 only behind the word-16 marker and
+  dvd_ctl.cpp    reads at least 25 words (31 since the audio engine's); trusts 17..20 only behind the word-16 marker and
                  22..24 only behind the word-21 marker.
   PER PICTURE (docs/decode_pacing.md §7 "Instrument"): dec_duty .frame_rate_code <-
   the decoder's frame_rate_code (the over-budget threshold); pic_max/pic_n/pic_over ->
@@ -145,7 +145,8 @@ def main():
 
     print('== dvd_ctl.cpp ==')
     c = strip_comments(open(a.ctl).read())
-    ok(re.search(r'uint16_t\s+w\[\s*25\s*\]', c) is not None, 'reads 25 words')
+    mw = re.search(r'uint16_t\s+w\[\s*(\d+)\s*\]', c)
+    ok(mw is not None and int(mw.group(1)) >= 25, 'reads at least 25 words')   # 31 since the audio engine's words
     ok(re.search(r'w\[21\]\s*==\s*DVD_TELEM_PIC_MAGIC', c) is not None,
        'words 22..24 trusted only behind w[21] == DVD_TELEM_PIC_MAGIC')
     ok(re.search(r'#define\s+DVD_TELEM_PIC_MAGIC\s+0xDD02', c) is not None, 'DVD_TELEM_PIC_MAGIC 0xDD02')

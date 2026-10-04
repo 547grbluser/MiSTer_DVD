@@ -86,6 +86,7 @@ bench/dvd/test_vobs/
 # AC-3 decoder verification artifacts (ported from MiSTer_AC3)
 bench/ac3/obj/
 bench/ac3/obj_cosim/
+bench/ac3/obj_golden/
 tools/streams/
 
 build_id.v

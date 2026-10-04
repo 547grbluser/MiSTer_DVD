@@ -13,7 +13,7 @@
 set -u
 cd "$(dirname "$0")/../.."
 fail=0
-SRC="dvd/ac3/*.sv dvd/lpcm_unpack.sv dvd/mp2/mp2_decode.sv"
+SRC="dvd/ac3/*.sv dvd/dts/dts_seq.sv dvd/dts/dts_vec.sv dvd/dts/dts_top.sv dvd/audio_engine.sv dvd/lpcm_unpack.sv dvd/mp2/mp2_decode.sv"
 iv() { iverilog -g2012 -D__IVERILOG__ -I rtl/mpeg2 -I dvd/ac3 -o "$@" 2>&1 | grep -v "sorry:" ; }
 
 green() {  # name pass-regex tb [dut-override]

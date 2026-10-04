@@ -22,8 +22,56 @@ predate later confirmations; the `CLAUDE.md` index carries the reconciled status
 
 ## Hardware status (THIS fork, verified 2026-06-21)
 
-- 🔧 **IN-FABRIC DTS CORE DECODER (2026-10-02: the engine RTL built and fitted
-  standalone, not wired; branch `feature/dts-decode`, `CORE_VERSION dev-dtsdecode`).**
+- 🔧 **THE AC-3 PARSE ON THE SHARED AUDIO ENGINE (scenario E; 2026-10-03: A0–A2d done,
+  not wired; branch `feature/ac3-engine` from `feature/dts-decode`, `CORE_VERSION
+  dev-ac3engine`, not pushed).** Full record: `docs/ac3_engine.md`.
+  - **Ask (maintainer):** measure whether moving the AC-3 parse (and later MP2) onto the
+    microcoded engine built for DTS saves ALMs over today's hardwired decoder.
+    `docs/dts_decoder.md` §4 estimated −1,000 … −1,450 ALM, with the AC-3 row the least
+    certain.
+  - **Done:**
+    - A0: `tools/ac3_model.py`, bit-exact against `dvd/ac3/`'s RTL on 30 streams, plus a
+      12,855-stream library census.
+    - A1: the whole parse as `dvd/dts/ac3.uasm`, emulated bit-exact. Worst frame 37 % of
+      real time with `imdct_512` in series.
+    - A2a: one 2K microcode ROM for both programs (+6 ALM, +8 M10K, fit leg (a)
+      2,233 / 39).
+    - A2b: the sequencer's AC-3 units in `dts_seq.sv`, trace-identical to the emulator,
+      with exact cycle counts (`run_ac3_seq.sh --red`: 35 arms, 21 mutations).
+    - A2c: the vector side; the whole engine hands `imdct_512` every coefficient equal to
+      dvd/ac3's own on all 30 streams (`run_ac3.sh --red`: 35 arms, 13 mutations).
+      Worst frame 37.3 % of real time on the RTL.
+  - **Decided (maintainer):** the 2K ROM for now; invalid codes refused and counted;
+    today's decoder keeps its delta-BA rule; the RTL and a standalone fit (A2) before MP2.
+    - W1 (2026-10-03): wired in. `dvd/audio_engine.sv` replaced `ac3_front` in
+      `dvd_audio_decode`, bit-identical block for block (`run_ac3_ab.sh`, 31 arms). In
+      core the front end is ~2,395 ALM against `ac3_front`'s 2,687 (−290), M10K +15,
+      SEED 1 re-pinned (clk_dec 90.49 / 88.33). HIL: AC-3 audible on BBB, MiB (4/4) and
+      T2. The "quiet tail" after an AC-3→DTS switch was a capture start-up artifact in
+      `audio_check` (fixed; both builds go silent within 50 ms, 6 of 6 runs).
+    - A2d: standalone fit 2,921 ALM / 39 M10K / 1 DSP, 35.8 MHz at −40 °C. AC-3 adds
+      +688 to the DTS engine, against −2,687 measured for today's AC-3 parse and bit
+      readers. DTS plus the migrated parse is about +200 … +300 ALM net, against ~1,125
+      spare: it fits, where DTS alone does not.
+  - **Decided (maintainer, 2026-10-03):** wire it in for both. W1 (AC-3) done.
+  - **Next:** DTS P2 (codebooks in DDR3) and P3 (the `T_DTS` arm).
+  - **Known gaps:**
+    - BAPZERO's write value: the only zero-SNR window codes exponent 0;
+    - the pending item at a refusal: today's timing never leaves one at the engine;
+    - the latab/baptab clamps: no stream reaches them;
+    - recombine saturation: no stream reaches it.
+
+- ✅ **IN-FABRIC DTS CORE DECODER (2026-10-03: P2 + P3 built, in core, and PLAYING on the
+  rig on `feature/ac3-engine`, not merged).** HIL: *Ultimate T2*'s DTS track at −32 dBFS
+  (silent before), correlation 0.922 with its AC-3 track over the same passage,
+  telemetry `dts_ok 1`, checksum = `CB_SUM`, 0 refused. P2: the codebooks are copied at
+  configuration from three FIFOs' power-up contents into DDR3 over `ram2`
+  (`dvd/dts/dts_cb_mem.sv`, `run_cb_copy.sh --red`). P3: the `T_DTS` arm sends DTS to
+  the shared audio engine, and its PCM plays out of the LPCM FIFO (`run_dts_dec.sh
+  --red`, `check_dts_wiring.py`). Telemetry words 25–30. The manual and README now
+  describe DTS decode. `docs/dts_decoder.md` "P2 + P3 result". Earlier entry:
+  (2026-10-02: the engine RTL built and fitted
+  standalone, not wired; branch `feature/dts-decode`, `CORE_VERSION dev-dtsdecode`).
   Full plan: `docs/dts_decoder.md`.
   - **Ask (maintainer):** decode DTS so a DTS track plays on a plain TV, not only through a
     receiver. Today `T_DTS` is a discard in `dvd_audio_decode` (`Decode PCM` is silent).

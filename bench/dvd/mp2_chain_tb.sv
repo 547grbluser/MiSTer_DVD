@@ -126,7 +126,7 @@ module mp2_chain_tb;
     wire        frame_pts_valid;
     wire        ring_almost_full;
 
-    audio_ring #(.BYTE_DEPTH(32768), .FRAME_DEPTH(128)) u_ring (
+    audio_ring #(.BYTE_DEPTH(32768), .FRAME_DEPTH(128)) u_ring ( .cp_step(1'b0),
         .clk(clk), .rst_n(rst_n),
         .aud_byte(rf_b), .aud_valid(rf_v), .aud_type(rf_t),
         .aud_frame_start(rf_s),
@@ -174,7 +174,7 @@ module mp2_chain_tb;
         end
     end
 
-    dvd_audio_decode dut (
+    dvd_audio_decode dut ( .cb_cp_mode(1'b0), .cb_lpcm_step(1'b0), .cb_mp2_step(1'b0), .cb_lpcm_q(), .cb_mp2_q(), .cb_req(), .cb_sel(), .cb_addr(), .cb_valid(1'b0), .cb_data(64'd0), .dts_tables_ok(1'b0),
         .clk(clk), .rst_n(rst_n),
         .enable(1'b1),
         .pause(1'b0), .aud_soft_switch(1'b0),

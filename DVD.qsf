@@ -99,16 +99,20 @@ set_global_assignment -name SYSTEMVERILOG_FILE dvd/mode_realign.sv
 # fwd/bwd motion-comp reference data fifos. See dvd/ref_dta_gate.sv / docs/motcomp_throughput.md.
 set_global_assignment -name SYSTEMVERILOG_FILE dvd/ref_dta_gate.sv
 
-set_global_assignment -name SYSTEMVERILOG_FILE dvd/ac3/ac3_front.sv
-set_global_assignment -name SYSTEMVERILOG_FILE dvd/ac3/ac3_parse.sv
+# The AC-3 front end is the shared microcoded audio engine (dvd/dts/, running
+# dvd/dts/ac3.uasm) since 2026-10-03; it replaced ac3_front, ac3_parse, sync_crc,
+# bsi_parse, audblk_parse, exponent_decode, bit_allocation and mantissa_dequant, which
+# stay in dvd/ac3/ as the reference bench/dvd/run_ac3_ab.sh scores the engine against
+# (docs/ac3_engine.md "W1"). bit_fifo + bit_reader stay: mp2_decode uses them.
+# The engine's ROM images load by repo-relative path (dvd/dts/*.mem).
+set_global_assignment -name SYSTEMVERILOG_FILE dvd/dts/dts_seq.sv
+set_global_assignment -name SYSTEMVERILOG_FILE dvd/dts/dts_vec.sv
+set_global_assignment -name SYSTEMVERILOG_FILE dvd/dts/dts_top.sv
+set_global_assignment -name SYSTEMVERILOG_FILE dvd/audio_engine.sv
+# D4: the DTS codebooks, copied once from three FIFOs' power-up contents into DDR3 (ram2)
+set_global_assignment -name SYSTEMVERILOG_FILE dvd/dts/dts_cb_mem.sv
 set_global_assignment -name SYSTEMVERILOG_FILE dvd/ac3/bit_fifo.sv
 set_global_assignment -name SYSTEMVERILOG_FILE dvd/ac3/bit_reader.sv
-set_global_assignment -name SYSTEMVERILOG_FILE dvd/ac3/sync_crc.sv
-set_global_assignment -name SYSTEMVERILOG_FILE dvd/ac3/bsi_parse.sv
-set_global_assignment -name SYSTEMVERILOG_FILE dvd/ac3/audblk_parse.sv
-set_global_assignment -name SYSTEMVERILOG_FILE dvd/ac3/exponent_decode.sv
-set_global_assignment -name SYSTEMVERILOG_FILE dvd/ac3/bit_allocation.sv
-set_global_assignment -name SYSTEMVERILOG_FILE dvd/ac3/mantissa_dequant.sv
 set_global_assignment -name SYSTEMVERILOG_FILE dvd/ac3/imdct_512.sv
 set_global_assignment -name SYSTEMVERILOG_FILE dvd/ac3/pcm_out.sv
 set_global_assignment -name SYSTEMVERILOG_FILE dvd/ddr_arb.sv
@@ -1548,4 +1552,9 @@ set_global_assignment -name PHYSICAL_SYNTHESIS_COMBO_LOGIC OFF
 #   Main at PR #143 (its SEED 7 build: 88.44/87.94) plus CORE_VERSION
 #   dev-dpadbackhold -> v0.8.0.
 
-set_global_assignment -name SEED 7
+# AC-3 ON THE AUDIO ENGINE (2026-10-03, feature/ac3-engine, CORE_VERSION dev-ac3engine):
+# the AC-3 front end replaced by dvd/audio_engine.sv. SEED 7 went MARGINAL on this
+# netlist (clk_dec 85.79 @100C / 86.95 @-40C, gate 86.0); the sweep's FIRST seed, SEED 1,
+# closes it: clk_dec 90.49 MHz @100C / 88.33 MHz @-40C. 40,680 / 41,910 ALMs (97 %, -105
+# against the menu-panscan baseline), 527 / 553 M10K, 92 / 112 DSP.
+set_global_assignment -name SEED 1

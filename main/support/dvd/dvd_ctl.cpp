@@ -43,6 +43,10 @@
 // "Instrument"): words 22..24 follow. A separate marker, so word 16 keeps meaning
 // what an older Main expects; cores without it answer 0 past word 20.
 #define DVD_TELEM_PIC_MAGIC 0xDD02
+// Word 25 of a core with the shared audio engine (docs/dts_decoder.md, docs/ac3_engine.md):
+// words 26..30 follow -- the DTS codebook copy's verdict and checksum, the engine's
+// frames and refusals. Cores without it answer 0 past word 24.
+#define DVD_TELEM_AUD_MAGIC 0xDD03
 
 #define TELEM_PERIOD_MS 250
 
@@ -92,9 +96,9 @@ static void telem_read()
 	// Words 11-13 (A/V phase) were added with the PTS-scheduled display work.
 	// Reading them from an OLDER core is safe: dvd_telem's readout mux answers
 	// 16'd0 for any index it does not implement, so they read 0, not garbage.
-	uint16_t w[25];
+	uint16_t w[31];
 	w[0] = spi_uio_cmd_cont(UIO_DVD_TELEM);
-	for (int i = 1; i < 25; i++) w[i] = spi_w(0);
+	for (int i = 1; i < 31; i++) w[i] = spi_w(0);
 	DisableIO();
 
 	if (w[0] != DVD_TELEM_MAGIC) return;      // no bridge in this core build
@@ -113,16 +117,24 @@ static void telem_read()
 	// picture decode in the core's last 0.83 s window (cycles/4096, a LEVEL, not a
 	// counter), and two wrapping counters -- pictures decoded, and those that took
 	// longer than one frame period. Absent on a core without them.
-	char duty[224] = "";
+	char duty[400] = "";
 	if (w[16] == DVD_TELEM_DUTY_MAGIC)
 	{
 		int n = snprintf(duty, sizeof(duty),
 			"\"dec_disp\":%u,\"dec_starve\":%u,\"dec_back\":%u,\"dec_ref\":%u,",
 			w[17], w[18], w[19], w[20]);
 		if (w[21] == DVD_TELEM_PIC_MAGIC && n > 0 && n < (int)sizeof(duty))
-			snprintf(duty + n, sizeof(duty) - n,
+			n += snprintf(duty + n, sizeof(duty) - n,
 				"\"pic_max\":%u,\"pic_n\":%u,\"pic_over\":%u,",
 				w[22], w[23], w[24]);
+		// the audio engine (behind the word-25 marker): dts_copied / dts_ok are the
+		// codebook copy's verdict (dts_ok 0 = DTS discarded), dts_sum its checksum
+		if (w[25] == DVD_TELEM_AUD_MAGIC && n > 0 && n < (int)sizeof(duty))
+			snprintf(duty + n, sizeof(duty) - n,
+				"\"dts_copied\":%u,\"dts_ok\":%u,\"dts_active\":%u,\"eng_last_err\":%u,"
+				"\"dts_sum\":\"%04x%04x\",\"eng_frames\":%u,\"eng_refused\":%u,",
+				w[26] & 1, (w[26] >> 1) & 1, (w[26] >> 2) & 1, (w[26] >> 8) & 31,
+				w[27], w[28], w[29], w[30]);
 	}
 	int len = snprintf(line, sizeof(line),
 		"{\"t\":%.6f,%s\"refreshes\":%u,\"pickups\":%u,\"lates\":%u,"

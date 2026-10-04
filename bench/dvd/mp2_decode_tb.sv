@@ -34,7 +34,7 @@ module mp2_decode_tb;
     wire signed [15:0] audio_l, audio_r;
     wire        aud_valid, synced, err_unsupported;
 
-    mp2_decode dut (
+    mp2_decode dut ( .cp_step(1'b0), .cp_q(),
         .clk(clk), .rst(rst),
         .wr_en(wr_en), .wr_data(wr_data), .full(full),
         .aud_ce(aud_ce),

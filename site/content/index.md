@@ -52,8 +52,8 @@ tables, multi-angle, seamless-branch interleaved cells, still frames, and
 audio/subtitle/angle/language selection. Transport runs from a gamepad, a USB keyboard or an
 infrared remote, with an on-screen HUD and seek bar.
 
-**Audio** — AC-3 and MPEG-1 Layer II decoded entirely in fabric (every AC-3 channel mode,
-downmixed to stereo) to HDMI; 48 kHz LPCM; AC-3 and DTS as
+**Audio** — AC-3, DTS and MPEG-1 Layer II decoded entirely in fabric (every AC-3 channel
+mode and the DTS core up to 5.1, downmixed to stereo) to HDMI; 48 kHz LPCM; AC-3 and DTS as
 [IEC 61937 bitstream](audio/passthrough.md) to a receiver — over optical S/PDIF, or over
 HDMI itself with the custom Main, so 5.1 needs no add-on board. Tracks with no bitstream
 format — LPCM and MP2 — still play as PCM in that mode.

@@ -24,7 +24,7 @@ vector ops' arguments.
     b<c>  rs, rt, label     branch if rs <c> rt, c in eq ne lt ge (signed)
     b<c>i rs, k, label      ... against a signed 10-bit constant k
                             A taken branch to ERR_BASE + code (an error vector,
-                            pc 992..1023) is `err code`: the program refuses the
+                            pc 2016..2047) is `err code`: the program refuses the
                             frame without a one-word stub per error code.
     jmp / call label, ret   (call stack depth 8)
     err   code              count the error code, drop the rest of the frame,
@@ -63,8 +63,8 @@ import dts_tables as T   # noqa: E402
 
 REPO = os.path.dirname(HERE)
 UASM = os.path.join(REPO, 'dvd', 'dts', 'dts.uasm')
-UMEM = os.path.join(REPO, 'dvd', 'dts', 'dts_ucode.mem')
-CMEM = os.path.join(REPO, 'dvd', 'dts', 'dts_const.mem')
+UMEM = os.path.join(REPO, 'dvd', 'dts', 'engine_ucode.mem')    # both programs (DTS, AC-3)
+CMEM = os.path.join(REPO, 'dvd', 'dts', 'engine_const.mem')
 HMEM = os.path.join(REPO, 'dvd', 'dts', 'dts_huff_lo.mem')      # nodes 0..2047
 HMEM_HI = os.path.join(REPO, 'dvd', 'dts', 'dts_huff_hi.mem')   # nodes 2048..: see huff_mem_words
 RMEM = os.path.join(REPO, 'dvd', 'dts', 'dts_hroot.mem')
@@ -83,7 +83,11 @@ VOP = {n: i for i, n in enumerate(VOPS)}
 MEM_REC, MEM_CONST = 0x0000, 0x1000
 REC_WORDS = 0x0800
 STACK_DEPTH = 8
-ERR_BASE = 0x3E0                  # error vectors: a taken branch to ERR_BASE + code is err
+# error vectors: a taken branch to ERR_BASE + code is err. The top 32 words of the
+# shared 2K microcode ROM: DTS's program sits at 0 and AC-3's after it
+# (tools/ac3_isa.py), so the vectors must clear both.
+ERR_BASE = 0x7E0
+UC_DEPTH = 0x800
 NCH_MAX = 5                       # primary channels (AMODE < 10)
 
 # Counters the CNT op and the engine keep (telemetry ids)
@@ -217,15 +221,20 @@ def _is_reg(tok, aliases):
     return re.fullmatch(r'r\d+', tok) is not None
 
 
-def assemble(text, mutate=None):
+def assemble(text, mutate=None, vops=None, cbase=None, extra_equ=None, org=0):
     """-> (words, labels, line numbers). `mutate`: a name; a line carrying
     `;MUT <name>: <instruction>` assembles that instruction instead (the RED arms
     of tools/test_dts_isa.py live beside the code they break)."""
-    equ = {'C_' + k: v for k, v in CBASE.items()}
+    # vops / cbase / extra_equ: another program on the same machine (tools/ac3_isa.py)
+    # names its own vector ops (numbered after DTS's: one engine, one op space), its
+    # constant ROM, and its own equates
+    vop_map = VOP if vops is None else vops
+    equ = {'C_' + k: v for k, v in (CBASE if cbase is None else cbase).items()}
     equ.update({'B_' + n.upper(): i for n, i in BOOK_ID.items()})
-    equ.update({'V_' + n.upper(): i for n, i in VOP.items()})
+    equ.update({'V_' + n.upper(): i for n, i in vop_map.items()})
     equ['CNT_DMIX_IGNORED'] = CNT_DMIX_IGNORED
     equ['ERRV'] = ERR_BASE
+    equ.update(extra_equ or {})
     aliases, labels, stmts = {}, {}, []
     mutated = False
     for ln, raw in enumerate(text.splitlines(), 1):
@@ -243,7 +252,7 @@ def assemble(text, mutate=None):
                 break
             if m.group(1) in labels:
                 raise AsmError(f'line {ln}: label {m.group(1)} twice')
-            labels[m.group(1)] = len(stmts)
+            labels[m.group(1)] = org + len(stmts)
             line = m.group(2).strip()
         if not line:
             continue
@@ -258,8 +267,8 @@ def assemble(text, mutate=None):
         stmts.append((ln, line, dict(aliases)))
     if mutate and not mutated:
         raise AsmError(f'no MUT {mutate} in the source')
-    if len(stmts) > ERR_BASE:
-        raise AsmError(f'{len(stmts)} words reach the error vectors at {ERR_BASE}')
+    if org + len(stmts) > ERR_BASE:
+        raise AsmError(f'words {org}..{org + len(stmts) - 1} reach the error vectors at {ERR_BASE}')
 
     def ev(expr, ln):
         env = dict(equ)
@@ -331,7 +340,7 @@ def assemble(text, mutate=None):
             elif mn == 'err':
                 words.append(encode('err', 0, 0, 0, ev(args[0], ln)))
             elif mn == 'vop':
-                words.append(encode('vop', 0, 0, 0, 0, VOP[args[0].lower()]))   # op in aux
+                words.append(encode('vop', 0, 0, 0, 0, vop_map[args[0].lower()]))   # op in aux
             elif mn in ('frame', 'bpos'):
                 words.append(encode(mn, reg(0)))
             else:
@@ -405,6 +414,7 @@ class Machine:
         self.cb_latency = CB_LATENCY
         self.trace = None        # a list to receive (kind, pc, addr, value): module doc
         self.vop_hook = None     # called as vop_hook(machine, op) after every vector op
+        self.pc_prof = None      # a dict: cycles by pc (profiling)
 
     # -- input ------------------------------------------------------------
     def feed(self, data):
@@ -444,8 +454,9 @@ class Machine:
         a &= 0xFFFF
         if a < REC_WORDS:
             return s16(self.rec[a])
-        if MEM_CONST <= a < MEM_CONST + len(CONST):
-            return s16(CONST[a - MEM_CONST])
+        const = getattr(self, 'const', CONST)
+        if MEM_CONST <= a < MEM_CONST + len(const):
+            return s16(const[a - MEM_CONST])
         raise EngineError(f'load from 0x{a:04x} at pc {self.pc}')
 
     def store(self, a, v):
@@ -615,6 +626,8 @@ class Machine:
             w = self.prog[self.pc]
             op, rd, rs, rt, imm, aux = decode(w)
             npc = self.pc + 1
+            if self.pc_prof is not None:            # cycles by instruction (profiling)
+                self._prof_pc, self._prof_c0 = self.pc, self.cycles
             self.cycles += CYC['instr']
             if op == 'nop':
                 pass
@@ -670,6 +683,14 @@ class Machine:
                 npc = self.labels['FRAME']
             elif op == 'vop':
                 self.vop(aux)
+                code = getattr(self, 'op_err', None)
+                if code is not None:                   # an op refused the frame
+                    self.op_err = None
+                    self.cycles += self.drain_cycles()
+                    self.errors[code] = self.errors.get(code, 0) + 1
+                    self.cur = None
+                    self.stack = []
+                    npc = self.labels['FRAME']
             elif op == 'frame':
                 if self.cur is not None:
                     self.frame_cycles.append(self.cycles - self.frame_start)
@@ -686,6 +707,9 @@ class Machine:
                 self.bitpos = len(self.cur) * 8 if self.cur is not None else 0
             elif op == 'bpos':
                 self.setr(rd, self.bitpos & 0xFFFF)
+            if self.pc_prof is not None:
+                self.pc_prof[self._prof_pc] = (self.pc_prof.get(self._prof_pc, 0) +
+                                               self.cycles - self._prof_c0)
             self.pc = npc
         raise EngineError('step limit')
 
@@ -719,22 +743,26 @@ def _packed(vals, w):
     return f"{w * len(vals)}'h{v:0{(w * len(vals) + 3) // 4}x}"
 
 
-def ucode_svh(words, labels):
-    """dvd/dts/dts_ucode.svh: the sizes, entry points and XQ code-reader tables
-    the sequencer RTL needs, all derived here so --check covers them."""
+def ucode_svh(words, labels, alabels, nconst):
+    """dvd/dts/dts_ucode.svh: the sizes, both programs' entry points and XQ's
+    code-reader tables the sequencer RTL needs, all derived here so --check covers
+    them."""
     ab = range(1, R.CODE_BOOKS + 1)
     blk = range(1, 8)
     lines = [
         '// dvd/dts/dts_ucode.svh -- GENERATED by tools/dts_isa.py --asm; never edit.',
-        '// The sequencer\'s sizes and entry points, and XQ\'s code-reader tables',
-        '// (packed: element i at [w*i +: w]; index abits - 1).',
+        '// The engine\'s sizes, both programs\' entry points (DTS at 0, AC-3 after it, in',
+        '// one ROM), and XQ\'s code-reader tables (packed: element i at [w*i +: w];',
+        '// index abits - 1).',
         f'localparam int UC_WORDS    = {len(words)};',
-        f'localparam int CONST_WORDS = {len(CONST)};',
+        f'localparam int CONST_WORDS = {nconst};',
         f'localparam int HUFF_NODES  = {len(HUFF_NODES)};',
         f'localparam int HUFF_BOOKS  = {len(HUFF_ROOTS)};',
-        f"localparam [9:0] UC_RESET  = 10'd{labels.get('RESET', 0)};",
-        f"localparam [9:0] UC_FRAME  = 10'd{labels['FRAME']};",
-        f"localparam [4:0] UC_ERRV   = 5'd{ERR_BASE >> 5};      // error vectors: pc[9:5] == this",
+        f"localparam [10:0] UC_DTS_RESET = 11'd{labels.get('RESET', 0)};",
+        f"localparam [10:0] UC_DTS_FRAME = 11'd{labels['FRAME']};",
+        f"localparam [10:0] UC_AC3_RESET = 11'd{alabels.get('RESET', 0)};",
+        f"localparam [10:0] UC_AC3_FRAME = 11'd{alabels['FRAME']};",
+        f"localparam [5:0]  UC_ERRV      = 6'd{ERR_BASE >> 5};      // error vectors: pc[10:5] == this",
         '// the first quantiser-index book of abits (book = QBOOK + selector)',
         f'localparam [{6 * R.CODE_BOOKS - 1}:0] XQ_QBOOK  = {_packed([QBOOK[a - 1] for a in ab], 6)};',
         '// selectors below this are Huffman books',
@@ -746,21 +774,69 @@ def ucode_svh(words, labels):
     return lines
 
 
+def cb_rows():
+    """The engine's codebook rows (dts_vec's cb port format, tools/dts_golden.py
+    write_codebooks): ADPCM 4096 x {4 x int16 at [16i +: 16]}, VQ {index, ssf} 4096 x
+    {8 x int8 at [8k +: 8]}."""
+    adpcm = [sum((c & 0xFFFF) << (16 * i) for i, c in enumerate(vec)) for vec in T.ADPCM_VB]
+    vq = []
+    for vec in T.HIGH_FREQ_VQ:
+        for ssf in range(4):
+            sl = vec[8 * ssf:8 * ssf + 8]
+            vq.append(sum((v & 0xFF) << (8 * k) for k, v in enumerate(sl)))
+    assert len(adpcm) == 4096 and len(vq) == 4096
+    return adpcm, vq
+
+
+def cb_host_images():
+    """D4: the three FIFOs that carry the codebooks as their power-up contents, in the
+    layout dvd/dts/dts_cb_mem.sv copies them out in, and that copy's checksum (the
+    RTL's Fletcher pair over every row in copy order: s1 += lo + hi; s2 += s1 + lo + hi;
+    the sum is s2 ^ s1)."""
+    adpcm, vq = cb_rows()
+    lpcm = [w for r in adpcm[:2048] for w in (r & 0xFFFFFFFF, r >> 32)]
+    mp2 = [w for r in adpcm[2048:] for w in (r & 0xFFFFFFFF, r >> 32)]
+    ring = [(r >> (8 * k)) & 0xFF for r in vq for k in range(8)]
+    s1 = s2 = 0
+    for r in adpcm + vq:
+        x = ((r & 0xFFFFFFFF) + (r >> 32)) & 0xFFFFFFFF
+        s2 = (s2 + s1 + x) & 0xFFFFFFFF
+        s1 = (s1 + x) & 0xFFFFFFFF
+    return lpcm, mp2, ring, s2 ^ s1
+
+
 def write_mems(check=False):
     words, labels, _ = assemble(open(UASM).read())
-    files = {UMEM: [f'{w:010x}' for w in words],
-             CMEM: [f'{w:04x}' for w in CONST],
+    import ac3_isa as A                          # the second program in the same ROM
+    awords, alabels = A.load_program()
+    allw = words + awords[len(words):]
+    allc = CONST + A.CONST
+    assert len(allw) <= ERR_BASE and len(allc) <= 1024
+    files = {UMEM: [f'{w:010x}' for w in allw],
+             CMEM: [f'{w:04x}' for w in allc],
              HMEM: [f'{w:05x}' for w in huff_mem_words()[:2048]],
              HMEM_HI: [f'{w:05x}' for w in huff_mem_words()[2048:]],
              RMEM: [f'{r:03x}' for r in HUFF_ROOTS],
-             USVH: ucode_svh(words, labels)}
+             USVH: ucode_svh(allw, labels, alabels, len(allc)) + A.svh_lines()}
     import dts_vecrom as V                       # the vector engine's ROMs
     files.update({
         os.path.join(VDIR, 'dts_vconst.mem'): [f'{w:06x}' for w in V.vconst_words()],
         os.path.join(VDIR, 'dts_win.mem'): [f'{w:06x}' for w in V.window_words()],
-        os.path.join(VDIR, 'dts_iprog.mem'): [f'{w:05x}' for w in V.prog_words()],
+        # the IMDCT program, then AC-3's dither-LFSR table at 768 (dts_vec IP_DITH)
+        os.path.join(VDIR, 'dts_iprog.mem'): [f'{w:05x}' for w in A.iprog_words(V.prog_words())],
         os.path.join(VDIR, 'dts_icoef.mem'): [f'{c & 0x7FFFFFF:07x}' for c in V.ICOEF],
         os.path.join(VDIR, 'dts_vec.svh'): V.vec_svh()})
+    # D4: the codebooks as the power-up contents of three FIFOs, and their checksum
+    lpcm, mp2, ring, csum = cb_host_images()
+    files.update({
+        os.path.join(VDIR, 'cb_host_lpcm.mem'): [f'{w:08x}' for w in lpcm],
+        os.path.join(VDIR, 'cb_host_mp2.mem'): [f'{w:08x}' for w in mp2],
+        os.path.join(VDIR, 'cb_host_ring.mem'): [f'{b:02x}' for b in ring],
+        os.path.join(VDIR, 'dts_cb.svh'): [
+            '// dvd/dts/dts_cb.svh -- GENERATED by tools/dts_isa.py --asm; never edit.',
+            '// The DTS codebooks\' checksum as dvd/dts/dts_cb_mem.sv computes it over the',
+            '// copy (docs/dts_decoder.md D4): a mismatch leaves tables_ok low.',
+            f"localparam [31:0] CB_SUM = 32'h{csum:08x};"]})
     bad = []
     for path, lines in files.items():
         text = '\n'.join(lines) + '\n'
@@ -770,7 +846,8 @@ def write_mems(check=False):
         else:
             os.makedirs(os.path.dirname(path), exist_ok=True)
             open(path, 'w').write(text)
-    print(f'dts_isa: {len(words)} microcode words, {len(CONST)} constant words, '
+    print(f'dts_isa: {len(words)} DTS + {len(allw) - len(words)} AC-3 = {len(allw)} microcode '
+          f'words; {len(allc)} constant words; '
           f'{len(HUFF_NODES)} Huffman nodes, {len(HUFF_ROOTS)} book roots')
     if check:
         print('dts_isa: ' + ('FAIL -- stale: ' + ', '.join(bad) if bad else 'PASS -- generated files match'))

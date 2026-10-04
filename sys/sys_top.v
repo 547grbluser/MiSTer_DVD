@@ -577,6 +577,23 @@ end
 wire reset;
 wire clk_100m;
 
+// DVD-FORK (DTS codebooks, docs/dts_decoder.md D4 / docs/hw_budget_and_lessons.md §1):
+// ram2 is the core's second DDR3 master (emu's DDRAM2_*), on the core's clock. Its
+// stock consumer, ddr_svc (ALSA ch0 -- compiled out by MISTER_DISABLE_ALSA -- and the
+// MISTER_FB palette ch1 -- not defined here), is left in place on svc_* nets with its
+// inputs tied off, because its ram_bcnt still feeds pal_a. Declared HERE, above the
+// sysmem_lite instance that uses them (Verilog declaration order).
+wire        ram2_clk;
+wire [28:0] ram2_address;
+wire  [7:0] ram2_burstcount;
+wire  [7:0] ram2_byteenable;
+wire        ram2_waitrequest;
+wire [63:0] ram2_readdata;
+wire [63:0] ram2_writedata;
+wire        ram2_readdatavalid;
+wire        ram2_read;
+wire        ram2_write;
+
 sysmem_lite sysmem
 (
 	//Reset/Clock
@@ -600,7 +617,7 @@ sysmem_lite sysmem
 	.ram1_write(ram_write),
 
 	//64-bit DDR3 RAM access
-	.ram2_clk(clk_audio),
+	.ram2_clk(ram2_clk),             // DVD-FORK: the core's clock (was clk_audio for ddr_svc)
 	.ram2_address(ram2_address),
 	.ram2_burstcount(ram2_burstcount),
 	.ram2_waitrequest(ram2_waitrequest),
@@ -625,30 +642,29 @@ sysmem_lite sysmem
 	.vbuf_read(vbuf_read)
 );
 
-wire [28:0] ram2_address;
-wire  [7:0] ram2_burstcount;
-wire  [7:0] ram2_byteenable;
-wire        ram2_waitrequest;
-wire [63:0] ram2_readdata;
-wire [63:0] ram2_writedata;
-wire        ram2_readdatavalid;
-wire        ram2_read;
-wire        ram2_write;
+// DVD-FORK: ddr_svc no longer owns ram2 (see above): its outputs go nowhere, its
+// inputs read an idle port.
+wire [28:0] svc_address;
+wire  [7:0] svc_burstcount;
+wire  [7:0] svc_byteenable;
+wire [63:0] svc_writedata;
+wire        svc_read;
+wire        svc_write;
 wire  [7:0] ram2_bcnt;
 
 ddr_svc ddr_svc
 (
 	.clk(clk_audio),
 
-	.ram_waitrequest(ram2_waitrequest),
-	.ram_burstcnt(ram2_burstcount),
-	.ram_addr(ram2_address),
-	.ram_readdata(ram2_readdata),
-	.ram_read_ready(ram2_readdatavalid),
-	.ram_read(ram2_read),
-	.ram_writedata(ram2_writedata),
-	.ram_byteenable(ram2_byteenable),
-	.ram_write(ram2_write),
+	.ram_waitrequest(1'b1),
+	.ram_burstcnt(svc_burstcount),
+	.ram_addr(svc_address),
+	.ram_readdata(64'd0),
+	.ram_read_ready(1'b0),
+	.ram_read(svc_read),
+	.ram_writedata(svc_writedata),
+	.ram_byteenable(svc_byteenable),
+	.ram_write(svc_write),
 	.ram_bcnt(ram2_bcnt),
 
 `ifndef MISTER_DISABLE_ALSA
@@ -1900,6 +1916,18 @@ emu emu
 	.DDRAM_DIN(ram_writedata),
 	.DDRAM_BE(ram_byteenable),
 	.DDRAM_WE(ram_write),
+
+	// DVD-FORK: the second DDR3 master (ram2): the DTS codebooks
+	.DDRAM2_CLK(ram2_clk),
+	.DDRAM2_ADDR(ram2_address),
+	.DDRAM2_BURSTCNT(ram2_burstcount),
+	.DDRAM2_BUSY(ram2_waitrequest),
+	.DDRAM2_DOUT(ram2_readdata),
+	.DDRAM2_DOUT_READY(ram2_readdatavalid),
+	.DDRAM2_RD(ram2_read),
+	.DDRAM2_DIN(ram2_writedata),
+	.DDRAM2_BE(ram2_byteenable),
+	.DDRAM2_WE(ram2_write),
 
 	.BUTTONS(btn),
 	.OSD_STATUS(osd_status),

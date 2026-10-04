@@ -13,6 +13,17 @@ durable scope/decisions/verification knowledge from that repo so it isn't lost.
 - **Strict full-fabric RTL.** No soft processor / microcoded sequencer — the
   irregular parse / bit-allocation path is hand-written FSMs. (The Han thesis uses a
   PicoBlaze for control; we use it for the *algorithms only*, not the architecture.)
+  ⏳ **Being revisited at the maintainer's request (2026-10-02):** moving the parse
+  onto the microcoded engine built for DTS (`dvd/dts/`) is estimated at −1,000 …
+  −1,450 ALM with MP2 (`dts_decoder.md` §4 scenario E). It is measured first by a
+  model and an emulator, not RTL: `docs/ac3_engine.md`. This decision stands until a
+  fit says otherwise.
+  ⏩ **Overturned by the fit (2026-10-03, the maintainer's call on it):** the parse now
+  runs on the engine (`dvd/audio_engine.sv`, `docs/ac3_engine.md` "W1"), bit-identical
+  to `ac3_front` block for block and ~290 ALM smaller in core. `imdct_512` and `pcm_out`
+  stay hardwired. The replaced modules remain in `dvd/ac3/` as the A/B reference
+  (`bench/dvd/run_ac3_ab.sh`), not in the build. "Fail loud" still holds in its
+  engine form: an out-of-scope frame is refused and counted, not halted on.
 - **Fail loud, never decode wrong.** Any syntax the datapath doesn't yet handle sets
   sticky **`err_unsupported`** (hardware) / `$fatal` (sim) rather than emitting
   garbage. As features land the fail-loud set *shrinks*, but an unhandled path always

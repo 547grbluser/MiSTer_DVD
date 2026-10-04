@@ -1,0 +1,1066 @@
+; ac3.uasm -- the AC-3 parse on the shared audio engine (docs/ac3_engine.md, A1).
+;
+; One frame per pass, as tools/ac3_model.py's Decoder (liba52 0.8.0's parse.c in
+; the RTL's behaviour): the sync info and BSI, then six audio blocks, each its
+; side information, its exponents (EXPD), its bit allocation (microcode around the
+; BAPSD band-integration and BAPFILL lookup ops), and its mantissas.
+; then its mantissas: AQ per channel, the coupling bands through AQC (each bin read
+; once, scattered into every coupled channel), the zero tails (CZERO), LFE, the 2/0
+; rematrix (REMAT), and IMDCT (the block's coefficients are ready).
+;
+; Assembled by tools/ac3_isa.py. Registers: r1-r7 scratch, r8-r15 op arguments.
+; Refusals are the RTL's (dvd/ac3/*.sv err_unsupported), and an invalid code is
+; refused too (docs/ac3_engine.md: refuse and count, the default).
+
+; ---------------------------------------------------------------- error codes
+.equ E_SYNC      1
+.equ E_FSCOD     2
+.equ E_ACMOD0    3
+.equ E_CPLBND    4
+.equ E_DELTBAE   5
+.equ E_CPLDELTBA 6
+.equ E_DELTBA    7
+.equ E_CHBW      8
+.equ E_EXP       9                 ; (raised by EXPD: an exponent outside 0..24)
+.equ E_GROUP     10                ; (raised by the mantissa op: an invalid group code)
+
+; ---------------------------------------------------------------- record RAM
+; frame / block scalars
+.equ F_ACMOD     0x000
+.equ F_NF        0x001
+.equ F_LFEON     0x002
+.equ F_BLK       0x003
+.equ F_CMIX      0x004
+.equ F_SURMIX    0x005
+.equ F_DYNRNG    0x006
+.equ F_CHINCPL   0x007
+.equ F_PHSINU    0x008
+.equ F_NCPLSUB   0x009
+.equ F_NCPLBND   0x00A
+.equ F_CPLSTBND  0x00B
+.equ F_CPLSTRT   0x00C
+.equ F_CPLEND    0x00D
+.equ F_REMAT     0x00E
+.equ F_CPLEXPSTR 0x00F
+.equ F_LFEEXPSTR 0x010
+.equ F_BAI       0x011
+.equ F_CSNR      0x012
+.equ F_CPLBAI    0x013
+.equ F_LFEBAI    0x014
+.equ F_CPLFLEAK  0x015
+.equ F_CPLSLEAK  0x016
+.equ F_CPLDBAE   0x017
+.equ F_CPLCOE    0x018
+.equ F_PSD       0x019             ; BAPSD's result
+.equ F_ALCH      0x01A             ; ALLOC's channel (BA_CHAN uses every scratch register)
+.equ F_DONECPL   0x01B             ; the coupling bins are read (by the first coupled channel)
+.equ F_MCH       0x01C             ; MANT's channel
+; the bit allocation of one channel (BA_CHAN's frame)
+.equ B_FDECAY    0x020
+.equ B_FGAIN     0x021
+.equ B_SDECAY    0x022
+.equ B_SGAIN     0x023
+.equ B_DBKNEE    0x024
+.equ B_FLOOR     0x025
+.equ B_SNROFF    0x026
+.equ B_BASE      0x027             ; record address of the channel's bin 0
+.equ B_END       0x028
+.equ B_DELTBA    0x029             ; record address of its 50 delta-BA bands, 0 = none
+.equ B_FLEAK     0x02A
+.equ B_SLEAK     0x02B
+.equ B_LOWCOMP   0x02C
+.equ B_I         0x02D
+.equ B_J         0x02E
+.equ B_START     0x02F
+.equ B_BNDSTART  0x030
+.equ B_BAI       0x031
+.equ B_PSD       0x032
+.equ B_SBAND     0x033
+.equ B_EBAND     0x034
+; per channel (8 slots each)
+.equ A_BLKSW     0x040
+.equ A_DITH      0x048
+.equ A_EXPSTR    0x050
+.equ A_ENDMANT   0x058
+.equ A_BAI       0x060
+.equ A_DELTBAE   0x068
+.equ A_BNDSTRC   0x070             ; [subband] 18
+.equ A_PHSNEG    0x088             ; [band] 18 (ch1's phase flag, toggled)
+.equ A_CPLCO     0x0A0             ; [ch*18 + band] {m[9:6], e==15 [5], e+mstr [4:0]}
+; per bin {bap[13:8], exp[4:0]}: C_BINBASE[slot] is bin 0 of slot 0-4, cpl (5), lfe (6)
+.equ DELTBA      0x6E0             ; [ch*50 + band]
+
+; ================================================================ the frame
+RESET:
+FRAME:
+        frame   r1
+        get     r2, 16
+        li      r3, 0x0B77
+        bne     r2, r3, ESYNC
+        get     r2, 16                  ; crc1
+        get     r2, 2                   ; fscod
+        bnei    r2, 0, EFSCOD
+        get     r2, 6                   ; frmsizcod
+        bgei    r2, 38, EFSCOD
+        get     r2, 5                   ; bsid
+        get     r2, 3                   ; bsmod
+        get     r2, 3                   ; acmod
+        beqi    r2, 0, EACMOD0
+        st      r2, F_ACMOD
+        ld      r3, C_NFCHANS[r2]
+        st      r3, F_NF
+        st      r0, F_CMIX
+        st      r0, F_SURMIX
+        andi    r3, r2, 1
+        beqi    r3, 0, H_SMIX
+        beqi    r2, 1, H_SMIX
+        get     r3, 2
+        st      r3, F_CMIX
+H_SMIX:
+        andi    r3, r2, 4
+        beqi    r3, 0, H_DSUR
+        get     r3, 2
+        st      r3, F_SURMIX
+H_DSUR:
+        bnei    r2, 2, H_LFE
+        get     r3, 2                   ; dsurmod
+H_LFE:
+        get     r3, 1
+        st      r3, F_LFEON
+        get     r3, 5                   ; dialnorm
+        get     r3, 1                   ; compre
+        beqi    r3, 0, H_LANG
+        get     r3, 8
+H_LANG:
+        get     r3, 1                   ; langcode
+        beqi    r3, 0, H_PROD
+        get     r3, 8
+H_PROD:
+        get     r3, 1                   ; audprodie
+        beqi    r3, 0, H_COPY
+        get     r3, 7
+H_COPY:
+        get     r3, 2                   ; copyrightb, origbs
+        get     r3, 1                   ; timecod1e
+        beqi    r3, 0, H_TC2
+        get     r3, 14
+H_TC2:
+        get     r3, 1
+        beqi    r3, 0, H_ADD
+        get     r3, 14
+H_ADD:
+        get     r3, 1                   ; addbsie
+        beqi    r3, 0, H_BLOCKS
+        get     r3, 6
+H_ADDL:
+        get     r4, 8
+        subi    r3, r3, 1
+        bgei    r3, 0, H_ADDL
+H_BLOCKS:
+        st      r0, F_BLK
+H_BLK:
+        call    BLOCK
+        ld      r2, F_BLK
+        addi    r2, r2, 1
+        st      r2, F_BLK
+        blti    r2, 6, H_BLK
+        fend
+        jmp     FRAME
+
+; ================================================================ one audio block
+BLOCK:
+        ld      r7, F_NF
+        li      r4, 0
+B_BSW:
+        get     r2, 1
+        st      r2, A_BLKSW[r4]
+        addi    r4, r4, 1
+        blt     r4, r7, B_BSW
+        li      r4, 0
+B_DTH:
+        get     r2, 1
+        st      r2, A_DITH[r4]
+        addi    r4, r4, 1
+        blt     r4, r7, B_DTH
+        ld      r2, F_BLK
+        bnei    r2, 0, B_DYN
+        st      r0, F_DYNRNG            ; unity at the frame's start ;MUT dynreset: nop
+B_DYN:
+        get     r2, 1                   ; dynrnge
+        beqi    r2, 0, B_CPLSTRE
+        get     r2, 8
+        st      r2, F_DYNRNG
+; ---- coupling strategy
+B_CPLSTRE:
+        get     r2, 1                   ; cplstre
+        beqi    r2, 0, B_CPLCO
+        st      r0, F_CHINCPL
+        get     r2, 1                   ; cplinu
+        beqi    r2, 0, B_CPLCO
+        li      r4, 0
+        li      r5, 0
+B_CHIN:
+        get     r2, 1
+        shl     r2, r2, r4
+        or      r5, r5, r2
+        addi    r4, r4, 1
+        blt     r4, r7, B_CHIN
+        st      r5, F_CHINCPL
+        ld      r2, F_ACMOD
+        bnei    r2, 2, B_BEGF
+        get     r2, 1
+        st      r2, F_PHSINU
+B_BEGF:
+        get     r2, 4                   ; cplbegf
+        get     r3, 4                   ; cplendf
+        addi    r3, r3, 3
+        blt     r3, r2, ECPLBND         ; cplendf + 3 < cplbegf
+        sub     r4, r3, r2              ; ncplsubnd
+        st      r4, F_NCPLSUB
+        st      r4, F_NCPLBND
+        ld      r5, C_CPLBNDTAB[r2]
+        st      r5, F_CPLSTBND
+        shli    r5, r2, 3               ; begf * 12 + 37
+        shli    r6, r2, 2
+        add     r5, r5, r6
+        addi    r5, r5, 37
+        st      r5, F_CPLSTRT
+        subi    r3, r3, 3               ; endf * 12 + 73
+        shli    r5, r3, 3
+        shli    r6, r3, 2
+        add     r5, r5, r6
+        addi    r5, r5, 73
+        st      r5, F_CPLEND
+        li      r5, 0                   ; the band structure, ncplsubnd - 1 bits
+        subi    r4, r4, 1
+B_STRC:
+        bge     r5, r4, B_CPLCO
+        get     r2, 1
+        st      r2, A_BNDSTRC[r5]
+        beqi    r2, 0, B_STRC_N
+        ld      r3, F_NCPLBND
+        subi    r3, r3, 1
+        st      r3, F_NCPLBND
+B_STRC_N:
+        addi    r5, r5, 1
+        jmp     B_STRC
+; ---- coupling coordinates
+B_CPLCO:
+        ld      r6, F_CHINCPL
+        beqi    r6, 0, B_REMAT
+        st      r0, F_CPLCOE
+        li      r4, 0                   ; ch
+B_COE:
+        shr     r2, r6, r4
+        andi    r2, r2, 1
+        beqi    r2, 0, B_COE_N
+        get     r2, 1                   ; cplcoe
+        beqi    r2, 0, B_COE_N
+        li      r2, 1
+        st      r2, F_CPLCOE
+        get     r3, 2                   ; mstrcplco * 3
+        shli    r2, r3, 1
+        add     r3, r3, r2
+        shli    r1, r4, 4               ; r1 = ch * 18 (A_CPLCO row)
+        shli    r2, r4, 1
+        add     r1, r1, r2
+        li      r5, 0
+B_COE_B:
+        ld      r2, F_NCPLBND
+        bge     r5, r2, B_COE_N
+        get     r2, 4                   ; cplcoexp
+        get     r7, 4                   ; cplcomant
+        shli    r7, r7, 6
+        add     r7, r7, r2              ; + cplcoexp
+        add     r7, r7, r3              ; + mstrcplco: e + mstr in [4:0] (<= 24)
+        bnei    r2, 15, B_COE_W
+        ori     r7, r7, 0x20            ; e == 15
+B_COE_W:
+        add     r2, r1, r5
+        st      r7, A_CPLCO[r2]
+        bnei    r4, 1, B_COE_I
+        st      r0, A_PHSNEG[r5]        ; a fresh ch1 coordinate: no phase sign
+B_COE_I:
+        addi    r5, r5, 1
+        jmp     B_COE_B
+B_COE_N:
+        addi    r4, r4, 1
+        ld      r7, F_NF
+        blt     r4, r7, B_COE
+        ld      r2, F_ACMOD             ; phase flags: 2/0, in use, any new coordinate
+        bnei    r2, 2, B_REMAT
+        ld      r2, F_PHSINU
+        beqi    r2, 0, B_REMAT
+        ld      r2, F_CPLCOE
+        beqi    r2, 0, B_REMAT
+        li      r5, 0
+B_PHS:
+        ld      r2, F_NCPLBND
+        bge     r5, r2, B_REMAT
+        get     r2, 1
+        ld      r3, A_PHSNEG[r5]
+        xor     r3, r3, r2              ;MUT phsflg: mov r3, r3
+        st      r3, A_PHSNEG[r5]
+        addi    r5, r5, 1
+        jmp     B_PHS
+; ---- rematrixing (2/0)
+B_REMAT:
+        ld      r7, F_NF
+        ld      r2, F_ACMOD
+        bnei    r2, 2, B_EXPSTR
+        get     r2, 1                   ; rematstr
+        beqi    r2, 0, B_EXPSTR
+        li      r6, 253                 ; end = chincpl ? cplstrtmant : 253
+        ld      r2, F_CHINCPL
+        beqi    r2, 0, B_RM0
+        ld      r6, F_CPLSTRT
+B_RM0:
+        li      r5, 0                   ; flags
+        li      r4, 0                   ; i
+B_RM1:
+        get     r2, 1
+        shl     r2, r2, r4
+        or      r5, r5, r2
+        ld      r3, C_REMATBAND[r4]
+        addi    r4, r4, 1
+        blt     r3, r6, B_RM1           ; while rematrix_band[i-1] < end
+        st      r5, F_REMAT
+; ---- exponent strategies
+B_EXPSTR:
+        st      r0, F_CPLEXPSTR
+        ld      r2, F_CHINCPL
+        beqi    r2, 0, B_CHEXP
+        get     r2, 2
+        st      r2, F_CPLEXPSTR
+B_CHEXP:
+        li      r4, 0
+B_CHEXP1:
+        get     r2, 2
+        st      r2, A_EXPSTR[r4]
+        addi    r4, r4, 1
+        blt     r4, r7, B_CHEXP1
+        st      r0, F_LFEEXPSTR
+        ld      r2, F_LFEON
+        beqi    r2, 0, B_BW
+        get     r2, 1
+        st      r2, F_LFEEXPSTR
+; ---- bandwidth (endmant)
+B_BW:
+        li      r4, 0
+B_BW1:
+        ld      r2, A_EXPSTR[r4]
+        beqi    r2, 0, B_BW_N           ; reuse: endmant stays
+        ld      r2, F_CHINCPL
+        shr     r2, r2, r4
+        andi    r2, r2, 1
+        beqi    r2, 0, B_BW_U
+        ld      r2, F_CPLSTRT           ; coupled: endmant = cplstrtmant
+        st      r2, A_ENDMANT[r4]
+        jmp     B_BW_N
+B_BW_U:
+        get     r2, 6                   ; chbwcod
+        bgei    r2, 61, ECHBW
+        shli    r3, r2, 1
+        add     r2, r2, r3              ; * 3
+        addi    r2, r2, 73
+        st      r2, A_ENDMANT[r4]
+B_BW_N:
+        addi    r4, r4, 1
+        blt     r4, r7, B_BW1
+; ---- exponents: coupling channel
+        ld      r11, F_CPLEXPSTR
+        beqi    r11, 0, B_FBWEXP
+        ld      r8, C_BINBASE+5
+        ld      r9, F_CPLSTRT
+        ld      r10, F_NCPLSUB          ; ngrps = (4 * ncplsubnd) >> (cplexpstr - 1)
+        shli    r10, r10, 2
+        subi    r2, r11, 1
+        shr     r10, r10, r2
+        get     r12, 4
+        shli    r12, r12, 1             ; the seed is cplabsexp << 1 ;MUT cplseed: shli r12, r12, 0
+        vop     EXPD
+; ---- exponents: full-bandwidth channels
+B_FBWEXP:
+        li      r4, 0
+B_FE1:
+        ld      r11, A_EXPSTR[r4]
+        beqi    r11, 0, B_FE_N
+        ld      r8, C_BINBASE[r4]
+        li      r9, 1
+        ; ngrps = (endmant + gs - 4) / gs, gs = 3 << (expstr - 1): ((endmant - 4) / 3 >> s) + 1
+        ld      r2, A_ENDMANT[r4]
+        subi    r2, r2, 4
+        li      r10, 0
+B_FE_D3:
+        blti    r2, 3, B_FE_D3E
+        subi    r2, r2, 3
+        addi    r10, r10, 1
+        jmp     B_FE_D3
+B_FE_D3E:
+        subi    r2, r11, 1
+        shr     r10, r10, r2
+        addi    r10, r10, 1
+        get     r12, 4                  ; the DC exponent
+        ld      r3, C_BINBASE[r4]
+        st      r12, 0[r3]
+        vop     EXPD
+        get     r2, 2                   ; gainrng
+B_FE_N:
+        ld      r7, F_NF
+        addi    r4, r4, 1
+        blt     r4, r7, B_FE1
+; ---- exponents: LFE
+        ld      r2, F_LFEEXPSTR
+        beqi    r2, 0, B_BAIE
+        ld      r8, C_BINBASE+6
+        li      r9, 1
+        li      r10, 2
+        li      r11, 1
+        get     r12, 4
+        st      r12, 0[r8]
+        vop     EXPD
+; ---- bit-allocation parameters
+B_BAIE:
+        get     r2, 1                   ; baie
+        beqi    r2, 0, B_SNR
+        get     r2, 11
+        st      r2, F_BAI
+B_SNR:
+        get     r2, 1                   ; snroffste
+        beqi    r2, 0, B_LEAK
+        get     r2, 6
+        st      r2, F_CSNR
+        ld      r2, F_CHINCPL
+        beqi    r2, 0, B_SNRCH
+        get     r2, 7
+        st      r2, F_CPLBAI
+B_SNRCH:
+        li      r4, 0
+B_SNRCH1:
+        get     r2, 7
+        st      r2, A_BAI[r4]
+        addi    r4, r4, 1
+        blt     r4, r7, B_SNRCH1
+        ld      r2, F_LFEON
+        beqi    r2, 0, B_LEAK
+        get     r2, 7
+        st      r2, F_LFEBAI
+B_LEAK:
+        ld      r2, F_CHINCPL
+        beqi    r2, 0, B_DBA
+        get     r2, 1                   ; cplleake
+        beqi    r2, 0, B_DBA
+        get     r2, 3
+        li      r3, 9
+        sub     r2, r3, r2
+        st      r2, F_CPLFLEAK
+        get     r2, 3
+        sub     r2, r3, r2
+        st      r2, F_CPLSLEAK
+; ---- delta bit allocation (the RTL: NONE every block, only NEW applies)
+B_DBA:
+        li      r2, 2
+        st      r2, F_CPLDBAE
+        li      r4, 0
+B_DBA0:
+        st      r2, A_DELTBAE[r4]
+        addi    r4, r4, 1
+        blti    r4, 5, B_DBA0
+        get     r2, 1                   ; deltbaie
+        beqi    r2, 0, B_SKIP
+        ld      r2, F_CHINCPL
+        beqi    r2, 0, B_DBACH
+        get     r2, 2
+        beqi    r2, 3, EDELTBAE
+        st      r2, F_CPLDBAE
+B_DBACH:
+        li      r4, 0
+B_DBACH1:
+        get     r2, 2
+        beqi    r2, 3, EDELTBAE
+        st      r2, A_DELTBAE[r4]
+        addi    r4, r4, 1
+        blt     r4, r7, B_DBACH1
+        ld      r2, F_CHINCPL
+        beqi    r2, 0, B_DBASEG
+        ld      r2, F_CPLDBAE
+        beqi    r2, 1, ECPLDELTBA
+B_DBASEG:
+        li      r4, 0
+B_DBASEG1:
+        ld      r2, A_DELTBAE[r4]
+        bnei    r2, 1, B_DBASEG_N
+        call    DELTSEG
+B_DBASEG_N:
+        ld      r7, F_NF
+        addi    r4, r4, 1
+        blt     r4, r7, B_DBASEG1
+; ---- skip field
+B_SKIP:
+        get     r2, 1                   ; skiple
+        beqi    r2, 0, B_ALLOC
+        get     r3, 9
+B_SKIP1:
+        beqi    r3, 0, B_ALLOC
+        get     r2, 8
+        subi    r3, r3, 1
+        jmp     B_SKIP1
+; ---- bit allocation
+B_ALLOC:
+        call    ALLOC
+        call    MANT
+        ret
+
+; ================================================================ mantissas
+; per channel: bins [0, endmant) (AQ); the FIRST coupled channel then reads the
+; coupling bins for every coupled channel (CPLPASS); then the channel's zero tail,
+; from cplendmant if coupled, else from endmant. Then LFE, then the 2/0 rematrix.
+MANT:
+        vop     QRST                    ; the grouped-quantizer caches empty
+        st      r0, F_DONECPL
+        li      r4, 0
+M_CH:
+        st      r4, F_MCH
+        mov     r8, r4
+        ld      r9, C_BINBASE[r4]
+        li      r10, 0
+        ld      r11, A_ENDMANT[r4]
+        ld      r12, A_DITH[r4]
+        vop     AQ
+        ld      r4, F_MCH
+        ld      r2, F_CHINCPL
+        shr     r2, r2, r4
+        andi    r2, r2, 1
+        beqi    r2, 0, M_UTAIL
+        ld      r2, F_DONECPL
+        bnei    r2, 0, M_CTAIL
+        li      r2, 1
+        st      r2, F_DONECPL
+        call    CPLPASS
+M_CTAIL:
+        ld      r8, F_MCH
+        ld      r9, F_CPLEND            ;MUT ctail: ld r9, F_CPLSTRT
+        jmp     M_TAIL
+M_UTAIL:
+        mov     r8, r4
+        ld      r9, A_ENDMANT[r4]
+M_TAIL:
+        li      r10, 256
+        vop     CZERO
+        ld      r4, F_MCH
+        addi    r4, r4, 1
+        ld      r7, F_NF
+        blt     r4, r7, M_CH
+        ld      r2, F_LFEON
+        beqi    r2, 0, M_REMAT
+        li      r8, 6
+        ld      r9, C_BINBASE+6
+        li      r10, 0
+        li      r11, 7
+        li      r12, 0
+        vop     AQ
+M_REMAT:
+        ld      r2, F_ACMOD
+        bnei    r2, 2, M_DONE
+        ld      r8, F_REMAT
+        beqi    r8, 0, M_DONE
+        ld      r9, A_ENDMANT
+        ld      r2, A_ENDMANT+1
+        min     r9, r9, r2              ; end = min(endmant0, endmant1)
+        vop     REMAT                   ;MUT noremat: nop
+M_DONE:
+        ; the block's side information for imdct_512, as the op's arguments: r8 blksw
+        ; (a bit a channel), r9 dynrng, r10 acmod, r11 lfeon, r12 cmixlev, r13 surmixlev
+        li      r8, 0
+        li      r4, 0
+        ld      r7, F_NF
+M_BLKSW:
+        ld      r2, A_BLKSW[r4]
+        shl     r2, r2, r4
+        or      r8, r8, r2
+        addi    r4, r4, 1
+        blt     r4, r7, M_BLKSW
+        ld      r9, F_DYNRNG
+        ld      r10, F_ACMOD
+        ld      r11, F_LFEON
+        ld      r12, F_CMIX
+        ld      r13, F_SURMIX
+        vop     IMDCT                   ; this block's coefficients are ready
+        ret
+
+; the coupling bands: liba52's band-merge replay (each set structure bit merges the
+; next 12-bin sub-band into this band), then AQC for the band's bins
+CPLPASS:
+        ld      r9, F_CPLSTRT           ; i
+        li      r8, 0                   ; band
+        li      r5, 0                   ; the structure bit (sub-band) index
+        ld      r6, F_NCPLSUB
+        subi    r6, r6, 1               ; ncplsubnd - 1 structure bits
+CP_BAND:
+        ld      r2, F_CPLEND
+        bge     r9, r2, CP_RET
+        addi    r10, r9, 12             ; this band's end
+CP_MERGE:
+        bge     r5, r6, CP_GO           ; past the structure bits: a 0
+        ld      r2, A_BNDSTRC[r5]
+        addi    r5, r5, 1
+        beqi    r2, 0, CP_GO
+        addi    r10, r10, 12            ;MUT nomerge: nop
+        jmp     CP_MERGE
+CP_GO:
+        vop     AQC                     ; band r8, bins [r9, r10)
+        mov     r9, r10
+        addi    r8, r8, 1
+        jmp     CP_BAND
+CP_RET:
+        ret
+
+; ================================================================ delta-BA segments
+; channel r4 (keep r4); bands DELTBA[r4*50 ..], cleared, then each segment's run
+DELTSEG:
+        mov     r1, r4                  ; r1 = DELTBA + ch * 50
+        shli    r2, r4, 5
+        shli    r3, r4, 4
+        add     r2, r2, r3
+        shli    r3, r4, 1
+        add     r1, r2, r3
+        addi    r1, r1, DELTBA
+        li      r5, 0
+DS_CLR:
+        add     r2, r1, r5
+        st      r0, 0[r2]
+        addi    r5, r5, 1
+        blti    r5, 50, DS_CLR
+        get     r6, 3                   ; deltnseg
+        li      r5, 0                   ; j
+DS_SEG:
+        get     r2, 5                   ; deltoffst
+        add     r5, r5, r2
+        get     r3, 4                   ; deltlen
+        get     r2, 3                   ; deltba code
+        blti    r2, 4, DS_LO
+        subi    r2, r2, 3
+        jmp     DS_V
+DS_LO:
+        subi    r2, r2, 4
+DS_V:
+        beqi    r3, 0, DS_NEXT
+        add     r7, r5, r3
+        bgei    r7, 50, EDELTBA         ; j + deltlen >= 50
+DS_RUN:
+        add     r7, r1, r5
+        st      r2, 0[r7]
+        addi    r5, r5, 1
+        subi    r3, r3, 1
+        bnei    r3, 0, DS_RUN
+DS_NEXT:
+        subi    r6, r6, 1
+        bgei    r6, 0, DS_SEG
+        ret
+
+; ================================================================ bit allocation
+; every channel, every block (the RTL); zero SNR offsets -> every bap 0
+ALLOC:
+        ; zero_snr_offsets: csnroffst == 0, and every fsnroffst (bai >> 3) == 0
+        ld      r2, F_CSNR
+        bnei    r2, 0, AL_GO
+        ld      r2, F_CHINCPL
+        beqi    r2, 0, AL_Z1
+        ld      r2, F_CPLBAI
+        shri    r2, r2, 3
+        bnei    r2, 0, AL_GO
+AL_Z1:
+        ld      r2, F_LFEON
+        beqi    r2, 0, AL_Z2
+        ld      r2, F_LFEBAI
+        shri    r2, r2, 3
+        bnei    r2, 0, AL_GO
+AL_Z2:
+        ld      r7, F_NF
+        li      r4, 0
+AL_Z3:
+        ld      r2, A_BAI[r4]
+        shri    r2, r2, 3
+        bnei    r2, 0, AL_GO
+        addi    r4, r4, 1
+        blt     r4, r7, AL_Z3
+        ; zero SNR: every bap 0
+        li      r4, 0
+AL_ZF:
+        ld      r8, C_BINBASE[r4]
+        li      r9, 0
+        ld      r10, A_ENDMANT[r4]
+        vop     BAPZERO
+        addi    r4, r4, 1
+        blt     r4, r7, AL_ZF
+        ld      r2, F_CHINCPL
+        beqi    r2, 0, AL_ZL
+        ld      r8, C_BINBASE+5
+        ld      r9, F_CPLSTRT
+        ld      r10, F_CPLEND
+        vop     BAPZERO
+AL_ZL:
+        ld      r2, F_LFEON
+        beqi    r2, 0, AL_RET
+        ld      r8, C_BINBASE+6
+        li      r9, 0
+        li      r10, 7
+        vop     BAPZERO
+AL_RET:
+        ret
+AL_GO:
+        ld      r7, F_NF
+        li      r4, 0
+AL_CH:
+        ld      r2, C_BINBASE[r4]
+        st      r2, B_BASE
+        st      r0, B_BNDSTART
+        st      r0, B_START
+        ld      r2, A_ENDMANT[r4]
+        st      r2, B_END
+        st      r0, B_FLEAK
+        st      r0, B_SLEAK
+        ld      r2, A_BAI[r4]
+        st      r2, B_BAI
+        st      r0, B_DELTBA            ; delta-BA only when this block says NEW
+        ld      r2, A_DELTBAE[r4]
+        bnei    r2, 1, AL_CH_GO
+        shli    r2, r4, 5               ; DELTBA + ch * 50
+        shli    r3, r4, 4
+        add     r2, r2, r3
+        shli    r3, r4, 1
+        add     r2, r2, r3
+        addi    r2, r2, DELTBA
+        st      r2, B_DELTBA
+AL_CH_GO:
+        st      r4, F_ALCH
+        call    BA_CHAN
+        ld      r4, F_ALCH
+        ld      r7, F_NF
+        addi    r4, r4, 1
+        blt     r4, r7, AL_CH
+        ld      r2, F_CHINCPL           ; the coupling channel
+        beqi    r2, 0, AL_LFE
+        ld      r2, C_BINBASE+5
+        st      r2, B_BASE
+        ld      r2, F_CPLSTBND
+        st      r2, B_BNDSTART
+        ld      r2, F_CPLSTRT
+        st      r2, B_START
+        ld      r2, F_CPLEND
+        st      r2, B_END
+        ld      r2, F_CPLFLEAK
+        shli    r2, r2, 8
+        st      r2, B_FLEAK
+        ld      r2, F_CPLSLEAK
+        shli    r2, r2, 8
+        st      r2, B_SLEAK
+        ld      r2, F_CPLBAI
+        st      r2, B_BAI
+        st      r0, B_DELTBA
+        call    BA_CHAN
+AL_LFE:
+        ld      r2, F_LFEON
+        beqi    r2, 0, AL_RET
+        ld      r2, C_BINBASE+6
+        st      r2, B_BASE
+        st      r0, B_BNDSTART
+        st      r0, B_START
+        li      r2, 7
+        st      r2, B_END
+        st      r0, B_FLEAK
+        st      r0, B_SLEAK
+        ld      r2, F_LFEBAI
+        st      r2, B_BAI
+        st      r0, B_DELTBA
+        call    BA_CHAN
+        ret
+
+; ---- one channel: liba52 a52_bit_allocate (fscod 0) over the B_* frame
+BA_CHAN:
+        ld      r1, F_BAI
+        shri    r2, r1, 7               ; fdecay = 63 + 20 * fdcycod
+        andi    r2, r2, 3
+        shli    r3, r2, 4
+        shli    r2, r2, 2
+        add     r2, r2, r3
+        addi    r2, r2, 63
+        st      r2, B_FDECAY
+        ld      r2, B_BAI               ; fgain = 128 + 128 * fgaincod
+        andi    r2, r2, 7
+        shli    r2, r2, 7
+        addi    r2, r2, 128
+        st      r2, B_FGAIN
+        shri    r2, r1, 9               ; sdecay = 15 + 2 * sdcycod
+        shli    r2, r2, 1
+        addi    r2, r2, 15
+        st      r2, B_SDECAY
+        shri    r2, r1, 5
+        andi    r2, r2, 3
+        ld      r2, C_SLOWGAIN[r2]
+        st      r2, B_SGAIN
+        shri    r2, r1, 3
+        andi    r2, r2, 3
+        ld      r2, C_DBPBTAB[r2]
+        st      r2, B_DBKNEE
+        andi    r2, r1, 7
+        ld      r3, C_FLOORTAB[r2]      ; r3 = floor
+        ld      r4, F_CSNR              ; snroffset = 960 - 64 csnr - 4 fsnr + floor
+        shli    r4, r4, 6
+        li      r5, 960
+        sub     r5, r5, r4
+        ld      r4, B_BAI
+        shri    r4, r4, 3
+        shli    r4, r4, 2
+        sub     r5, r5, r4
+        add     r5, r5, r3
+        st      r5, B_SNROFF
+        shri    r3, r3, 5
+        st      r3, B_FLOOR
+        ld      r2, B_BNDSTART
+        st      r2, B_I
+        ld      r2, B_START
+        st      r2, B_J
+        bnei    r2, 0, BA_BANDS         ; the coupling channel skips the low bins
+        ; ---- phase 1: bins 0..2, and on while the exponent rises (to 7)
+        st      r0, B_LOWCOMP
+        ld      r2, B_END
+        subi    r2, r2, 1
+        st      r2, B_J                 ; j = end - 1 (the lowcomp look-ahead bound)
+BA_P1:
+        li      r7, 384
+        call    LOWCOMP
+        call    EXPI                    ; r1 = exp[i]
+        shli    r1, r1, 7               ; psd
+        st      r1, B_PSD
+        ld      r2, B_FGAIN
+        add     r2, r1, r2
+        ld      r3, B_LOWCOMP
+        add     r2, r2, r3              ; mask = psd + fgain + lowcomp
+        call    MASKBAP
+        ld      r6, B_I
+        addi    r6, r6, 1
+        st      r6, B_I
+        blti    r6, 3, BA_P1
+        bgei    r6, 7, BA_P1E
+        call    EXPI
+        mov     r5, r1
+        subi    r6, r6, 1
+        st      r6, B_I
+        call    EXPI
+        addi    r6, r6, 1
+        st      r6, B_I
+        blt     r1, r5, BA_P1           ; exp[i] > exp[i-1]
+BA_P1E:
+        ld      r1, B_PSD               ; fastleak = psd + fgain, slowleak = psd + sgain
+        ld      r2, B_FGAIN
+        add     r2, r1, r2
+        st      r2, B_FLEAK
+        ld      r2, B_SGAIN
+        add     r2, r1, r2
+        st      r2, B_SLEAK
+        ; ---- phase 2: to bin 7, the leaky integrator engages
+BA_P2:
+        ld      r6, B_I
+        bgei    r6, 7, BA_P2E
+        li      r7, 384
+        call    LOWCOMP
+        call    LEAKBIN
+        ld      r6, B_I
+        addi    r6, r6, 1
+        st      r6, B_I
+        jmp     BA_P2
+BA_P2E:
+        ld      r2, B_END
+        beqi    r2, 7, BA_RET           ; LFE
+        ; ---- phase 3: bins 7..19, lowcomp seed 320 (always the look-ahead)
+BA_P3:
+        li      r7, 320                 ;MUT p3seed: li r7, 384
+        call    LOWCOMP3
+        call    LEAKBIN
+        ld      r6, B_I
+        addi    r6, r6, 1
+        st      r6, B_I
+        blti    r6, 20, BA_P3
+        ; ---- phase 4: the lowcomp tail, two bins at most
+BA_P4:
+        ld      r2, B_LOWCOMP
+        blti    r2, 129, BA_P4E
+        subi    r2, r2, 128
+        st      r2, B_LOWCOMP
+        call    LEAKBIN
+        ld      r6, B_I
+        addi    r6, r6, 1
+        st      r6, B_I
+        jmp     BA_P4
+BA_P4E:
+        ld      r6, B_I
+        st      r6, B_J                 ; j = i
+        ; ---- phase 5: the bands
+BA_BANDS:
+        ld      r2, B_J
+        st      r2, B_SBAND
+        ld      r6, B_I                 ; endband = min(bndtab[i - 20], end)
+        ld      r3, C_BNDTAB-20[r6]
+        ld      r4, B_END
+        min     r3, r3, r4
+        st      r3, B_EBAND
+        ld      r8, B_BASE
+        mov     r9, r2
+        mov     r10, r3
+        vop     BAPSD                   ; F_PSD = the band's integrated PSD
+        ld      r1, F_PSD
+        call    LEAK                    ; r2 = min(fastleak, slowleak), updated
+        ld      r3, B_I
+        call    CMASK
+        ld      r8, B_BASE
+        ld      r9, B_SBAND
+        ld      r10, B_EBAND
+        mov     r11, r2
+        vop     BAPFILL
+        ld      r6, B_I
+        addi    r6, r6, 1
+        st      r6, B_I
+        ld      r2, B_EBAND
+        st      r2, B_J
+        ld      r3, B_END
+        blt     r2, r3, BA_BANDS
+BA_RET:
+        ret
+
+; r1 = exp[B_I] (r6 = B_I on return)
+EXPI:
+        ld      r6, B_I
+        ld      r4, B_BASE
+        add     r4, r4, r6
+        ld      r1, 0[r4]
+        andi    r1, r1, 31
+        ret
+
+; phases 1-2: if i < j: exp[i+1] == exp[i] - 2 -> lowcomp = r7 (384);
+;             else if lowcomp and exp[i+1] > exp[i]: lowcomp -= 64
+LOWCOMP:
+        ld      r6, B_I
+        ld      r2, B_J
+        bge     r6, r2, LC_RET
+LOWCOMP3:                               ; phase 3: no i < j test
+        ld      r6, B_I
+        ld      r4, B_BASE
+        add     r4, r4, r6
+        ld      r2, 0[r4]               ; exp[i]
+        andi    r2, r2, 31
+        ld      r3, 1[r4]               ; exp[i+1]
+        andi    r3, r3, 31
+        subi    r5, r2, 2
+        bne     r3, r5, LC_DEC
+        st      r7, B_LOWCOMP
+        ret
+LC_DEC:
+        ld      r5, B_LOWCOMP
+        beqi    r5, 0, LC_RET
+        bge     r2, r3, LC_RET          ; exp[i+1] > exp[i]
+        subi    r5, r5, 64
+        st      r5, B_LOWCOMP
+LC_RET:
+        ret
+
+; one bin of phases 2-4: psd = 128 exp[i]; UPDATE_LEAK;
+; mask = min(fastleak + lowcomp, slowleak); COMPUTE_MASK; bap
+LEAKBIN:
+        call    EXPI
+        shli    r1, r1, 7
+        st      r1, B_PSD
+        call    LEAKUP
+        ld      r2, B_FLEAK
+        ld      r3, B_LOWCOMP
+        add     r2, r2, r3
+        ld      r3, B_SLEAK
+        min     r2, r2, r3
+        call    MASKBAP
+        ret
+
+; UPDATE_LEAK with psd r1: fastleak = min(fastleak + fdecay, psd + fgain), slowleak alike
+LEAKUP:
+        ld      r2, B_FLEAK
+        ld      r3, B_FDECAY
+        add     r2, r2, r3
+        ld      r3, B_FGAIN
+        add     r3, r1, r3
+        min     r2, r2, r3
+        st      r2, B_FLEAK
+        ld      r2, B_SLEAK
+        ld      r3, B_SDECAY
+        add     r2, r2, r3
+        ld      r3, B_SGAIN
+        add     r3, r1, r3
+        min     r2, r2, r3
+        st      r2, B_SLEAK
+        ret
+
+; a band: UPDATE_LEAK with psd r1, then r2 = min(fastleak, slowleak)
+LEAK:
+        call    LEAKUP
+        ld      r2, B_FLEAK
+        ld      r3, B_SLEAK
+        min     r2, r2, r3
+        ret
+
+; COMPUTE_MASK (psd r1, mask r2, index r3) then bap[i] = baptab[156 + mask + 4 exp[i]]
+MASKBAP:
+        ld      r3, B_I
+        call    CMASK
+        ld      r6, B_I
+        ld      r4, B_BASE
+        add     r4, r4, r6
+        ld      r5, 0[r4]
+        andi    r1, r5, 31
+        shli    r1, r1, 2
+        add     r1, r1, r2
+        ld      r1, C_BAPTAB+156[r1]
+        andi    r1, r1, 63
+        shli    r1, r1, 8
+        andi    r5, r5, 31
+        or      r5, r5, r1
+        st      r5, 0[r4]
+        ret
+
+; COMPUTE_MASK: psd r1, mask r2, index r3 -> r2
+CMASK:
+        ld      r4, B_DBKNEE
+        bge     r4, r1, CM_1            ; psd > dbknee: mask -= (psd - dbknee) >> 2 ;MUT knee: jmp CM_1
+        sub     r5, r1, r4
+        sari    r5, r5, 2
+        sub     r2, r2, r5
+CM_1:
+        ld      r4, C_HTH[r3]           ; mask = min(mask, hth[i])
+        min     r2, r2, r4
+        ld      r4, B_SNROFF            ; mask -= snroffset + 128 deltba[i]
+        sub     r2, r2, r4
+        ld      r4, B_DELTBA
+        beqi    r4, 0, CM_3
+        add     r4, r4, r3
+        ld      r4, 0[r4]
+        shli    r4, r4, 7
+        sub     r2, r2, r4
+CM_3:
+        blti    r2, 1, CM_NEG           ; mask > 0 -> 0, else (-mask) >> 5
+        li      r2, 0
+        jmp     CM_FL
+CM_NEG:
+        sub     r2, r0, r2
+        sari    r2, r2, 5
+CM_FL:
+        ld      r4, B_FLOOR
+        sub     r2, r2, r4
+        ret
+
+; ================================================================ errors
+; A branch to ERRV + code refuses the frame with that code (tools/dts_isa.py).
+.equ ESYNC      ERRV + E_SYNC
+.equ EFSCOD     ERRV + E_FSCOD
+.equ EACMOD0    ERRV + E_ACMOD0
+.equ ECPLBND    ERRV + E_CPLBND
+.equ EDELTBAE   ERRV + E_DELTBAE
+.equ ECPLDELTBA ERRV + E_CPLDELTBA
+.equ EDELTBA    ERRV + E_DELTBA
+.equ ECHBW      ERRV + E_CHBW

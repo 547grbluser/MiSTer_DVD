@@ -19,6 +19,26 @@
 //   op 7 HCLR    a0 ch, a1 from band: clear the ADPCM history from that band up
 //   op 8 CNT     a0 counter (dts_top counts it)
 //
+// AC-3's ops (docs/ac3_engine.md A2c; tools/ac3_isa.py Machine.run_op, i.e.
+// tools/ac3_model.py's arithmetic). The coefficients live in X at {slot, bin} (slots 0-4
+// the full-bandwidth channels, 6 LFE), 24-bit Q1.23 sign-extended; AQC's coupling
+// coordinates at 0x700 + ch, where the sequencer's item address puts them.
+//   op 21 AQ     a0 slot, a2 lo, a3 hi: hi - lo bin items from the mantissa unit, each
+//                (m16 << 8) >>> exp, a dither (the LFSR stepped, x 23170, rounded >> 7 +
+//                exp; 0 past exp 23), or 0
+//   op 22 AQC    a1 lo, a2 hi: the band's channel set and coordinates, then hi - lo bins,
+//                each scaled once (or dithered per coupled, dithered channel, in channel
+//                order) and recombined into every coupled channel: sat24((c x co) >> 18)
+//   op 23 CZERO  a0 slot, a1 lo, a2 hi: X[slot][lo .. min(hi, 256)) = 0
+//   op 24 REMAT  a0 flags, a1 end: 2/0 rematrix of bins [13, end), saturating; the
+//                active bands' bins, L and R read before either is written
+//   op 25 IMDCT  the block's coefficients are ready: imdct_req until imdct_done, X's
+//                read port the caller's (coef_ra -> coef_q, one cycle)
+// A refusal mid-AQ / AQC (abort, the sequencer's err_valid) ends the op WITHOUT done,
+// after the item in flight and the one still pending: the emulator stepped the dither
+// LFSR for every item the sequencer emitted. The LFSR (power-up 1) lives here; its
+// table is in the IMDCT program ROM at 768 (AC-3 never runs that program).
+//
 // ONE DATAPATH, two stages: a previously built decoder of this kind closed timing only
 // once its multiply and its round / clip chain had a cycle each. Issue (the per-state
 // wiring below): the operands, the accumulator's preset, the rounding, the addend and
@@ -51,7 +71,7 @@ module dts_vec (
     input  wire          rst_n,
 
     input  wire          start,
-    input  wire    [3:0] op,
+    input  wire    [5:0] op,
     input  wire  [127:0] args,
     output logic         done,
 
@@ -68,19 +88,28 @@ module dts_vec (
     output logic  [15:0] pcm_l,
     output logic  [15:0] pcm_r,
     output logic         pcm_valid,
-    input  wire          pcm_ready
+    input  wire          pcm_ready,
+
+    // AC-3
+    input  wire   [10:0] xq_addr,
+    input  wire          abort,
+    output logic         imdct_req,
+    input  wire          imdct_done,
+    input  wire   [10:0] coef_ra,
+    output logic  [24:0] coef_q
 );
 
 `include "dvd/dts/dts_ucode.svh"
 `include "dvd/dts/dts_vec.svh"
 
-    localparam [3:0] OP_XCLR = 4'd0, OP_XQ = 4'd1, OP_XVQ = 4'd2, OP_ADPCM = 4'd3,
-                     OP_JOINT = 4'd4, OP_BFLY = 4'd5, OP_MIXSYN = 4'd6, OP_HCLR = 4'd7;
+    localparam [5:0] OP_XCLR = 6'd0, OP_XQ = 6'd1, OP_XVQ = 6'd2, OP_ADPCM = 6'd3,
+                     OP_JOINT = 6'd4, OP_BFLY = 6'd5, OP_MIXSYN = 6'd6, OP_HCLR = 6'd7;
+    localparam [9:0] IP_DITH = 10'd768;      // the dither LFSR's table in the iprog ROM
 
     // ------------------------------------------------------------------ ROMs
     logic [23:0] vk    [0:VK_WORDS-1];
     logic [23:0] win   [0:1023];
-    logic [19:0] iprog [0:IPROG_WORDS-1];
+    logic [19:0] iprog [0:1023];             // the IMDCT program; AC-3's dither table at 768
     logic [26:0] icoef [0:ICOEF_WORDS-1];
     initial begin
         $readmemh("dvd/dts/dts_vconst.mem", vk);
@@ -135,6 +164,7 @@ module dts_vec (
     wire  signed [15:0] p_s16 = (p_rnd > 25'sd32767) ? 16'sh7FFF :
                                 (p_rnd < -25'sd32768) ? 16'sh8000 : p_rnd[15:0];
 
+    assign coef_q = xb_q;
     always_ff @(posedge clk) begin
         xb_q <= xb[xb_ra];    if (x_xb_we) xb[x_xb_wa] <= res[24:0];
         hb_q <= hb[hb_ra];    if (x_hb_we) hb[x_hb_wa] <= res[23:0];
@@ -150,16 +180,18 @@ module dts_vec (
     end
 
     // ------------------------------------------------------------------ state
-    typedef enum logic [4:0] {
+    typedef enum logic [5:0] {
         V_IDLE, V_LOOP, V_DRAIN, V_DONE,
         V_XQ0, V_XQ1, V_XQ2, V_XQ2W, V_XQ3, V_XQ4, V_XQ4W, V_XQ5, V_XQ6, V_XQ6W, V_XQ7,
         V_VQ0, V_VQ1, V_JO0, V_JO1,
         V_AD0, V_AD1, V_AD2, V_AD3,
         V_BF,
-        V_MX, V_IPS, V_IP, V_WIN, V_WINW, V_EMIT, V_EMITL, V_EMITW
+        V_MX, V_IPS, V_IP, V_WIN, V_WINW, V_EMIT, V_EMITL, V_EMITW,
+        // AC-3
+        V_AW, V_AD, V_CSC, V_CCH, V_CD1, V_CD2, V_CMUL, V_CZ, V_RM, V_IM
     } vstate_t;
     vstate_t st;
-    logic  [3:0] vop;
+    logic  [5:0] vop;
     logic [15:0] a0, a1, a2, a3, a4, a5, a6, a7;
     logic [11:0] k, k_d, lcnt;
     logic        dv;
@@ -191,6 +223,30 @@ module dts_vec (
     logic        w_go;
 
     wire  [8:0] off = side ? off1 : off0;
+
+    // AC-3: the item at the port, the bin being scattered, the LFSR
+    localparam [5:0] OP_AQ = 6'd21, OP_AQC = 6'd22, OP_CZERO = 6'd23, OP_REMAT = 6'd24,
+                     OP_IMDCT = 6'd25;
+    wire        i_set  = xq_addr == 11'h7F0;                  // AQC's channel set
+    wire        i_co   = (xq_addr[10:8] == 3'd7) && !i_set;    // a coordinate
+    wire [16:0] i_m16  = xq_code[16:0];
+    wire  [4:0] i_e    = xq_code[21:17];
+    wire        i_b0   = xq_code[22];
+    wire        i_dith = xq_code[23];
+    logic [15:0] lfsr;
+    wire  [15:0] lfsr_n = ip_q[15:0] ^ {lfsr[7:0], 8'd0};     // the table read last cycle
+    logic  [4:0] c_dm, c_chin, c_e;
+    logic  [2:0] c_nf, c_slot, c_ch;
+    logic  [7:0] c_bin;
+    logic        c_b0, ab;
+    logic [23:0] creg;                                        // a bin's scaled or dithered value
+    logic  [7:0] rb;                                          // REMAT's bin
+    logic  [1:0] rph;
+    wire  [1:0] r_band = (rb < 8'd25) ? 2'd0 : (rb < 8'd37) ? 2'd1 : (rb < 8'd61) ? 2'd2 : 2'd3;
+    wire        r_act  = a0[r_band];
+    wire signed [26:0] lf27  = {{11{lfsr_n[15]}}, lfsr_n};
+    wire signed [26:0] creg27 = {{3{creg[23]}}, creg};
+    wire signed [55:0] i_scl = {{31{i_m16[16]}}, i_m16, 8'd0};
 
     // sign extensions (named, no casts)
     wire signed [26:0] xq27   = {{3{xq_code[23]}}, xq_code};
@@ -336,7 +392,8 @@ module dts_vec (
         wn_ra = {a7[0], w_t, w_q, w_i};
         ip_ra = (st == V_IPS) ? 10'd0 : (ip_bub || ip_final) ? ip_d : ip_d + 10'd1;
         ic_ra = ip_q[12:6];
-        xq_ready = (st == V_XQ7);
+        xq_ready = (st == V_XQ7) || (st == V_AW);
+        imdct_req = (st == V_IM);
         case (st)
             // ---- the plain loops: XCLR, HCLR (zero writes), XVQ, JOINT (8 samples)
             V_LOOP: begin
@@ -453,6 +510,54 @@ module dts_vec (
                     else begin sat24 = 1'b1; p_wi = 1'b1; end        // a, b: PCM
                 end
             end
+            // ---- AC-3: an item (the dither table is read for the LFSR as it stands)
+            V_AW: begin
+                ip_ra = IP_DITH + {2'd0, lfsr[15:8]};
+                if (xq_valid) begin
+                    xb_wa = xq_addr;
+                    if (i_co) begin                 // a coordinate, as sent
+                        direct = 1'b1; dsrc = {{32{xq_code[23]}}, xq_code}; xb_we = 1'b1;
+                    end else if (!i_set && !(vop == OP_AQ && i_b0 && i_dith)) begin
+                        // a bin's (m16 << 8) >>> exp, or 0; AQ writes it, AQC holds it
+                        direct = 1'b1; dsrc = i_b0 ? 56'sd0 : i_scl;
+                        rsh = i_b0 ? 6'd0 : {1'b0, i_e}; trunc = 1'b1;
+                        xb_we = (vop == OP_AQ);
+                    end
+                end
+            end
+            V_AD, V_CD1: begin                      // the dither: round(ns x 23170 / 2^(7+e))
+                ma = lf27; mb = 27'sd23170; rsh = 6'd7 + {1'b0, c_e};
+                if (c_e > 5'd23) begin direct = 1'b1; dsrc = 56'sd0; rsh = 6'd0; end
+                xb_we = (st == V_AD); xb_wa = {c_slot, c_bin};
+            end
+            V_CCH: begin
+                ip_ra = IP_DITH + {2'd0, lfsr[15:8]};
+                xb_ra = {8'hE0, c_ch};                         // its coordinate
+                if (c_ch != c_nf && c_chin[c_ch] && c_b0 && !c_dm[c_ch]) begin
+                    direct = 1'b1; xb_we = 1'b1; xb_wa = {c_ch, c_bin};    // undithered: 0
+                end
+            end
+            V_CD2: xb_ra = {8'hE0, c_ch};
+            V_CMUL: begin                           // sat24((c x co) >> 18), floor
+                ma = creg27; mb = xb27; rsh = 6'd18; trunc = 1'b1; sat24 = 1'b1;
+                xb_we = 1'b1; xb_wa = {c_ch, c_bin};
+            end
+            V_CZ: begin direct = 1'b1; xb_we = 1'b1; xb_wa = {a0[2:0], k[7:0]}; end
+            // ---- REMAT: an active bin in 4 cycles (read L, read R, write L + R, L - R)
+            V_RM: begin
+                xb_ra = {2'd0, rph[0], rb};
+                direct = 1'b1; sat24 = 1'b1;
+                if (rb < a1[7:0] && r_act) begin
+                    if (rph == 2'd2) begin
+                        dsrc = {{31{bf_a[24]}}, bf_a} + {{31{xb_q[24]}}, xb_q};
+                        xb_we = 1'b1; xb_wa = {3'd0, rb};
+                    end else if (rph == 2'd3) begin
+                        dsrc = {{31{bf_a[24]}}, bf_a} - {{31{bf_c[24]}}, bf_c};
+                        xb_we = 1'b1; xb_wa = {3'd1, rb};
+                    end
+                end
+            end
+            V_IM: xb_ra = coef_ra;
             default: ;
         endcase
     end
@@ -464,9 +569,12 @@ module dts_vec (
         if (cb_valid) begin cb_row <= cb_data; cb_got <= 1'b1; end
         if (pcm_valid && pcm_ready) pcm_valid <= 1'b0;
         if (x_mag_en) mag <= mag + {5'd0, res_abs};
+        if ((st == V_AW || st == V_AD || st == V_CSC || st == V_CCH || st == V_CD1 ||
+             st == V_CD2 || st == V_CMUL) && abort) ab <= 1'b1;
         if (!rst_n) begin
             st <= V_IDLE; pcm_valid <= 1'b0; cb_got <= 1'b0;
             off0 <= 9'd0; off1 <= 9'd0;
+            lfsr <= 16'd1;
         end else case (st)
             V_IDLE: if (start) begin
                 vop <= op;
@@ -502,9 +610,73 @@ module dts_vec (
                         nch <= VK_NCH[3 * args[19:16] +: 3];
                         st <= V_MX;
                     end
+                    OP_AQ: begin
+                        ab <= 1'b0;
+                        lcnt <= args[63:48] - args[47:32];
+                        if ($signed(args[47:32]) < $signed(args[63:48])) st <= V_AW;
+                        else st <= V_DONE;
+                    end
+                    OP_AQC: begin ab <= 1'b0; lcnt <= args[47:32] - args[31:16]; st <= V_AW; end
+                    OP_CZERO: begin
+                        k <= args[27:16];
+                        lcnt <= (args[47:32] > 16'd256) ? 12'd256 : args[43:32];
+                        if (args[31:16] < ((args[47:32] > 16'd256) ? 16'd256 : args[47:32])) st <= V_CZ;
+                        else st <= V_DONE;
+                    end
+                    OP_REMAT: begin
+                        rb <= 8'd13; rph <= 2'd0;
+                        if (args[31:16] > 16'd13) st <= V_RM; else st <= V_DONE;
+                    end
+                    OP_IMDCT: st <= V_IM;
                     default: st <= V_DONE;          // CNT
                 endcase
             end
+            // ---- AC-3: AQ / AQC items
+            V_AW: if (xq_valid) begin
+                if (i_set) begin c_dm <= xq_code[4:0]; c_chin <= xq_code[9:5]; c_nf <= xq_code[12:10]; end
+                else if (!i_co) begin
+                    c_slot <= xq_addr[10:8]; c_bin <= xq_addr[7:0]; c_e <= i_e; c_b0 <= i_b0;
+                    c_ch <= 3'd0;
+                    if (vop == OP_AQ) begin
+                        if (i_b0 && i_dith) st <= V_AD;
+                        else begin
+                            k <= k + 12'd1;
+                            if (k + 12'd1 == lcnt && !ab) st <= V_DRAIN;
+                        end
+                    end else if (i_b0) st <= V_CCH;
+                    else st <= V_CSC;
+                end
+            end else if (ab) st <= V_IDLE;          // refused: nothing pending, no done
+            V_AD: begin
+                lfsr <= lfsr_n;
+                k <= k + 12'd1;
+                if (k + 12'd1 == lcnt && !ab) st <= V_DRAIN; else st <= V_AW;
+            end
+            V_CSC: begin creg <= res[23:0]; st <= V_CCH; end
+            V_CCH: if (c_ch == c_nf) begin
+                k <= k + 12'd1;
+                if (k + 12'd1 == lcnt && !ab) st <= V_DRAIN; else st <= V_AW;
+            end else if (!c_chin[c_ch] || (c_b0 && !c_dm[c_ch])) c_ch <= c_ch + 3'd1;
+            else if (c_b0) st <= V_CD1;
+            else st <= V_CMUL;
+            V_CD1: begin lfsr <= lfsr_n; st <= V_CD2; end
+            V_CD2: begin creg <= res[23:0]; st <= V_CMUL; end
+            V_CMUL: begin c_ch <= c_ch + 3'd1; st <= V_CCH; end
+            V_CZ: begin
+                k <= k + 12'd1;
+                if (k + 12'd1 == lcnt) st <= V_DRAIN;
+            end
+            V_RM: begin
+                if (rb >= a1[7:0]) st <= V_DRAIN;
+                else if (!r_act) rb <= rb + 8'd1;
+                else begin
+                    if (rph == 2'd1) bf_a <= xb_q;      // L, read in phase 0
+                    if (rph == 2'd2) bf_c <= xb_q;      // R, read in phase 1
+                    rph <= rph + 2'd1;
+                    if (rph == 2'd3) rb <= rb + 8'd1;
+                end
+            end
+            V_IM: if (imdct_done) st <= V_DONE;
             // ---- a plain loop: k issues reads, k_d the data's use
             V_LOOP: begin
                 dv <= (k < lcnt);

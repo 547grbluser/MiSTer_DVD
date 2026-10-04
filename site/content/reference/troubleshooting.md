@@ -160,7 +160,8 @@ bitstream and your receiver's volume owns the level.
 
 Press **B7** to see which audio track is playing, and again while the popup is up to change it. The disc's default may be:
 
-- **DTS** — there is no DTS decoder in the core. Use
+- **DTS showing `AUDIO UNSUPPORTED`** — the DTS decoder could not load its tables at
+  start-up, so DTS is skipped (it should never happen; please report it). Use
   [Passthru](../audio/passthrough.md) to a receiver, or pick the disc's AC-3 track.
 - **96 kHz or multichannel LPCM** — only 48 kHz stereo is decoded. (LPCM and MP2 at
   48 kHz play in *both* modes; in Passthru they are sent as ordinary PCM.)

@@ -44,8 +44,16 @@ import hud_read as H            # noqa: E402
 # a defect. -80 sits in the wide gap between the two and cannot reach either.
 SILENT_DBFS = -80.0
 
+# MEASURED (2026-10-03, docs/ac3_engine.md "the quiet tail"): the first ~0.5-1 s of a
+# FRESH capture is not live audio. It reads silent, or carries a fragment of stale
+# buffered samples from before the capture started, then a gap. This tool starts each
+# capture just AFTER switching tracks, so that fragment was the PREVIOUS track's audio,
+# and it read as a quiet "tail" on a track that was really silent. Capture LEAD_S more
+# and measure only what follows it.
+LEAD_S = 1.0
 
-def rms_dbfs(wav):
+
+def rms_dbfs(wav, skip_s=LEAD_S):
     import numpy as np
     import wave
     with wave.open(wav, 'rb') as w:
@@ -53,7 +61,9 @@ def rms_dbfs(wav):
         if n == 0:
             return -999.0, -999.0
         raw = w.readframes(n)
+        lead = int(skip_s * w.getframerate()) * w.getnchannels()
     a = np.frombuffer(raw, dtype='<i2').astype(np.float32) / 32768.0
+    a = a[lead:]                                   # the capture's start-up (LEAD_S)
     if a.size == 0:
         return -999.0, -999.0
     rms = float(np.sqrt((a * a).mean()))
@@ -75,13 +85,21 @@ def capture_audio(adev, afmt, secs, path):
     return True
 
 
-def board_audio_track(tmpdir, step):
+POPUP_S = 2.5          # dvd/transport_hud.sv SHOW_TICKS: a popup's life from its last press
+_last_press = [0.0]
+
+
+def board_audio_track(tmpdir, step, presses=1):
     """Press Audio and read the track the core reports from the HUD popup.
 
     The popup is the core's own answer to "which track is selected and how many
     are there", so the loop follows the disc rather than assuming a count.
     """
-    M.cmd_key(argparse.Namespace(names=['audio']))
+    for k in range(presses):
+        if k:
+            time.sleep(0.5)            # inside the popup: this press steps
+        M.cmd_key(argparse.Namespace(names=['audio']))
+        _last_press[0] = time.time()
     time.sleep(1.5)
     png = os.path.join(tmpdir, f'aud{step:02d}.png')
     rc, _ = M.ssh('''
@@ -151,7 +169,24 @@ def main():
                   f'({"no HUD" if lang is None else repr(lang)})')
             break
         if cur in seen:
-            break                      # wrapped around the disc's own list
+            # Show-first Audio (PR #145): a press while the popup is DOWN only
+            # shows the current track; a press while it is UP steps (and re-arms
+            # it for POPUP_S). The single press above just re-showed the track
+            # measured, so the popup is up for an unknown remainder: a press now
+            # could step or not. Wait until it has certainly expired, then show and
+            # step -- two presses 0.5 s apart. (Pressing twice while it was still up
+            # stepped twice and skipped a track.)
+            for attempt in range(2):   # a late screenshot can miss the popup: retry once
+                time.sleep(max(0.0, _last_press[0] + POPUP_S + 0.3 - time.time()))
+                cur, total2, lang2 = board_audio_track(tmpdir, 100 + 10 * i + attempt, presses=2)
+                if cur is not None and cur not in seen:
+                    break
+            if cur is None or cur in seen:
+                if total and len(seen) < total:
+                    print(f'  step {i}: could not step past track(s) {sorted(seen)} of {total} '
+                          f'(read {cur!r}); stopping short')
+                break                  # wrapped around the disc's own list
+            total, lang = total2, lang2
         seen.add(cur)
         # ⚠ RED PROOF. The FINDING path must be shown to fire, or "all tracks
         # audible" means nothing. --red mutes the core for ONE track, so exactly
@@ -162,7 +197,7 @@ def main():
             M.cmd_osd(argparse.Namespace(setting='Audio=Off'))
             time.sleep(3)
         wav = os.path.join(tmpdir, f'trk{cur}.wav')
-        ok = capture_audio(adev, afmt, args.secs, wav)
+        ok = capture_audio(adev, afmt, args.secs + LEAD_S, wav)
         r, pk = rms_dbfs(wav) if ok else (-999.0, -999.0)
         if args.red and len(seen) == 1:
             M.cmd_osd(argparse.Namespace(setting='Audio=On'))
@@ -196,8 +231,7 @@ def main():
             print(f'  !! FINDING: track {r["track"]}/{r["total"]} ({r["lang"]}) '
                   f'is digitally silent at {r["rms"]:.0f} dBFS while '
                   f'{len(audible)} other track(s) on the same title are audible')
-        print('     Unsupported AC-3 acmod is the known cause of exactly this '
-              '(dvd/ac3 supports acmod 2 and 7 only); confirm with '
+        print('     The core refused the format of that track (DTS on a core without the DTS decoder, AC-3 dual mono, or a refusal counted in telemetry eng_refused); see the format with '
               'tools/dvd_census.py --audio on this disc.')
         return 1
     if silent and not audible:

@@ -58,6 +58,17 @@ fails "Device or resource busy" when the sound server owns the card, which ffmpe
 as an input error rather than as "something else has it". `mister.py capture_devices()`
 handles both.
 
+**★ A fresh capture's first ~1 s is not live audio.** It reads silent, or opens with a
+fragment of STALE buffered samples and then a gap. A capture started just after a track
+switch therefore "hears" the previous track for a moment, which read as a quiet tail on a
+silent track (2026-10-03, `docs/ac3_engine.md`). Capture a lead-in and discard it
+(`audio_check.LEAD_S`), or capture across the event with timestamped presses.
+
+**★ Show-first popups (PR #145) make a press's meaning depend on time.** A press steps
+the track only while its popup is up (2.5 s from the last press, `SHOW_TICKS`). Two
+presses inside one popup step twice. Step from a known popup-down state: wait out the
+popup, then "show, step" 0.5 s apart.
+
 **★ Telemetry field names come from `main/support/dvd/dvd_ctl.cpp`'s `fprintf`, never from
 the RTL port names.** Word 11 is `disp_lag` in `dvd_telem.sv` and `disp_lag_ms` in the JSON
 — renamed AND pre-scaled to ms. `.get('disp_lag', 0)` returns a constant zero and produces
