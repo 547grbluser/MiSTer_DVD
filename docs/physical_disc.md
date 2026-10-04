@@ -84,6 +84,9 @@ while the core is open plays it (`dvd_phys` polls for media change).
   backstop.
 - **Title keys per VOB** at each VOB start sector (libdvdread's pattern), lazily so the
   mount does not freeze; filesystem/IFO sectors read NOFLAGS (raw), VOB payload DECRYPT.
+  A raw read stops at the next VOB's start, as a VOB read stops at its end (issue #147):
+  the read-ahead's 32-sector bursts start wherever the core's last read left off, so one
+  that began in an IFO used to carry the following VOB's head out undecrypted.
 
 ## Relationship to MiSTer Physical Disc (Anime0t4ku)
 
