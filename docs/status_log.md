@@ -23,7 +23,7 @@ predate later confirmations; the `CLAUDE.md` index carries the reconciled status
 ## Hardware status (THIS fork, verified 2026-06-21)
 
 - ✅ **32 SUBTITLE TRACKS (2026-10-04, branch `feature/subp-32`, stacked on
-  `feature/forced-subs`; HW-CONFIRMED 2026-10-04 against a `main` control arm).** Full record:
+  PR #151; HW-CONFIRMED 2026-10-04 against a `main` control arm).** Full record:
   `docs/track_selection.md` "32 subtitle tracks".
   - **Was:** the Subtitle button reached 8 tracks and the disc's own choice 16. **98 of
     1,431 discs use tracks 9–16.**
@@ -52,7 +52,7 @@ predate later confirmations; the `CLAUDE.md` index carries the reconciled status
     - ***MOST*** (19 tracks): `1/19` … `18/19 SV`, `19/19` (blank language in the IFO), then
       `OFF`. Past the old 16-entry bound.
 
-- ✅ **FORCED SUBTITLES (2026-10-03, branch `feature/forced-subs`; HW-CONFIRMED 2026-10-04 against a `main` control arm).**
+- ✅ **FORCED SUBTITLES (2026-10-03, PR #151; HW-CONFIRMED 2026-10-04 against a `main` control arm).**
   Full record: `docs/subpicture.md` "Forced subtitles".
   - **Gap:** found by the 2026-10-01 *DVD Demystified* 3rd-edition audit. Units starting
     with `0x00` FSTA_DSP are shown by a set-top player even with subtitles off (translated

@@ -395,7 +395,7 @@ multi-player option disappears."*
 
 ✅ **HW gate passed** (status line at the top of this section).
 
-## Forced subtitles (2026-10-03, branch `feature/forced-subs`; ✅ HW-CONFIRMED 2026-10-04)
+## Forced subtitles (2026-10-03, PR #151; ✅ HW-CONFIRMED 2026-10-04)
 
 **What it is.** A DVD marks a subtitle unit *forced* by starting it with `0x00` FSTA_DSP
 instead of `0x01` STA_DSP. A set-top player with subtitles **off** still decodes the

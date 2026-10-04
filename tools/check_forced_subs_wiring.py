@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Gate for forced subtitles (feature/forced-subs; docs/subpicture.md "Forced subtitles").
+"""Gate for forced subtitles (PR #151; docs/subpicture.md "Forced subtitles").
 
 WHY THIS EXISTS
 ---------------

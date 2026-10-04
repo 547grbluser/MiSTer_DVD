@@ -3029,7 +3029,7 @@ wire        menu_sp_ctx   = menu_dom_live || sp_menu_early;
 // A MENU context (menu-domain menu, or an in-title multi-button game menu like
 // Scene It) resolves LOGICAL stream 0 -- but through the map, not as a constant.
 // DVD-FORK FIX (issues #60/#61): this used to short-circuit to physical 0.
-// ---- FORCED SUBTITLES (2026-10-03, feature/forced-subs; docs/subpicture.md) ----
+// ---- FORCED SUBTITLES (2026-10-03, PR #151; docs/subpicture.md) ----
 // A set-top player with subtitles OFF still decodes the title's subpicture stream
 // and shows the units marked FORCED (0x00 FSTA_DSP) -- typically one translated line
 // of foreign-language dialogue. Which stream: SPRM2's number with its display bit

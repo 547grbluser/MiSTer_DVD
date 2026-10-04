@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Forced subtitles (docs/subpicture.md "Forced subtitles"; feature/forced-subs).
+# Forced subtitles (docs/subpicture.md "Forced subtitles"; PR #151).
 #
 #   bench/dvd/run_forced_subs.sh          GREEN: the forced bench + every spu_decode bench
 #   bench/dvd/run_forced_subs.sh --red    + mutation arms: each must fail EXACTLY its arms
