@@ -621,7 +621,7 @@ in `CONF_STR`. Design: `docs/cdda.md` "`.cue` sheets". ⛔ CHD still not support
 > **top gap confirmed = exact chapters/PTT (7/7 discs); interactive GPRM-counter/NVTMR promoted
 > above parental on measured prevalence (3/7 game discs).** Phase 3 = close gaps in that order.
 
-### 🔧 Subtitle tracks to the spec maximum (decided 2026-10-04; built on `feature/subp-32`, ⏳ build/HW — see `docs/track_selection.md` "32 subtitle tracks")
+### ✅ Subtitle tracks to the spec maximum (built on `feature/subp-32`, HW-CONFIRMED 2026-10-04 — see `docs/track_selection.md` "32 subtitle tracks")
 
 DVD-Video allows 32 subtitle tracks. The core reaches **8** with the Subtitle button and
 **16** through the disc's own choice and forced subtitles. Maintainer decision: widen both

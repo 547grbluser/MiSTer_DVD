@@ -22,8 +22,8 @@ predate later confirmations; the `CLAUDE.md` index carries the reconciled status
 
 ## Hardware status (THIS fork, verified 2026-06-21)
 
-- 🔧 **32 SUBTITLE TRACKS (2026-10-04, branch `feature/subp-32`, stacked on
-  `feature/forced-subs`; sim-proven, ⏳ build + HW).** Full record:
+- ✅ **32 SUBTITLE TRACKS (2026-10-04, branch `feature/subp-32`, stacked on
+  `feature/forced-subs`; HW-CONFIRMED 2026-10-04 against a `main` control arm).** Full record:
   `docs/track_selection.md` "32 subtitle tracks".
   - **Was:** the Subtitle button reached 8 tracks and the disc's own choice 16. **98 of
     1,431 discs use tracks 9–16.**
@@ -37,10 +37,20 @@ predate later confirmations; the `CLAUDE.md` index carries the reconciled status
     48/51 traces are identical, 2 differ only in sector-read order and valid timing, and 1
     is timing-sensitive by construction (a `main`-reader control diverges earlier).
     Verilator: no new warnings.
-  - **Next:** the build (ALM cost, the `subp_ctl_ram`/`s_lang_ram` altsyncram lines in
-    `DVD.map.rpt`), then HW on **The Naked Gun** (feature declares 11 tracks): the button
-    reaches `SUB 11/11 JA`, then `SUB OFF`; a `main` control arm stops at 8. (*MOST*
-    declares 19, which covers past 16.)
+  - **Build:** `DVD_subp32_20261004_1603`, SEED 1, `clk_dec` 88.14 MHz at 100 °C and
+    87.40 MHz at −40 °C (gate 86.0).
+    - **38,571 ALMs, 192 FEWER than the forced-subs build; registers −318; M10K +2.**
+      Moving the tables to block RAM more than paid for the wider datapath.
+    - `DVD.map.rpt` infers altsyncram for both `subp_ctl_ram` and `s_lang_ram`. Quartus
+      pruned them to the bits read: 21 per table word, 14 per language.
+  - **HW (2026-10-04):** each step is decoded from the core's own `SUB n/N` popup.
+    - **The Naked Gun**, whose feature declares 11 tracks:
+      - `main` control: `1/8 EN` … `8/8 TH`, then `OFF`. Tracks 9–11 are unreachable.
+      - This build: `1/11 EN` … `11/11 JA`, then `OFF`, each language matching the IFO.
+      - Track 9 renders Spanish subtitles (sign translations: "20 AÑOS DE EDEN TECH",
+        "CALABAZAS").
+    - ***MOST*** (19 tracks): `1/19` … `18/19 SV`, `19/19` (blank language in the IFO), then
+      `OFF`. Past the old 16-entry bound.
 
 - ✅ **FORCED SUBTITLES (2026-10-03, branch `feature/forced-subs`; HW-CONFIRMED 2026-10-04 against a `main` control arm).**
   Full record: `docs/subpicture.md` "Forced subtitles".
