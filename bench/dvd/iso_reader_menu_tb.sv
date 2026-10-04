@@ -138,23 +138,23 @@ module iso_reader_menu_tb;
     // pinned to physical substream 0x20. Two PAL 16:9 discs map logical 0 -> 1,
     // so their menu SPU (0x21) was discarded and no button highlight could render.
     wire        pgc_ctl_we;
-    wire [4:0]  pgc_ctl_waddr;
+    wire [5:0]  pgc_ctl_waddr;        // 0..31 subp, 32..39 audio (PR #152)
     wire [31:0] pgc_ctl_wdata;
     wire        pgc_ctl_valid;
     wire        pgc_dom_tt;
-    reg  [31:0] mcap [0:15];        // subp words seen while in the MENU domain
-    reg         mseen[0:15];
+    reg  [31:0] mcap [0:31];        // subp words seen while in the MENU domain
+    reg         mseen[0:31];
     integer     msubp_writes = 0;   // subp writes with menu_active high
     integer     tsubp_writes = 0;   // subp writes with menu_active low (title)
     reg         mdom_tt_at_subp;    // pgc_dom_tt sampled at a menu subp write
     reg         mvalid_at_subp;     // pgc_ctl_valid during ANY subp write (must be 0)
     integer     mk;
     always @(posedge clk) begin
-        if (pgc_ctl_we && !pgc_ctl_waddr[4]) begin
+        if (pgc_ctl_we && !pgc_ctl_waddr[5]) begin
             if (pgc_ctl_valid) mvalid_at_subp <= 1'b1;
             if (menu_active) begin
-                mcap [pgc_ctl_waddr[3:0]] <= pgc_ctl_wdata;
-                mseen[pgc_ctl_waddr[3:0]] <= 1'b1;
+                mcap [pgc_ctl_waddr[4:0]] <= pgc_ctl_wdata;
+                mseen[pgc_ctl_waddr[4:0]] <= 1'b1;
                 msubp_writes <= msubp_writes + 1;
                 mdom_tt_at_subp <= pgc_dom_tt;
             end else
@@ -519,7 +519,7 @@ module iso_reader_menu_tb;
     integer cap_mark;
 
     initial begin
-        for (mk=0; mk<16; mk=mk+1) begin mcap[mk]=0; mseen[mk]=0; end
+        for (mk=0; mk<32; mk=mk+1) begin mcap[mk]=0; mseen[mk]=0; end
         mdom_tt_at_subp = 1'b1; mvalid_at_subp = 1'b0;
         build_iso();
         rst_n = 0;
@@ -761,11 +761,11 @@ module iso_reader_menu_tb;
         // msubp_writes is 0 and every check below fails.
         $display("TEST10 menu subp_control: menu_writes=%0d title_writes=%0d [0]=%08x [2]=%08x",
                  msubp_writes, tsubp_writes, mcap[0], mcap[2]);
-        // Every menu PGC load streams all 16 words, and this test performs many
+        // Every menu PGC load streams all 32 words (16 before PR #152), and many
         // menu jumps -- so the invariant is "a whole number of complete tables",
         // never a partial walk.
-        chk(msubp_writes >= 16 && (msubp_writes % 16) == 0,
-            "T10a menu subp_control streams in complete 16-word tables");
+        chk(msubp_writes >= 32 && (msubp_writes % 32) == 0,
+            "T10a menu subp_control streams in complete 32-word tables");
         chk(mseen[0] && mcap[0] === 32'h80010200,
             "T10b menu subp_control[0] byte-exact (the issue #60/#61 word)");
         chk(mseen[2] && mcap[2] === 32'h80030400,

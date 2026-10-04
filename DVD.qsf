@@ -172,6 +172,7 @@ set_global_assignment -name SYSTEMVERILOG_FILE dvd/aud_stream_map.sv
 # subpicture logical->physical stream mapping (PGC subp_control, libdvdnav
 # vm_get_subp_stream) -- issues #60/#61, docs/track_selection.md
 set_global_assignment -name SYSTEMVERILOG_FILE dvd/subp_stream_map.sv
+set_global_assignment -name SYSTEMVERILOG_FILE dvd/subp_decl.sv
 
 
 

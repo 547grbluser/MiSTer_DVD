@@ -57,7 +57,7 @@ module spu_decode #(
     input  wire        clk,           // clk_sys 27 MHz
     input  wire        rst_n,
     input  wire        enable,        // O[15]; when low, nothing is shown
-    // FORCED-ONLY (2026-10-03, feature/forced-subs; docs/subpicture.md "Forced
+    // FORCED-ONLY (2026-10-03, PR #151; docs/subpicture.md "Forced
     // subtitles"). High while emu routes the title's subpicture stream with the
     // subtitle DISPLAY off -- the set-top player's "subtitles off": only a unit
     // whose display-control table carries 0x00 FSTA_DSP (forced start) is shown.

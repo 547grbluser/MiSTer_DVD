@@ -12,19 +12,19 @@
 //
 // Packed vector, LSB first:
 //   [0] map_valid  [1] dom_tt  [2] menu_dom  [3] wide
-//   [5:4] disp_mode  [9:6] logical  [41:10] ctl_sel  [46:42] expect
+//   [5:4] disp_mode  [10:6] logical  [42:11] ctl_sel  [47:43] expect  (5-bit logical: 32 streams)
 
 `timescale 1ns/1ps
 
 module subp_stream_map_tb;
 
-    localparam NVEC = 2077;               // directed + random (see generator)
+    localparam NVEC = 2109;               // directed + random (see generator)
 
     reg  [47:0] vec [0:NVEC-1];
 
     reg         map_valid, dom_tt, menu_dom, wide;
     reg  [1:0]  disp_mode;
-    reg  [3:0]  logical;
+    reg  [4:0]  logical;
     reg  [31:0] ctl_sel;
     wire [4:0]  phys_streamN;
     wire        stream_absent;
@@ -46,14 +46,14 @@ module subp_stream_map_tb;
     integer i, errors = 0, n = 0;
     integer n_menu_fix = 0;      // menu arms that resolve to a NON-ZERO substream
     reg [4:0] expect_v;
-    reg [1:0] unused_hi;
+    // (the 48-bit vector is now exactly filled: no unused high bits)
     initial begin
         $readmemh("bench/dvd/test_vobs/subp_map_vec.hex", vec);
         for (i = 0; i < NVEC; i = i + 1) begin
             if (^vec[i] === 1'bx) begin
                 i = NVEC;                       // short-file guard
             end else begin
-                {unused_hi, expect_v, ctl_sel, logical, disp_mode,
+                {expect_v, ctl_sel, logical, disp_mode,
                  wide, menu_dom, dom_tt, map_valid} = vec[i];
                 #1;
                 if (phys_streamN !== expect_v) begin
@@ -92,7 +92,7 @@ module subp_stream_map_tb;
             map_valid = 1; dom_tt = 1; menu_dom = 0; wide = 1; disp_mode = 0;
 
             // [1] class C: the table declares SOMETHING, but not this entry -> absent
-            any_present = 1; logical = 4'd0; ctl_sel = 32'h00000000; #1;
+            any_present = 1; logical = 5'd0; ctl_sel = 32'h00000000; #1;
             if (stream_absent !== 1'b1) begin
                 errors = errors + 1;
                 $display("FAIL [avail-1]: undeclared entry in a PGC that declares others must be ABSENT");
@@ -101,21 +101,21 @@ module subp_stream_map_tb;
             // [2] the SAME entry when the PGC declares NOTHING (class B, 586 PGCs in
             //     the library sweep) -> NOT absent; the identity fallback must stand,
             //     or those discs silently lose their subtitles.
-            any_present = 0; logical = 4'd0; ctl_sel = 32'h00000000; #1;
+            any_present = 0; logical = 5'd0; ctl_sel = 32'h00000000; #1;
             if (stream_absent !== 1'b0) begin
                 errors = errors + 1;
                 $display("FAIL [avail-2]: a PGC that declares NO stream must keep the identity fallback");
             end
 
             // [3] a declared entry is never absent (the normal case, 18,801 PGCs)
-            any_present = 1; logical = 4'd0; ctl_sel = 32'h80000100; #1;
+            any_present = 1; logical = 5'd0; ctl_sel = 32'h80000100; #1;
             if (stream_absent !== 1'b0) begin
                 errors = errors + 1;
                 $display("FAIL [avail-3]: a DECLARED stream must not be reported absent");
             end
 
             // [4] the rabbit's own stream stays selectable (logical 1, 0x80020300)
-            any_present = 1; logical = 4'd1; ctl_sel = 32'h80020300; #1;
+            any_present = 1; logical = 5'd1; ctl_sel = 32'h80020300; #1;
             if (stream_absent !== 1'b0 || phys_streamN !== 5'd2) begin
                 errors = errors + 1;
                 $display("FAIL [avail-4]: the rabbit's declared stream must resolve to 0x22 and not be absent (abs=%b phys=%0d)",
@@ -123,7 +123,7 @@ module subp_stream_map_tb;
             end
 
             // [5] no usable table at all -> never absent, whatever any_present says
-            map_valid = 0; any_present = 1; logical = 4'd0; ctl_sel = 32'h00000000; #1;
+            map_valid = 0; any_present = 1; logical = 5'd0; ctl_sel = 32'h00000000; #1;
             if (stream_absent !== 1'b0) begin
                 errors = errors + 1;
                 $display("FAIL [avail-5]: an unparsed table must not report absence");
@@ -131,7 +131,7 @@ module subp_stream_map_tb;
             map_valid = 1;
 
             // [6] wrong domain (a MENU-DOMAIN player against a title table) -> not absent
-            menu_dom = 1; any_present = 1; logical = 4'd0; ctl_sel = 32'h00000000; #1;
+            menu_dom = 1; any_present = 1; logical = 5'd0; ctl_sel = 32'h00000000; #1;
             if (stream_absent !== 1'b0) begin
                 errors = errors + 1;
                 $display("FAIL [avail-6]: an out-of-domain table must not report absence");
@@ -156,7 +156,7 @@ module subp_stream_map_tb;
         // the wiring: gated separately by tools/check_subp_map_wiring.py, which
         // reads the port connection out of dvd/emu.sv and is RED on the pre-#81 file.
         begin : in_title_menu_arms
-            map_valid = 1; any_present = 1; wide = 1; disp_mode = 0; logical = 4'd0;
+            map_valid = 1; any_present = 1; wide = 1; disp_mode = 0; logical = 5'd0;
 
             // [7] the reported disc's word, in the title domain -> 0x21, not 0x20.
             dom_tt = 1; menu_dom = 0; ctl_sel = 32'h80010200; #1;

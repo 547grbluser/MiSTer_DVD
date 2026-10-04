@@ -326,12 +326,13 @@ module dvd_iso_reader #(
     // (unconstrained = pre-Phase-10 behaviour) until a real IFO is parsed, so
     // non-ISO / linear playback is unchanged. See docs/track_selection.md.
     output reg [3:0]  audio_ntracks, // nr_of_vts_audio_streams @515 (1..8)
-    output reg [3:0]  subp_ntracks,  // nr_of_vts_subp_streams  @597 (1..8)
+    output reg [5:0]  subp_ntracks,  // nr_of_vts_subp_streams  @597 (1..32; spec max 32)
     input      [2:0]  attr_a_sel,    // audio track to read out (0..7)
     output     [2:0]  attr_a_fmt,    // audio_format (0=AC3,2=MPEG1,4=LPCM,6=DTS)
     output     [15:0] attr_a_lang,   // ISO-639 language, 2 ASCII bytes (0=none)
-    input      [2:0]  attr_s_sel,    // subpicture track to read out (0..7)
-    output     [15:0] attr_s_lang,   // subpicture ISO-639 language (0=none)
+    input      [4:0]  attr_s_sel,    // subpicture track to read out (0..31)
+    output     [15:0] attr_s_lang,   // subpicture ISO-639 language (0=none); REGISTERED
+                                     // (block RAM, one cycle after attr_s_sel)
 
     // PGC command table stream (pre|post|cell contiguous, 8 B/command, byte
     // stream into the dvd_vm command BRAM).
@@ -490,7 +491,7 @@ module dvd_iso_reader #(
     //                  and so is subp_control -- see the S_PGC_HDR walk arm.
     //                  See docs/dvd_nav.md, docs/track_selection.md.
     output reg        pgc_ctl_we,
-    output reg [4:0]  pgc_ctl_waddr,
+    output reg [5:0]  pgc_ctl_waddr,  // 0..31 subp_control, 32..39 audio_control
     output reg [31:0] pgc_ctl_wdata,
     // High while the streamed audio_control AND subp_control words above are
     // COMPLETE and consistent with the loaded PGC: cleared at S_PGC_HDR (a new
@@ -595,15 +596,34 @@ reg [7:0] rbuf [0:FETCH_N-1];
 // =========================================================================
 reg [2:0]  a_fmt_mem  [0:7];    // audio_format
 reg [15:0] a_lang_mem [0:7];    // ISO-639 language
-reg [15:0] s_lang_mem [0:7];    // subpicture language
 assign attr_a_fmt  = a_fmt_mem [attr_a_sel];
 assign attr_a_lang = a_lang_mem[attr_a_sel];
-assign attr_s_lang = s_lang_mem[attr_s_sel];
+// SUBPICTURE languages: all 32 entries, the DVD-Video spec maximum (2026-10-04,
+// PR #152; docs/track_selection.md "32 subtitle tracks"). 8 audio is
+// already the spec maximum. A 32x16 table in flops plus a 32:1 read would cost
+// ~400 registers and a wide mux at ~3 % ALM headroom, so it lives in a block RAM:
+// written by the S_ATTR sweep (one full-word write per stream: the high byte is
+// latched first), read with a registered address. attr_s_lang is therefore one
+// cycle behind attr_s_sel -- the HUD popup re-formats every ~1.2 ms, and
+// transport_hud_tb checks the first rendered pass shows the new track's language.
+// Kept out of the reset always-block on purpose: a memory written there cannot
+// be inferred as altsyncram (grep DVD.map.rpt for "s_lang_ram" after a build).
+(* ramstyle = "M10K" *) reg [15:0] s_lang_ram [0:31];
+reg        s_lang_we;
+reg [4:0]  s_lang_waddr;
+reg [15:0] s_lang_wdata;
+reg [7:0]  s_lang_hi;           // the language's first byte, held for the word write
+reg [15:0] attr_s_lang_q;
+always @(posedge clk) begin
+    if (s_lang_we) s_lang_ram[s_lang_waddr] <= s_lang_wdata;
+    attr_s_lang_q <= s_lang_ram[attr_s_sel];
+end
+assign attr_s_lang = attr_s_lang_q;
 
 // S_ATTR sweep bookkeeping. attr_addr walks parse_buf; attr_idx/attr_j track
 // the current stream and byte-within-stream (stride 8 audio / 6 subp).
 reg [10:0] attr_addr;
-reg [2:0]  attr_idx;
+reg [4:0]  attr_idx;            // stream index: 0..7 audio, 0..31 subpicture
 reg [2:0]  attr_j;
 reg        attr_phase;           // 0 = audio table, 1 = subpicture table
 reg        attr_vatr;            // 1 = the pending read is VTS_V_ATTR@0x200 (one-shot)
@@ -1231,7 +1251,7 @@ reg [1:0]  follow_cnt;
 // the cell playback table (-> cell BRAMs, still/cmd_nr meta included).
 localparam [2:0] P_HDR = 3'd0, P_CMDH = 3'd1, P_CMD = 3'd2, P_CELL = 3'd3,
                  P_PMAP = 3'd4,      // Phase-4: program-map stream -> dvd_vm
-                 P_SUBP = 3'd5,      // subp_control[16] @ PGC+0x1C -> pgc_ctl_we
+                 P_SUBP = 3'd5,      // subp_control[32] @ PGC+0x1C -> pgc_ctl_we
                  P_PTT  = 3'd6,      // Phase-6: VTS_PTT_SRPT TTU -> ptt_mem
                  P_ACTL = 3'd7;      // audio_control[8] @ PGC+0x0C -> pgc_ctl_we
 reg [2:0]  wphase;
@@ -2351,7 +2371,7 @@ always @(posedge clk or negedge rst_n) begin
         // Title-level state: reset ONLY here (rst_n), never on a per-seek pipe
         // reset (cf. the pgc-palette-seek-reset-bug lesson).
         audio_ntracks <= 4'd8;
-        subp_ntracks  <= 4'd8;
+        subp_ntracks  <= 6'd8;   // no IFO (linear file): 8, the pre-32 default
         grp_mnu_lba  <= 32'd0;
         grp_mnu_blk  <= 32'd0;
         pending_ifo_vts <= 8'hFF;
@@ -2443,7 +2463,11 @@ always @(posedge clk or negedge rst_n) begin
         pal_waddr    <= 4'd0;
         pal_wdata    <= 32'd0;
         pgc_ctl_we    <= 1'b0;
-        pgc_ctl_waddr <= 5'd0;
+        pgc_ctl_waddr <= 6'd0;
+        s_lang_we     <= 1'b0;
+        s_lang_waddr  <= 5'd0;
+        s_lang_wdata  <= 16'd0;
+        s_lang_hi     <= 8'd0;
         pgc_ctl_wdata <= 32'd0;
         pgc_ctl_valid <= 1'b0;
         pgc_dom_tt    <= 1'b0;
@@ -2524,8 +2548,9 @@ always @(posedge clk or negedge rst_n) begin
         seek_ack <= 1'b0;               // default: one-cycle pulses
         pal_we   <= 1'b0;
         pgc_ctl_we <= 1'b0;
+        s_lang_we  <= 1'b0;
         // Control-table completion: the LAST write of the whole walk is
-        // subp_control[15] (addr 15), emitted by P_SUBP, which now follows
+        // subp_control[31] (addr 31; it was [15] while 16 entries were kept), emitted by P_SUBP, which now follows
         // P_ACTL in EVERY domain. It is registered, so this fires the cycle it
         // lands at the consumer - pgc_ctl_valid rises strictly AFTER all 8
         // audio words AND all 16 subpicture words are stable. dom is still the
@@ -2534,7 +2559,7 @@ always @(posedge clk or negedge rst_n) begin
         // AUDIO word, which P_ACTL emits BEFORE P_SUBP runs -- so valid rose
         // ~128 cycles early and subp_ctl_mem still held the PREVIOUS PGC's
         // table. Latent while menus never read it; not latent once they do.
-        if (pgc_ctl_we && pgc_ctl_waddr == 5'd15) begin
+        if (pgc_ctl_we && pgc_ctl_waddr == 6'd31) begin
             pgc_ctl_valid <= 1'b1;
             pgc_dom_tt    <= (dom == DOM_TT);
         end
@@ -3669,7 +3694,7 @@ always @(posedge clk or negedge rst_n) begin
                     // high byte, in the same resident sector (issue #81).
                     attr_vatr  <= 1'b1;
                     attr_addr  <= 11'd512;             // VTS_V_ATTR @0x200 (high byte)
-                    attr_idx   <= 3'd0; attr_j <= 3'd0;
+                    attr_idx   <= 5'd0; attr_j <= 3'd0;
                     state      <= S_SECREAD;
                 end else begin
                     state <= S_FINAL2;                 // no VTSI -> linear
@@ -3694,52 +3719,62 @@ always @(posedge clk or negedge rst_n) begin
                     attr_addr <= 11'd515;              // on to the audio count
                     state     <= S_ATTR_RD;
                 end else if (attr_cnt_pending) begin
-                    // stream-count byte. Clamp to 1..8 (a switch needs >=1 valid
-                    // target; only the low-8 substreams are routable).
+                    // stream-count byte. Clamp to 1..spec max (a switch needs >=1
+                    // valid target): 8 audio streams, 32 subpicture streams.
+                    // ⚠ This count is a CLAIM the authoring tool wrote: 140/1,431
+                    // library discs say 32 while their PGCs declare far fewer (and
+                    // Universal's copy-protection decoy VTS declares 32 streams of one
+                    // unit each). emu steps the Subtitle button over the PGC's
+                    // DECLARED bits and uses this only when there is no PGC table.
                     if (!attr_phase)
                         audio_ntracks <= (pb_rdata == 8'd0) ? 4'd1 :
                                          (pb_rdata >  8'd8) ? 4'd8 : pb_rdata[3:0];
                     else
-                        subp_ntracks  <= (pb_rdata == 8'd0) ? 4'd1 :
-                                         (pb_rdata >  8'd8) ? 4'd8 : pb_rdata[3:0];
+                        subp_ntracks  <= (pb_rdata == 8'd0)  ? 6'd1  :
+                                         (pb_rdata >  8'd32) ? 6'd32 : pb_rdata[5:0];
                     attr_cnt_pending <= 1'b0;
                     attr_addr <= attr_phase ? 11'd598 : 11'd516;  // table base
-                    attr_idx  <= 3'd0; attr_j <= 3'd0;
+                    attr_idx  <= 5'd0; attr_j <= 3'd0;
                     state     <= S_ATTR_RD;
                 end else begin
                     // attribute byte attr_j of stream attr_idx
                     if (!attr_phase) begin
                         case (attr_j)
-                          3'd0: a_fmt_mem [attr_idx] <= pb_rdata[7:5];       // audio_format
+                          3'd0: a_fmt_mem [attr_idx[2:0]] <= pb_rdata[7:5];  // audio_format
                           // byte 1 = channel count: nothing reads it (the HUD shows the
                           // codec and language only), so it is not stored.
-                          3'd2: a_lang_mem[attr_idx][15:8] <= pb_rdata;      // lang hi
-                          3'd3: a_lang_mem[attr_idx][7:0]  <= pb_rdata;      // lang lo
+                          3'd2: a_lang_mem[attr_idx[2:0]][15:8] <= pb_rdata; // lang hi
+                          3'd3: a_lang_mem[attr_idx[2:0]][7:0]  <= pb_rdata; // lang lo
                           default: ;                                        // bytes 4..7 unused
                         endcase
                     end else begin
                         case (attr_j)
-                          3'd2: s_lang_mem[attr_idx][15:8] <= pb_rdata;      // lang hi
-                          3'd3: s_lang_mem[attr_idx][7:0]  <= pb_rdata;      // lang lo
+                          3'd2: s_lang_hi <= pb_rdata;                       // lang hi (held)
+                          3'd3: begin                                        // lang lo: write the word
+                                    s_lang_we    <= 1'b1;
+                                    s_lang_waddr <= attr_idx;
+                                    s_lang_wdata <= {s_lang_hi, pb_rdata};
+                                end
                           default: ;                                        // byte0=type,4,5 unused
                         endcase
                     end
                     attr_addr <= attr_addr + 11'd1;
                     if (attr_j == (attr_phase ? 3'd5 : 3'd7)) begin
                         attr_j <= 3'd0;
-                        if (attr_idx == 3'd7) begin
-                            // finished this table (all 8 routable streams read)
+                        // finished this table: all 8 audio entries, or all 32
+                        // subpicture entries (both the DVD-Video spec maximum)
+                        if (attr_idx == (attr_phase ? 5'd31 : 5'd7)) begin
                             if (!attr_phase) begin
                                 attr_phase       <= 1'b1;
                                 attr_cnt_pending <= 1'b1;
                                 attr_addr        <= 11'd597;   // subp count
-                                attr_idx <= 3'd0;
+                                attr_idx <= 5'd0;
                                 state <= S_ATTR_RD;
                             end else begin
                                 state <= S_PTTLD_MAT;          // sweep done
                             end
                         end else begin
-                            attr_idx <= attr_idx + 3'd1;
+                            attr_idx <= attr_idx + 5'd1;
                             state <= S_ATTR_RD;
                         end
                     end else begin
@@ -4197,7 +4232,7 @@ always @(posedge clk or negedge rst_n) begin
                 P_ACTL: begin
                     if (walk_idx[0]) begin
                         pgc_ctl_we    <= 1'b1;
-                        pgc_ctl_waddr <= {2'b10, walk_idx[3:1]};  // 16 + stream 0..7
+                        pgc_ctl_waddr <= {3'b100, walk_idx[3:1]}; // 32 + stream 0..7
                         pgc_ctl_wdata <= {16'd0, wacc[7:0], pb_rdata};
                     end
                     if (walk_left == 13'd1) begin
@@ -4208,18 +4243,18 @@ always @(posedge clk or negedge rst_n) begin
                         // own tail does the @156 hop that the menu path used to
                         // do itself). pgc_ctl_valid rises at the END of P_SUBP
                         // now - see the we/waddr==15 clause.
-                        walk_left <= 13'd64;           // 16 streams x 4 bytes
+                        walk_left <= 13'd128;          // all 32 streams x 4 bytes (spec max)
                         walk_idx  <= 13'd0;
                         wphase    <= P_SUBP;
                     end
                 end
 
-                // ----- subp_control[16]: PGC bytes 0x1C..0x5B (idx 0..63) -----
+                // ----- subp_control[32]: PGC bytes 0x1C..0x9B (idx 0..127) -----
                 // Emit one 32-bit word per stream (BE), then walk the @156 header.
                 P_SUBP: begin
                     if (walk_idx[1:0] == 2'd3) begin
                         pgc_ctl_we    <= 1'b1;
-                        pgc_ctl_waddr <= {1'b0, walk_idx[5:2]};   // stream 0..15
+                        pgc_ctl_waddr <= {1'b0, walk_idx[6:2]};   // stream 0..31
                         pgc_ctl_wdata <= {wacc, pb_rdata};
                     end
                     if (walk_left == 13'd1) begin

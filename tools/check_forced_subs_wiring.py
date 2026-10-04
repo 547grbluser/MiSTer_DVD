@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Gate for forced subtitles (feature/forced-subs; docs/subpicture.md "Forced subtitles").
+"""Gate for forced subtitles (PR #151; docs/subpicture.md "Forced subtitles").
 
 WHY THIS EXISTS
 ---------------
@@ -18,9 +18,10 @@ the file (the check_subp_map_wiring.py pattern):
   4. sp_route_en = ~sp_user_absent & (sp_disp_on | fs_route).
   5. sp_sel_log selects fs_log for fs_route, AFTER the menu and VM arms.
   6. sp_track_eff resolves fs_route through the map (sp_phys_streamN), like SPRM2.
-  7. fs_log uses SPRM2 only when it names a declared stream 0..15 (vm_spstn[5:4]
-     zero) and otherwise falls back to the first declared stream -- never an
-     aliasing [3:0] truncation of 16..31 / 62 / 63.
+  7. fs_log uses SPRM2 only when it names a declared stream 0..31 (vm_spstn[5]
+     clear: 62/63 are "none"/"forced", not streams) and otherwise falls back to the
+     first declared stream -- never an aliasing truncation of 62 / 63. (All 32
+     streams since PR #152; it was 0..15 with a [5:4] guard.)
   8. sp_user_absent does not mute the forced route.
 
     python3 tools/check_forced_subs_wiring.py [emu.sv]     # exit 0 = wired right
@@ -104,7 +105,7 @@ def main():
     if fr:
         for t in ('~sp_disp_on', 'pgc_ctl_valid', 'pgc_dom_tt'):
             need(t in fr, '2. fs_route lacks %s: %s' % (t, fr))
-        need('subp_declared' in fr or 'subp_any_present' in fr,
+        need('subp_declared' in fr or 'subp_any_present' in fr or 'subp_any_decl' in fr,
              '2. fs_route is not gated on a declared subpicture stream: %s' % fr)
 
     dp = stmt(src, r'sp_disp_on')
@@ -139,10 +140,10 @@ def main():
     ok = stmt(src, r'fs_vm_ok')
     need(fl is not None and ok is not None, '7. fs_log / fs_vm_ok not found')
     if fl and ok:
-        need(fl == 'fs_vm_ok?vm_spstn[3:0]:subp_first_decl',
-             '7. fs_log must be fs_vm_ok ? vm_spstn[3:0] : subp_first_decl, got %s' % fl)
-        need("vm_spstn[5:4]==2'b00" in ok and 'subp_declared[vm_spstn[3:0]]' in ok,
-             '7. fs_vm_ok must reject SPRM2 >= 16 and undeclared streams: %s' % ok)
+        need(fl == 'fs_vm_ok?vm_spstn[4:0]:subp_first_decl',
+             '7. fs_log must be fs_vm_ok ? vm_spstn[4:0] : subp_first_decl, got %s' % fl)
+        need('!vm_spstn[5]' in ok and 'subp_declared[vm_spstn[4:0]]' in ok,
+             '7. fs_vm_ok must reject SPRM2 62/63 (bit 5) and undeclared streams: %s' % ok)
 
     ua = stmt(src, r'sp_user_absent')
     need(ua is not None and 'fs_route' in ua,

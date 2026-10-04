@@ -687,7 +687,7 @@ assign CE_PIXEL = interlaced_eff ? ce_pix_q : 1'b1;
 // the branch changes the netlist anyway - and NEVER PER COMMIT. Do not derive
 // either from a git SHA or a timestamp: every compile would become a new
 // netlist. Same-day rebuilds on one branch append a digit ("dev-seekrealign2").
-`define CORE_VERSION "dev-forcedsubs"
+`define CORE_VERSION "dev-subp32"
 
 parameter CONF_STR = {
     "DVD;;",
@@ -2767,7 +2767,8 @@ wire       seek_natural_mux = vm_seek_pulse & vm_from_wait_w;
 // aud_cur/sub_idx: when a menu's SetSTN owns the selection those differ, and the
 // show press displayed the effective one -- stepping from aud_cur would make the
 // "AUD 2" the user just saw become "AUD 1".
-wire [3:0] audio_ntracks_w, subp_ntracks_w;
+wire [3:0] audio_ntracks_w;
+wire [5:0] subp_ntracks_w;                   // 1..32 (spec max); a CLAIM, see below
 wire [2:0] attr_a_fmt_w;
 wire [15:0] attr_a_lang_w, attr_s_lang_w;
 wire       hud_aud_step_w, hud_sub_step_w;   // from transport_hud_inst
@@ -2775,23 +2776,65 @@ wire       hud_hidden_w;                     // saver / stage-2 Stop (assigned b
 wire       aud_step_w = hud_aud_step_w & ~hud_hidden_w;
 wire       sub_step_w = hud_sub_step_w & ~hud_hidden_w;
 wire [2:0] aud_log;                          // effective logical audio track (below)
-wire [2:0] sp_sel;                           // effective logical subpicture track (below)
+wire [4:0] sp_sel;                           // effective logical subpicture track 0..31 (below)
 wire       sub_on_eff;                       // effective subtitle display (below)
+// ---- THE LOADED PGC'S SUBTITLE TABLE: which of the 32 streams it DECLARES ----
+// (2026-10-04, PR #152; docs/track_selection.md "32 subtitle tracks".)
+// DVD-Video allows 32 subpicture streams. The 32 subp_control words live in a
+// block RAM (subp_ctl_ram, below); only their "declared" bit [31] is kept here as
+// flops, because three things need all 32 at once:
+//   * the Subtitle button steps over DECLARED streams only. The IFO's stream count
+//     (subp_ntracks) is an authoring-tool claim -- 140/1,431 library discs say 32
+//     while their PGCs declare a handful, and Universal's copy-protection decoy
+//     title sets declare 32 streams of ONE unit each -- so stepping by that count
+//     would walk the user through dozens of empty tracks. The count is used only
+//     when there is no table (a linear file).
+//   * the forced-subtitle fallback (first declared stream, libdvdnav);
+//   * "does the PGC declare anything" (subp_any_present).
+// The bookkeeping lives in dvd/subp_decl.sv so it has a bench (bench/dvd/
+// subp_decl_tb.sv); tools/check_subp32_wiring.py gates this instance.
+wire [31:0] subp_declared;
+wire        subp_any_decl, subp_next_ok;
+wire [4:0]  subp_first_decl, subp_last_decl, subp_next_decl;
+subp_decl u_subp_decl (
+    .clk        (clk_sys),
+    .ctl_we     (pgc_ctl_we),
+    .ctl_waddr  (pgc_ctl_waddr),
+    .ctl_wbit31 (pgc_ctl_wdata[31]),
+    .cur        (sp_sel),                 // the EFFECTIVE track the popup shows
+    .declared   (subp_declared),
+    .any        (subp_any_decl),
+    .first      (subp_first_decl),
+    .last       (subp_last_decl),
+    .next_ok    (subp_next_ok),
+    .next       (subp_next_decl)
+);
+// a usable table for the user cycle: parsed, title domain, declares something
+wire        sp_tbl_ok = pgc_ctl_valid & pgc_dom_tt & subp_any_decl;
+
 reg  [2:0] aud_cur;
 reg        sub_on;
-reg  [2:0] sub_idx;
+reg  [4:0] sub_idx;                          // 0..31
 always @(posedge clk_sys or negedge reset_n) begin
     if (!reset_n) begin
-        aud_cur <= 3'd0; sub_on <= 1'b0; sub_idx <= 3'd0;
+        aud_cur <= 3'd0; sub_on <= 1'b0; sub_idx <= 5'd0;
     end else if (start_streaming) begin
-        aud_cur <= 3'd0; sub_on <= 1'b0; sub_idx <= 3'd0;  // default: track 0, subs off
+        aud_cur <= 3'd0; sub_on <= 1'b0; sub_idx <= 5'd0;  // default: track 0, subs off
     end else begin
         if (aud_step_w)
             aud_cur <= (({1'b0,aud_log} + 4'd1) >= audio_ntracks_w) ? 3'd0 : aud_log + 3'd1;
         if (sub_step_w) begin
-            if (!sub_on_eff)                                    begin sub_on <= 1'b1; sub_idx <= 3'd0; end
-            else if (({1'b0,sp_sel} + 4'd1) >= subp_ntracks_w)  begin sub_on <= 1'b0; sub_idx <= 3'd0; end
-            else                                                begin sub_on <= 1'b1; sub_idx <= sp_sel + 3'd1; end
+            if (sp_tbl_ok) begin
+                // a PGC table: OFF -> first declared -> next declared ... -> OFF
+                if (!sub_on_eff)                                begin sub_on <= 1'b1; sub_idx <= subp_first_decl; end
+                else if (!subp_next_ok)                         begin sub_on <= 1'b0; sub_idx <= 5'd0; end
+                else                                            begin sub_on <= 1'b1; sub_idx <= subp_next_decl; end
+            end else begin
+                // no table (linear file): the stream count, as before
+                if (!sub_on_eff)                                begin sub_on <= 1'b1; sub_idx <= 5'd0; end
+                else if (({1'b0,sp_sel} + 6'd1) >= subp_ntracks_w) begin sub_on <= 1'b0; sub_idx <= 5'd0; end
+                else                                            begin sub_on <= 1'b1; sub_idx <= sp_sel + 5'd1; end
+            end
         end
     end
 end
@@ -2836,7 +2879,8 @@ always @(posedge clk_sys or negedge reset_n) begin
             if (aud_step_w)
                 vm_owns_aud <= 1'b0;
             // subpicture: SetSTN display-on claims; a Subtitle STEP releases
-            if (menus_on && vm_spstn != vm_spstn_p && vm_spstn[6])
+            // (bit 5 clear: 62/63 = "none"/"forced" are not streams and never claim)
+            if (menus_on && vm_spstn != vm_spstn_p && vm_spstn[6] && !vm_spstn[5])
                 vm_owns_sp <= 1'b1;
             if (sub_step_w)
                 vm_owns_sp <= 1'b0;
@@ -2856,11 +2900,11 @@ assign     aud_log = (({1'b0,aud_sel} >= audio_ntracks_w)
 // e.g. 0x83 — GET_SMART VTS2; 31/431 library discs author non-identity maps).
 // The map store is deliberately NARROW: only avail (bit15) + phys (bits[10:8])
 // are kept — 32 FFs, not eight u16 words (a second 32-bit mux failed to route
-// on this design once already; see the subp_ctl_mem note below).
+// on this design once already; see the subp_ctl_ram note below).
 reg [7:0]  actl_avail;
 reg [23:0] actl_phys;                       // {phys7,...,phys0}, 3 bits each
 always @(posedge clk_sys) begin
-    if (pgc_ctl_we && pgc_ctl_waddr[4]) begin
+    if (pgc_ctl_we && pgc_ctl_waddr[5]) begin       // 32..39 = audio_control
         actl_avail[pgc_ctl_waddr[2:0]] <= pgc_ctl_wdata[15];
         case (pgc_ctl_waddr[2:0])       // explicit mux — no variable part-select
         3'd0: actl_phys[ 2: 0] <= pgc_ctl_wdata[10:8];
@@ -2944,7 +2988,7 @@ always @(posedge clk_sys or negedge reset_n)
 // non-zero subtitle track would make it drop the menu's own 0x20 stream ->
 // no menu graphic + nothing for the highlight to recolour (HW: deep menus blank).
 // Force stream 0 while a menu is up; SPRM2/gamepad selection is for the TITLE only.
-assign     sp_sel = (menus_on && vm_owns_sp && vm_spstn[6]) ? vm_spstn[2:0] : sub_idx;
+assign     sp_sel = (menus_on && vm_owns_sp && vm_spstn[6]) ? vm_spstn[4:0] : sub_idx;
 // Effective subtitle display, for the popup and the Subtitle step: the gamepad's
 // sub_on OR a menu SetSTN display-on that still owns the selection (the same two
 // terms sp_route_en carries for the title).
@@ -2957,9 +3001,8 @@ assign     sub_on_eff = sub_on | (menus_on && vm_owns_sp && vm_spstn[6]);
 // icon (SetSTN logical stream 1) reaches substream 0x22 (16:9 wide) / 0x23
 // (letterbox) instead of 0x21. Applied ONLY to the VM-selected stream so the
 // user subtitle path is byte-identical. Ref: libdvdnav vmget.c vm_get_subp_stream.
-reg  [31:0] subp_ctl_mem [0:15];
-always @(posedge clk_sys)
-    if (pgc_ctl_we && !pgc_ctl_waddr[4]) subp_ctl_mem[pgc_ctl_waddr[3:0]] <= pgc_ctl_wdata;
+// (The 32 subp_control words are in subp_ctl_ram, next to the one read that uses
+//  them -- see sp_sel_log below. Their declared bits are subp_declared, above.)
 // Force 4:3 Subpics (P1O[15]) debug override: advertise a 4:3/LETTERBOX display so a
 // disc that authors mode-specific subpicture streams serves its 4:3-mode art. MiB
 // "visual commentary" is the motivating case (logical subp 3: wide->0x23 warning,
@@ -2968,11 +3011,13 @@ always @(posedge clk_sys)
 wire        force_43_subp = status[15];
 // The VM (in-title HLI / SetSTN) path and the user (gamepad B8) path both resolve a
 // LOGICAL subpicture stream -> PHYSICAL substream via pgc->subp_control by display mode.
-// SHARE one subp_ctl_mem 16:1 read between them (routing is tight at ~90% ALM — a second
+// SHARE one subp_ctl_ram read between them (routing is tight at ~90% ALM — a second
 // mux failed to fit): pick the logical index first, then one lookup + one mapping.
 wire        vm_owns_route = menus_on && vm_owns_sp && vm_spstn[6];
-wire [2:0]  sp_user_log   = ({1'b0,sp_sel} >= subp_ntracks_w)
-                            ? (subp_ntracks_w[2:0] - 3'd1) : sp_sel;   // clamped user index
+// clamped user index: by the stream count only when there is no PGC table (with
+// one, the Subtitle button only ever lands on declared streams)
+wire [4:0]  sp_user_log   = (!sp_tbl_ok && ({1'b0,sp_sel} >= subp_ntracks_w))
+                            ? (subp_ntracks_w[4:0] - 5'd1) : sp_sel;
 // "A MENU-DOMAIN PGC is loaded" -- the DOMAIN fact, named once so it cannot
 // diverge from the map's domain gate below (issue #81: the context and the domain
 // were two readings of one idea, and only one of them was about the domain).
@@ -2984,7 +3029,7 @@ wire        menu_sp_ctx   = menu_dom_live || sp_menu_early;
 // A MENU context (menu-domain menu, or an in-title multi-button game menu like
 // Scene It) resolves LOGICAL stream 0 -- but through the map, not as a constant.
 // DVD-FORK FIX (issues #60/#61): this used to short-circuit to physical 0.
-// ---- FORCED SUBTITLES (2026-10-03, feature/forced-subs; docs/subpicture.md) ----
+// ---- FORCED SUBTITLES (2026-10-03, PR #151; docs/subpicture.md) ----
 // A set-top player with subtitles OFF still decodes the title's subpicture stream
 // and shows the units marked FORCED (0x00 FSTA_DSP) -- typically one translated line
 // of foreign-language dialogue. Which stream: SPRM2's number with its display bit
@@ -3000,49 +3045,43 @@ wire        menu_sp_ctx   = menu_dom_live || sp_menu_early;
 // in_title_hli), the Scene It menus (sp_menu_early) and menu domains are all
 // excluded by construction. spu_decode.forced_only = fs_route.
 //
-// ⚠ SPEC BOUND, inherited and recorded (not widened here): the reader keeps 16
-// of the PGC's 32 subp_control entries (subp_ctl_mem) and sp_sel_log is 4 bits.
-// A forced stream numbered 16..31 is treated as undeclared and falls back to
-// the first declared stream instead of ALIASING onto 0..15 the way a [3:0]
-// truncation would. See docs/subpicture.md "Forced subtitles".
-wire [15:0] subp_declared;
-genvar sdi;
-generate for (sdi = 0; sdi < 16; sdi = sdi + 1) begin : g_subp_decl
-    assign subp_declared[sdi] = subp_ctl_mem[sdi][31];
-end endgenerate
-// the first declared logical stream (priority encoder; meaningful only when
-// subp_any_present, which fs_route requires)
-reg  [3:0]  subp_first_decl;
-always @* begin
-    subp_first_decl = 4'd0;
-    for (int fi = 15; fi >= 0; fi = fi - 1)
-        if (subp_declared[fi]) subp_first_decl = fi[3:0];
-end
-// SPRM2's stream, when it names a declared stream 0..15 (62/63 = none, 16..31 = past
-// the 16-entry bound); the VM only drives it with Disc Menus on.
-wire        fs_vm_ok  = menus_on && (vm_spstn[5:4] == 2'b00) && subp_declared[vm_spstn[3:0]];
-wire [3:0]  fs_log    = fs_vm_ok ? vm_spstn[3:0] : subp_first_decl;
+// All 32 streams since PR #152 (subp_declared / subp_first_decl are the
+// table state declared ahead of the Subtitle-button logic).
+// SPRM2's stream, when it names a declared stream 0..31 (62/63 = none/forced are
+// not streams: bit 5 set); the VM only drives it with Disc Menus on.
+wire        fs_vm_ok  = menus_on && !vm_spstn[5] && subp_declared[vm_spstn[4:0]];
+wire [4:0]  fs_log    = fs_vm_ok ? vm_spstn[4:0] : subp_first_decl;
 // Every display-ON term of sp_route_en below, named once so the forced route is
 // derived from what selects the display path rather than restating it.
 wire        sp_disp_on = sub_on | (menus_on && menu_active)
                        | (menus_on && vm_owns_sp && vm_spstn[6])
                        | in_title_hli | sp_menu_early;
-wire        fs_route  = ~sp_disp_on & pgc_ctl_valid & pgc_dom_tt & (|subp_declared);
+wire        fs_route  = ~sp_disp_on & pgc_ctl_valid & pgc_dom_tt & subp_any_decl;
 
-wire [3:0]  sp_sel_log    = menu_sp_ctx  ? 4'd0 :
-                            vm_owns_route ? vm_spstn[3:0] :
-                            fs_route      ? fs_log        : {1'b0, sp_user_log};
-wire [31:0] subp_ctl_sel  = subp_ctl_mem[sp_sel_log];                 // single 16:1 mux
-// Does the loaded PGC declare ANY subpicture stream? 16 flop reads, no mux -- this is
-// what separates "the table does not offer this stream" from "there is no table".
-wire subp_any_present = subp_ctl_mem[ 0][31] | subp_ctl_mem[ 1][31] |
-                        subp_ctl_mem[ 2][31] | subp_ctl_mem[ 3][31] |
-                        subp_ctl_mem[ 4][31] | subp_ctl_mem[ 5][31] |
-                        subp_ctl_mem[ 6][31] | subp_ctl_mem[ 7][31] |
-                        subp_ctl_mem[ 8][31] | subp_ctl_mem[ 9][31] |
-                        subp_ctl_mem[10][31] | subp_ctl_mem[11][31] |
-                        subp_ctl_mem[12][31] | subp_ctl_mem[13][31] |
-                        subp_ctl_mem[14][31] | subp_ctl_mem[15][31];
+wire [4:0]  sp_sel_log    = menu_sp_ctx  ? 5'd0 :
+                            vm_owns_route ? vm_spstn[4:0] :
+                            fs_route      ? fs_log        : sp_user_log;
+// THE 32 subp_control WORDS, in a block RAM (PR #152). Two 32-word tables
+// in flops plus a 32:1 x 32-bit read would cost ~1,000 registers and a wide mux at
+// ~3 % ALM headroom; the routing note below already records one 16:1 mux that
+// failed to fit. Written by the reader's pgc_ctl walk, read ONCE per cycle at the
+// shared logical index with a registered address, so subp_ctl_sel is one cycle
+// behind sp_sel_log -- the logical stream changes on a key press or a SetSTN,
+// never in a cycle-critical way. (The table load itself: pgc_ctl_valid rises the
+// cycle the last word lands, so for one cycle the read of THAT word can be the
+// previous PGC's; the substream filter is off-by-one-cycle at worst.)
+// Kept out of every reset block so altsyncram infers -- grep DVD.map.rpt for
+// "subp_ctl_ram" after a build.
+(* ramstyle = "M10K" *) reg [31:0] subp_ctl_ram [0:31];
+reg  [31:0] subp_ctl_sel_q;
+always @(posedge clk_sys) begin
+    if (pgc_ctl_we && !pgc_ctl_waddr[5]) subp_ctl_ram[pgc_ctl_waddr[4:0]] <= pgc_ctl_wdata;
+    subp_ctl_sel_q <= subp_ctl_ram[sp_sel_log];
+end
+wire [31:0] subp_ctl_sel  = subp_ctl_sel_q;
+// Does the loaded PGC declare ANY subpicture stream? This is what separates "the
+// table does not offer this stream" from "there is no table".
+wire subp_any_present = subp_any_decl;
 // 16:9 display mode: override -> letterbox; else Crop=pan&scan, Letterbox=letterbox,
 // else wide (Fit/HDMI anamorphic — the common case; O[4:3] refines it, HW-tunable).
 // ⚠ reads aa_osd_sel, NOT status[4:3]: the B15 Aspect button overrides that
@@ -3117,7 +3156,7 @@ wire sp_user_absent = sp_stream_absent & ~(menu_sp_ctx | vm_owns_route | force_4
 // An in-title multi-button game menu (Scene It, and the motion menus of
 // Aniki mon Frere / BROTHER) is a MENU: its highlight rides LOGICAL subpicture
 // stream 0 like a menu-domain menu (sp_sel_log above), and resolves through the
-// same map (it is a title-domain PGC, so subp_ctl_mem is already populated for it
+// same map (it is a title-domain PGC, so subp_ctl_ram is already populated for it
 // and ar_wide_auto_eff == ar_wide_auto there).
 // ⚠ THAT LAST CLAUSE WAS FALSE FROM THE DAY IT WAS WRITTEN UNTIL issue #81: the
 // map's domain gate was handed the menu CONTEXT and required a menu-DOMAIN table,
@@ -3132,7 +3171,7 @@ wire sp_user_absent = sp_stream_absent & ~(menu_sp_ctx | vm_owns_route | force_4
 // fs_route resolves through the map like the VM path: a forced stream is a logical
 // number, and libdvdnav maps it by display mode exactly as it maps SPRM2.
 wire [4:0] sp_track_eff  = (menu_sp_ctx | vm_owns_route | force_43_subp | fs_route)
-                           ? sp_phys_streamN : {2'b0, sp_user_log};
+                           ? sp_phys_streamN : sp_user_log;
 
 // =========================================================================
 // DVD-FORK (live output-mode switch — built for Interlaced Out Auto, now serving the
@@ -6059,11 +6098,11 @@ spu_decode spu_decode_inst (
 wire        pgc_pal_we;
 wire [3:0]  pgc_pal_waddr;
 wire [31:0] pgc_pal_wdata;
-// PGC stream-control bus (dvd_iso_reader): waddr 0..15 = subp_control words
-// (-> subp_ctl_mem, the subpicture display-mode substream mapping above),
-// waddr 16..23 = audio_control words (-> the audio logical->physical map).
+// PGC stream-control bus (dvd_iso_reader): waddr 0..31 = subp_control words
+// (-> subp_ctl_ram + subp_declared, the subpicture display-mode substream mapping above),
+// waddr 32..39 = audio_control words (-> the audio logical->physical map).
 wire        pgc_ctl_we;
-wire [4:0]  pgc_ctl_waddr;
+wire [5:0]  pgc_ctl_waddr;                 // 0..31 subp_control, 32..39 audio_control
 wire [31:0] pgc_ctl_wdata;
 wire        pgc_ctl_valid;
 wire        pgc_dom_tt;
@@ -6566,8 +6605,10 @@ transport_hud #(.HUD_QX_ADJ(5)) transport_hud_inst (
     .aud_cnt      (audio_ntracks_w),
     .aud_lang     (attr_a_lang_w),
     .sub_enabled  (sub_on_eff),
-    .sub_no       ({1'b0, sp_sel} + 4'd1),
-    .sub_cnt      (subp_ntracks_w),
+    .sub_no       ({1'b0, sp_sel} + 6'd1),
+    // N = the highest DECLARED stream + 1 when there is a PGC table (the IFO count
+    // is a claim -- see subp_declared), else the stream count
+    .sub_cnt      (sp_tbl_ok ? ({1'b0, subp_last_decl} + 6'd1) : subp_ntracks_w),
     .sub_lang     (attr_s_lang_w),
     .ang_no       (cur_angle),
     .ang_cnt      (angle_count),

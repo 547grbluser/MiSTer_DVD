@@ -49,7 +49,8 @@ module transport_hud_tb;
     reg         seek_fwd = 0;
     reg  [6:0]  seek_min = 7'd0;
     reg  [2:0]  seek_sec = 3'd0;
-    reg  [3:0]  aud_no = 0, aud_cnt = 0, sub_no = 0, sub_cnt = 0;
+    reg  [3:0]  aud_no = 0, aud_cnt = 0;
+    reg  [5:0]  sub_no = 0, sub_cnt = 0;   // 1..32 subtitle tracks (PR #152)
     reg  [3:0]  ang_no = 0, ang_cnt = 0;
     reg  [15:0] aud_lang = 0, sub_lang = 0;
     reg         sub_enabled = 0;
@@ -301,9 +302,13 @@ module transport_hud_tb;
         check_popup("T9b audio popup", "AUDIO  2/ 4 FR~~~~~~~~~~~~~~~~~~");
 
         // T10: subtitle popup (on, then OFF variant)
-        sub_enabled = 1; sub_no = 4'd1; sub_cnt = 4'd3; sub_lang = "en";
+        sub_enabled = 1; sub_no = 6'd1; sub_cnt = 6'd3; sub_lang = "en";
         @(posedge clk); sub_evt = 1; @(posedge clk); sub_evt = 0;
         check_popup("T10a sub popup", "SUB    1/ 3 EN~~~~~~~~~~~~~~~~~~");
+        // T10c: two-digit track numbers past 8 and up to the spec maximum 32
+        sub_no = 6'd12; sub_cnt = 6'd32; sub_lang = "ja";
+        @(posedge clk); sub_evt = 1; @(posedge clk); sub_evt = 0;
+        check_popup("T10c sub 12/32", "SUB   12/32 JA~~~~~~~~~~~~~~~~~~");
         sub_enabled = 0;
         @(posedge clk); sub_evt = 1; @(posedge clk); sub_evt = 0;
         check_popup("T10b sub off", "SUB   OFF~~~~~~~~~~~~~~~~~~~~~~~");

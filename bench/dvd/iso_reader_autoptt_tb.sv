@@ -81,7 +81,7 @@ module iso_reader_autoptt_tb;
         .jump_entry(4'd0), .jump_cell(8'd0), .jump_ttn(7'd0), .jump_pgn(8'd0),
         .jump_ptt(10'd0), .jump_natural(1'b0), .menu_btns_armed(1'b0),
         .vm_mode(1'b0), .vm_adv(1'b0), .vm_replay(1'b0),
-        .attr_a_sel(3'd0), .attr_s_sel(3'd0),
+        .attr_a_sel(3'd0), .attr_s_sel(5'd0),
         .cur_pgm(cur_pgm_w), .nr_ptt_o(nr_ptt_w), .res_ttn(res_ttn_w),
         .seek_ack(seek_ack), .jump_ack(jump_ack),
         .sd_lba(sd_lba), .sd_rd(sd_rd), .sd_ack(sd_ack),

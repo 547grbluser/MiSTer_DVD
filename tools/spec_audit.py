@@ -368,7 +368,7 @@ def scan_domain(f, extents):
     assembly (units concatenate per substream by SPDSZ = the SPU's first u16)
     and nav_extract's PCI offsets (PCI data @0x2D; hl_gi @0x60 PCI-relative)."""
     st = {}                            # substream -> bytes remaining in unit
-    # FORCED-SUBTITLE axis (2026-10-03, feature/forced-subs): reassemble each
+    # FORCED-SUBTITLE axis (2026-10-03, PR #151): reassemble each
     # unit (ub) to read its tail DCSQ table, and classify a unit carrying 0x00
     # FSTA_DSP by whether the VOBU it STARTED in has a live HLI. With an HLI it
     # is an in-title button graphic (the Matrix white-rabbit class); without, it

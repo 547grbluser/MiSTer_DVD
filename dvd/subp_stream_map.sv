@@ -79,7 +79,7 @@ module subp_stream_map (
     // menu resolution": an in-title game/motion menu is a menu context in the
     // TITLE domain, and conflating the two was issue #81 (see the note above).
     input  wire        menu_dom,
-    input  wire [3:0]  logical,       // logical stream index (already selected)
+    input  wire [4:0]  logical,       // logical stream index 0..31 (spec max; already selected)
     input  wire [31:0] ctl_sel,       // subp_control[logical], muxed by emu
     input  wire        wide,          // content is 16:9 (ar_wide_auto_eff)
     input  wire [1:0]  disp_mode,     // 0 = wide, 1 = letterbox, 2 = pan&scan
@@ -111,7 +111,7 @@ module subp_stream_map (
         endcase
     end
 
-    assign phys_streamN = !use_map ? {1'b0, logical}     :  // fall back: identity
+    assign phys_streamN = !use_map ? logical             :  // fall back: identity
                           !wide    ? ctl_sel[28:24]      :  // 4:3 content
                                      phys_wide;
 

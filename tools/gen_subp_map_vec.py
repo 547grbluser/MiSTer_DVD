@@ -4,11 +4,8 @@ bench/dvd/subp_stream_map_tb.sv, from the reference model
 tools/dvd_vm_ref.py subp_stream_map() (the libdvdnav vm_get_subp_stream port,
 with this core's documented forced-wide-for-menus deviation).
 
-Vector format, one hex word per line, 42 bits:
-  [41:37] expect (phys_streamN)
-  [36:5]  ctl_sel   (subp_control[logical])
-  [4:1]   logical
-  ...packed low bits below
+Vector format, one hex word per line, 48 bits (logical widened to 5 bits for the
+32-stream spec maximum, PR #152):
 
   bit layout, LSB first:
     [0]     map_valid
@@ -16,9 +13,9 @@ Vector format, one hex word per line, 42 bits:
     [2]     menu_dom  (a MENU-DOMAIN PGC is loaded; NOT "menu context" -- #81)
     [3]     wide
     [5:4]   disp_mode
-    [9:6]   logical
-    [41:10] ctl_sel
-    [46:42] expect
+    [10:6]  logical
+    [42:11] ctl_sel
+    [47:43] expect
 
 Deterministic (seeded) — regenerating always produces the same file.
 
@@ -36,7 +33,7 @@ import sys
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from dvd_vm_ref import subp_stream_map
 
-W_EXPECT = 42
+W_EXPECT = 43
 
 
 def vec(map_valid, dom_tt, menu_dom, wide, disp_mode, logical, ctl_sel):
@@ -48,8 +45,8 @@ def vec(map_valid, dom_tt, menu_dom, wide, disp_mode, logical, ctl_sel):
     v |= (int(menu_dom) & 1) << 2
     v |= (int(wide) & 1) << 3
     v |= (disp_mode & 3) << 4
-    v |= (logical & 0xF) << 6
-    v |= (ctl_sel & 0xFFFFFFFF) << 10
+    v |= (logical & 0x1F) << 6
+    v |= (ctl_sel & 0xFFFFFFFF) << 11
     v |= (exp & 0x1F) << W_EXPECT
     return v
 
@@ -103,7 +100,7 @@ def main():
         out.append(vec(1, 1, 0, 1, dm, 5, REAL['unavail']))  # unavail -> identity 5
 
     # ---- every logical index resolves its own word -------------------------
-    for log in range(16):
+    for log in range(32):
         out.append(vec(1, 1, 0, 1, 0, log, REAL['reporters']))
         out.append(vec(1, 0, 1, 1, 0, log, REAL['reporters']))
 
@@ -112,7 +109,7 @@ def main():
     for _ in range(2000):
         ctl = rnd.getrandbits(32)
         out.append(vec(rnd.getrandbits(1), rnd.getrandbits(1), rnd.getrandbits(1),
-                       rnd.getrandbits(1), rnd.randrange(4), rnd.randrange(16), ctl))
+                       rnd.getrandbits(1), rnd.randrange(4), rnd.randrange(32), ctl))
 
     here = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
     dst = os.path.join(here, 'bench', 'dvd', 'test_vobs', 'subp_map_vec.hex')

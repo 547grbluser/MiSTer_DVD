@@ -724,6 +724,76 @@ it the same way as Audio and Subtitle, so it is a candidate follow-up with the s
 - Presses inside a menu do nothing.
 - The chord no longer steps the tracks.
 
+## 32 subtitle tracks (2026-10-04, PR #152; ✅ HW-CONFIRMED: The Naked Gun 11 tracks, MOST 19)
+
+**Why.** DVD-Video allows 32 subpicture streams. The core reached **8** with the Subtitle
+button (3-bit `sub_idx`, and the reader clamped `subp_ntracks` to 8) and **16** through
+the disc's own choice (`subp_ctl_mem` kept 16 of the PGC's 32 `subp_control` words).
+- Measured over 1,431 title-PGC subtitle tables, **98 discs use slots 9–16**, mostly
+  10–12 tracks (TV box sets, multi-language releases). The button could not reach those.
+- The maintainer decided on 2026-10-04 to go to the spec maximum, falling back to 16 only
+  if it did not fit.
+
+**What changed.**
+- **Reader:**
+  - it walks all 32 `subp_control` words (PGC+0x1C..0x9B, ending exactly at the 156 header);
+  - it streams them on a 6-bit `pgc_ctl` bus: 0..31 subtitle, 32..39 audio, with `valid`
+    rising after word 31;
+  - it sweeps all 32 subpicture attribute entries, holding the languages in a block RAM
+    with a registered read;
+  - it clamps the count to 1..32.
+- **`emu.sv`:** every subtitle index is 5 bits. The 32 table words are in a block RAM
+  (`subp_ctl_ram`), read once per cycle at `sp_sel_log`. `dvd/subp_decl.sv` keeps the 32
+  *declared* bits, with first, last and next-above encoders.
+- **HUD:** shows up to `SUB 32/32`.
+- **Audio** stays at 8, which is already the spec maximum.
+
+**The Subtitle button steps over DECLARED streams, not the IFO count.** The IFO's
+`nr_of_vts_subp_streams` is an authoring-tool claim:
+- **140/1,431 discs say 32** while their PGCs declare a handful.
+- On three of the 19 discs whose PGC tables also declare all 32 (Furious 7, Jurassic
+  World, Lucy), a deep scan found that the "32-stream" title set (VTS_01) holds **exactly
+  one unit on each of 32 streams, every one forced**. That is a copy-protection decoy;
+  their real features carry 3–5 streams.
+
+Stepping by the count would walk a user through dozens of empty tracks, landing in decoys.
+So the cycle is `OFF → first declared → next declared above the current → … → OFF`. The
+IFO count is used only when there is no PGC table (a linear file), where the pre-32
+default of 8 stays. The popup's total is the highest declared stream + 1, so gaps in the
+declared set still show the stream's own number.
+
+**Costs, in time.**
+- **The table read lags by one cycle.** `subp_ctl_sel` is one cycle behind `sp_sel_log`,
+  and `attr_s_lang` one cycle behind `attr_s_sel`. A track change is a key press or a
+  SetSTN, and the HUD re-formats every ~1.2 ms, so neither is visible.
+- **Each PGC load takes ~64 more cycles** (the longer walk). The reader regression
+  (`run_reader_regress.sh`) keeps **all 51 verdicts identical to `main`**. With the fields
+  this change legitimately alters masked (the subtitle count and language, and the
+  `pgc_ctl` bus), **48/51 arms produce exactly the same output sequence** (only timing
+  shifts). The other three:
+  - two differ only in sector-read order and the later `pgc_ctl_valid` rise;
+  - one, `iso_reader_menudrain`, is a closed-loop bench whose trace diverges just as
+    early with `main`'s reader and a one-cycle-slower mock SD card.
+
+**Gates.**
+- `bench/dvd/run_subp32.sh --red`:
+  - `subp_decl_tb`: 3000 random tables, edges, and the user's walk;
+  - `subp_stream_map_tb`: 2109 vectors, 5-bit logical;
+  - `iso_reader_subpctl_tb`: words 17 and 31 byte-exact, exactly 32 writes;
+  - `iso_reader_attr_tb`: all 32 languages from the real MiB VTSI, plus opt-in patched
+    entries 9/31 and counts 12, 40→32 and 0→1;
+  - `transport_hud_tb` T10c: `SUB 12/32 JA`;
+  - three mutations, each caught.
+- `tools/check_subp32_wiring.py` is RED on the pre-32 code, with 31 findings.
+
+**HW vehicle.** It needs a disc whose MAIN FEATURE PGC declares more than 8 tracks; a
+VTS-wide count is not enough, since *27 Dresses* claims 12 but its feature declares 3.
+- 11 library discs qualify, e.g. **The Naked Gun** (85 min, 11 tracks:
+  en zh es fr ja ko zh th es fr ja), *Capote* (10), *Courageous* (10), and *MOST* (33 min,
+  19 tracks, past 16).
+- Expected: the Subtitle button walks `SUB 1/11 EN` … `SUB 11/11 JA`, then `SUB OFF`. The
+  pre-32 core stops at 8.
+
 ## Follow-ups
 
 - **Show-first Angle (B6)** — see "Show-first Audio/Subtitle" above.

@@ -44,8 +44,10 @@ module iso_reader_attr_tb;
     wire        debug_iso_mode;
 
     // Phase-10 enumeration outputs under test
-    wire [3:0]  audio_ntracks, subp_ntracks;
-    reg  [2:0]  attr_a_sel = 0, attr_s_sel = 0;
+    wire [3:0]  audio_ntracks;
+    wire [5:0]  subp_ntracks;                 // 1..32 since PR #152
+    reg  [2:0]  attr_a_sel = 0;
+    reg  [4:0]  attr_s_sel = 0;               // 0..31
     wire [2:0]  attr_a_fmt;
     wire [15:0] attr_a_lang, attr_s_lang;
     wire        title_ar_wide;      // issue #81: TITLE-domain aspect from the IFO
@@ -80,6 +82,23 @@ module iso_reader_attr_tb;
     // Real VTS_21_0.IFO VTSI_MAT sector (ISO LBA 1683520)
     reg [7:0] vtsimat [0:2047];
     initial $readmemh("bench/dvd/test_vobs/mib_vts21_vtsi_mat.hex", vtsimat);
+    // 32-TRACK ARMS (PR #152), OPT-IN so the default run stays the real disc
+    // byte for byte:
+    //   +x32       write distinct languages into subpicture entries 9 and 31 (the disc
+    //              has 4; the sweep reads all 32 regardless of the count)
+    //   +subcnt=N  override the claimed subpicture count byte @597 (12, and 40 for
+    //              the clamp to the spec maximum 32)
+    integer subcnt_ov = -1;
+    reg     x32 = 1'b0;
+    initial begin
+        #1;
+        if ($test$plusargs("x32")) begin
+            x32 = 1'b1;
+            vtsimat[598 + 6*9  + 2] = 8'h6a; vtsimat[598 + 6*9  + 3] = 8'h61;   // 'ja'
+            vtsimat[598 + 6*31 + 2] = 8'h7a; vtsimat[598 + 6*31 + 3] = 8'h68;   // 'zh'
+        end
+        if ($value$plusargs("subcnt=%d", subcnt_ov)) vtsimat[597] = subcnt_ov[7:0];
+    end
 
     localparam VTSI_LBA = 32'd1683520;
 
@@ -135,9 +154,12 @@ module iso_reader_attr_tb;
         end
     endtask
 
-    task chk_s(input [2:0] trk, input [15:0] lang);
+    // attr_s_lang is REGISTERED since PR #152 (block RAM, one cycle after
+    // attr_s_sel): wait an edge, never sample combinationally.
+    task chk_s(input [4:0] trk, input [15:0] lang);
         begin
-            attr_s_sel = trk; #1;
+            @(negedge clk); attr_s_sel = trk;
+            @(posedge clk); @(posedge clk); #1;
             if (attr_s_lang !== lang) begin
                 errors = errors + 1;
                 $display("  ERR subp[%0d]: lang=%04x (want %04x)", trk, attr_s_lang, lang);
@@ -153,26 +175,42 @@ module iso_reader_attr_tb;
         // subp phase, its per-track langs during the table sweep that follows),
         // then settle to let the full subpicture table sweep complete.
         t = 0;
-        while (!(audio_ntracks != 4'd8 && subp_ntracks != 4'd8) && t < 400000) begin
+        while (!(audio_ntracks != 4'd8 && subp_ntracks != 6'd8) && t < 400000) begin
             @(posedge clk); t = t + 1;
         end
-        repeat (200) @(posedge clk);   // let the subp attribute sweep finish
+        repeat (800) @(posedge clk);   // let the 32-entry subp attribute sweep finish
 
         $display("ATTR: iso_mode=%b iso_error=%b audio_ntracks=%0d subp_ntracks=%0d",
                  debug_iso_mode, dut.iso_error, audio_ntracks, subp_ntracks);
 
         if (audio_ntracks !== 4'd4) begin errors=errors+1; $display("  ERR audio_ntracks (want 4)"); end
-        if (subp_ntracks  !== 4'd4) begin errors=errors+1; $display("  ERR subp_ntracks (want 4)"); end
+        begin : cnt_arm
+            reg [5:0] want;
+            want = (subcnt_ov < 0)  ? 6'd4  :
+                   (subcnt_ov == 0) ? 6'd1  :
+                   (subcnt_ov > 32) ? 6'd32 : subcnt_ov[5:0];
+            if (subp_ntracks !== want) begin
+                errors=errors+1; $display("  ERR subp_ntracks=%0d (want %0d)", subp_ntracks, want);
+            end
+        end
 
         // Per-track: en=0x656e, fr=0x6672, es=0x6573, AC3=fmt 0
         chk_a(3'd0, 3'd0, 16'h656e);   // English 2.0
         chk_a(3'd1, 3'd0, 16'h656e);   // English 5.1
         chk_a(3'd2, 3'd0, 16'h6672);   // French 2.0
         chk_a(3'd3, 3'd0, 16'h656e);   // English commentary 2.0
-        chk_s(3'd0, 16'h656e);               // English subs
-        chk_s(3'd1, 16'h6672);               // French subs
-        chk_s(3'd2, 16'h6573);               // Spanish subs
-        chk_s(3'd3, 16'h656e);               // English subs
+        chk_s(5'd0, 16'h656e);               // English subs
+        chk_s(5'd1, 16'h6672);               // French subs
+        chk_s(5'd2, 16'h6573);               // Spanish subs
+        chk_s(5'd3, 16'h656e);               // English subs
+        // all 32 entries read back exactly what the IFO holds (derived from the fixture,
+        // so this cannot go stale and covers entries 8..31 the pre-32 reader never read)
+        for (i = 0; i < 32; i = i + 1)
+            chk_s(i[4:0], {vtsimat[598 + 6*i + 2], vtsimat[598 + 6*i + 3]});
+        if (x32) begin                       // not vacuous: the patched entries are non-zero
+            chk_s(5'd9,  16'h6a61);
+            chk_s(5'd31, 16'h7a68);
+        end
 
         // ---- issue #81: VTS_V_ATTR@0x200 rides the same sweep ----------------
         // Expected value is DERIVED FROM THE FIXTURE, not written out: bits 11:10

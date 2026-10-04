@@ -184,8 +184,8 @@ module transport_hud #(
     input  wire [3:0]  aud_cnt,
     input  wire [15:0] aud_lang,            // 2-ASCII ISO-639 (0 = none)
     input  wire        sub_enabled,
-    input  wire [3:0]  sub_no,              // 1-based subtitle track
-    input  wire [3:0]  sub_cnt,
+    input  wire [5:0]  sub_no,              // 1-based subtitle track (1..32, spec max)
+    input  wire [5:0]  sub_cnt,             // 1..32
     input  wire [15:0] sub_lang,
     input  wire [3:0]  ang_no,              // 1-based angle
     input  wire [3:0]  ang_cnt,
@@ -803,8 +803,8 @@ module transport_hud #(
                         f2_l2 <= a2g(aud_lang[7:0]);
                     end
                     4'd1: begin
-                        f2_n  <= bin2bcd99({4'd0, sub_no});
-                        f2_nn <= bin2bcd99({4'd0, sub_cnt});
+                        f2_n  <= bin2bcd99({2'd0, sub_no});
+                        f2_nn <= bin2bcd99({2'd0, sub_cnt});
                         f2_off <= !sub_enabled;
                         if (sub_enabled) begin
                             f2_l1 <= a2g(sub_lang[15:8]);

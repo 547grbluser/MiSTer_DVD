@@ -395,7 +395,7 @@ multi-player option disappears."*
 
 ✅ **HW gate passed** (status line at the top of this section).
 
-## Forced subtitles (2026-10-03, branch `feature/forced-subs`; ✅ HW-CONFIRMED 2026-10-04)
+## Forced subtitles (2026-10-03, PR #151; ✅ HW-CONFIRMED 2026-10-04)
 
 **What it is.** A DVD marks a subtitle unit *forced* by starting it with `0x00` FSTA_DSP
 instead of `0x01` STA_DSP. A set-top player with subtitles **off** still decodes the
@@ -466,9 +466,8 @@ its authored time. This is bounded by the existing ~700 ms hold bound, and the H
 matched the subtitles-on arm. The precise predecessor would be
 `c_valid && (!forced_only || c_forced)`.
 
-**Known bound, inherited and not widened here** (recorded per the spec-maximum rule;
-**maintainer decision 2026-10-04: widen to 32 on its own branch**, roadmap "Subtitle tracks
-to the spec maximum"): the reader keeps **16 of the PGC's 32** `subp_control`
+**Known bound — RESOLVED by `PR #152` (2026-10-04): all 32 streams, see
+`docs/track_selection.md` "32 subtitle tracks".** The note below is the pre-32 record: the reader keeps **16 of the PGC's 32** `subp_control`
 entries (`subp_ctl_mem`), and the user track index is 3 bits.
 - SPRM2 values 16–31 are treated as undeclared and fall back. They do not alias onto
   0–15, which the old `[3:0]` truncation would have done.

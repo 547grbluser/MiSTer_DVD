@@ -69,7 +69,7 @@ module hud_frame_tb;
         .aud_evt(aud_evt), .sub_evt(1'b0), .angle_evt(1'b0), .chap_evt(1'b0),
         .css_warn(1'b0),
         .aud_no(4'd2), .aud_cnt(4'd4), .aud_lang("fr"),
-        .sub_enabled(1'b0), .sub_no(4'd0), .sub_cnt(4'd0), .sub_lang(16'd0),
+        .sub_enabled(1'b0), .sub_no(6'd0), .sub_cnt(6'd0), .sub_lang(16'd0),
         .ang_no(4'd0), .ang_cnt(4'd0),
         .hud_on(hud_on), .hud_r(hud_r), .hud_g(hud_g), .hud_b(hud_b),
         .hud_alpha(hud_alpha)
