@@ -73,6 +73,19 @@ def assign_stmt(src, name):
     return m.group(1).strip() if m else None
 
 
+def block_after(src, head_re):
+    """Text of the single begin..end block opened by head_re (balanced), or None."""
+    hits = list(re.finditer(head_re, src))
+    if len(hits) != 1:
+        return None
+    i, depth = hits[0].end(), 1
+    for m in re.finditer(r"\b(begin|end)\b", src[i:]):
+        depth += 1 if m.group(1) == 'begin' else -1
+        if depth == 0:
+            return src[i:i + m.start()]
+    return None
+
+
 def connections(src, module):
     """{port: expr} for one module instantiation's named connections."""
     # allow an optional #(...) parameter block (transport_hud is instantiated with one)
@@ -142,9 +155,20 @@ def main():
     g = one_guard('A1', r"aud_cur\s*<=\s*\(", 'aud_cur <= (...)')
     guard_is('A1', g, 'aud_step_w',
              'The Audio press must only SHOW; a raw-edge guard is the old cycle-on-every-press.')
-    g = one_guard('A2', r"begin\s*if\s*\(\s*!\s*sub_on_eff\s*\)", 'begin if (!sub_on_eff)')
-    guard_is('A2', g, 'sub_step_w',
-             'The Subtitle press must only SHOW; a raw-edge guard is the old cycle-on-every-press.')
+    # Since feature/subp-32 the Subtitle step has TWO branches inside `if (sub_step_w)`:
+    # step over the PGC's declared streams, or (no table) over the stream count. So
+    # the rule is structural: every `if (!sub_on_eff)` step branch in the file must
+    # lie inside the single `if (sub_step_w) begin ... end` block.
+    sub_blk = block_after(src, r"\bif\s*\(\s*sub_step_w\s*\)\s*begin")
+    n_all = len(re.findall(r"\bif\s*\(\s*!\s*sub_on_eff\s*\)", src))
+    if sub_blk is None:
+        bad('A2', 'expected exactly one `if (sub_step_w) begin ... end` block')
+    else:
+        n_in = len(re.findall(r"\bif\s*\(\s*!\s*sub_on_eff\s*\)", sub_blk))
+        if n_in == 0 or n_in != n_all:
+            bad('A2', '%d of %d `if (!sub_on_eff)` step branches are inside `if (sub_step_w)`. '
+                      'The Subtitle press must only SHOW; a raw-edge guard is the old '
+                      'cycle-on-every-press.' % (n_in, n_all))
 
     # A3 -- the VM SetSTN ownership is released by a STEP, never a show press.
     g = one_guard('A3', r"vm_owns_aud\s*<=\s*1'b0\s*;", "vm_owns_aud <= 1'b0;")
@@ -200,13 +224,26 @@ def main():
     m = re.search(r"aud_cur\s*<=\s*\(([^;]*);", src)
     if not m or 'aud_log' not in terms(m.group(1)) or 'aud_cur' in terms(m.group(1)):
         bad('A8', 'the Audio step must advance from aud_log (the effective track), not aud_cur')
-    m = re.search(r"if\s*\(\s*!\s*sub_on_eff\s*\)(.*?)end\s*end", src)
-    steps = re.findall(r"sub_idx\s*<=\s*([^;]*);", m.group(1)) if m else []
-    moving = [r for r in steps if terms(r) - {'d0'}]          # the non-literal one
-    if (not m or len(moving) != 1 or 'sp_sel' not in terms(moving[0])
-            or 'sub_idx' in terms(moving[0])):
+    # Every ADVANCING subtitle step must come from sp_sel: directly (`sp_sel + 1`, the
+    # no-table branch) or as subp_next_decl, the subp_decl instance's .next output,
+    # whose .cur must be sp_sel (the next declared stream above the effective track).
+    # subp_first_decl is the start from OFF, not an advance. Nothing may read sub_idx.
+    steps = re.findall(r"sub_idx\s*<=\s*([^;]*);", sub_blk) if sub_blk else []
+    dec = connections(src, 'subp_decl') or {}
+    above = ('subp_declared %s' % dec.get('cur', '')) if dec.get('next') == 'subp_next_decl' \
+        else (assign_of(src, 'subp_above') or '')
+    moving = [r for r in steps if terms(r) - {'d0'} - {'subp_first_decl'}]
+    def from_sel(r):
+        t = terms(r)
+        if 'sub_idx' in t:
+            return False
+        if 'sp_sel' in t:
+            return True
+        return t == {'subp_next_decl'} and 'sp_sel' in terms(above) \
+            and 'subp_declared' in terms(above)
+    if not moving or not all(from_sel(r) for r in moving):
         bad('A8', 'the Subtitle step must advance from sp_sel (the effective track), '
-                  'got sub_idx <= %s' % (moving or None))
+                  'got sub_idx <= %s (subp_above = %s)' % (moving or None, above or None))
 
     # A9 -- nothing else consumes the raw presses (a new reader of audio_edge is
     # a new place a show press could change state).
