@@ -431,8 +431,9 @@ bit 7 set, meaning "only let Forced display show". VLC's `spudec` honours that a
 - **Disc Menus off** works too: there is no VM, SPRM2 stays 62, and the fallback takes the
   first declared stream, which is libdvdnav's default.
 - **Stream choice after the user turns subtitles off (B8):** SPRM2's stream (the disc's
-  choice), not the stream the user was last on. This matches libdvdnav, and is flagged for a
-  maintainer decision in the status log.
+  choice), not the stream the user was last on. This matches libdvdnav, and was **decided by
+  the maintainer 2026-10-04**. `SUB OFF` is reached by stepping past the last track, so "the
+  user's last track" would be the disc's final language.
 
 **Measured** (`tools/spec_audit.py --deep`, which now reassembles each SPU unit and walks its
 DCSQ table):
@@ -466,7 +467,8 @@ matched the subtitles-on arm. The precise predecessor would be
 `c_valid && (!forced_only || c_forced)`.
 
 **Known bound, inherited and not widened here** (recorded per the spec-maximum rule;
-maintainer decision pending): the reader keeps **16 of the PGC's 32** `subp_control`
+**maintainer decision 2026-10-04: widen to 32 on its own branch**, roadmap "Subtitle tracks
+to the spec maximum"): the reader keeps **16 of the PGC's 32** `subp_control`
 entries (`subp_ctl_mem`), and the user track index is 3 bits.
 - SPRM2 values 16–31 are treated as undeclared and fall back. They do not alias onto
   0–15, which the old `[3:0]` truncation would have done.

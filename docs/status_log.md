@@ -68,9 +68,19 @@ predate later confirmations; the `CLAUDE.md` index carries the reconciled status
     0x22 (1). Testing it means driving its language menu on the rig.
   - **Open:**
     - ⏳ HW: the SPRM2 arm on Casino Royale (above).
-    - ⏳ Maintainer decision: forced stream after B8-off (SPRM2's, as now, vs the user's
-      last track).
-    - ⏳ Maintainer decision: the inherited 16-of-32 `subp_control` / 3-bit track bound.
+  - **Decisions (maintainer, 2026-10-04):**
+    - **Forced stream after B8-off = the disc's choice** (SPRM2, else first declared), as
+      built. The alternative, the user's last track, was rejected. `SUB OFF` is reached by
+      stepping *past the last track*, so "last track" would almost always be the disc's
+      final language. Fixing that needs a remembered pre-cycle track for a rare benefit.
+    - **Subtitle track limit → the spec maximum of 32, on its own branch** (fall back to 16
+      if it does not fit). Measured over 1,431 title-PGC subtitle tables:
+      - **98 discs use slots 9–16**, which the B8 button cannot reach today (3-bit
+        `sub_idx`, reader clamps `subp_ntracks` to 8).
+      - 20 discs claim slots past 16. Nineteen claim all 32 (Furious 7, Jurassic World,
+        Lucy…), probably one authoring house flagging every slot; a VOB scan would confirm.
+      - The manual now states the 8-track button limit (`reference/compatibility.md`).
+      - Roadmap: "Subtitle tracks to the spec maximum".
   - **Tooling found on the way:** `tools/lint_undriven.sh` passes **vacuously** in a fresh
     worktree. `build_id.v` is missing there, Verilator aborts, and the script greps only for
     "not driven". Not fixed here.

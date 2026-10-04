@@ -621,6 +621,30 @@ in `CONF_STR`. Design: `docs/cdda.md` "`.cue` sheets". ⛔ CHD still not support
 > **top gap confirmed = exact chapters/PTT (7/7 discs); interactive GPRM-counter/NVTMR promoted
 > above parental on measured prevalence (3/7 game discs).** Phase 3 = close gaps in that order.
 
+### ⏳ Subtitle tracks to the spec maximum (decided 2026-10-04; own branch)
+
+DVD-Video allows 32 subtitle tracks. The core reaches **8** with the Subtitle button and
+**16** through the disc's own choice and forced subtitles. Maintainer decision: widen both
+to 32, and fall back to 16 if the ALM cost does not fit (~1,125 spare).
+
+**Exposure** (1,431 title-PGC subtitle tables):
+- 98 discs use slots 9–16; the button cannot reach those tracks today.
+- 20 discs claim slots past 16. Nineteen claim all 32, probably flags rather than real
+  tracks: run `tools/spec_audit.py --deep` on one (e.g. JURASSIC_WORLD) to count the
+  substreams actually present.
+
+**What to change:**
+- `sub_idx` / `sp_sel` / `sp_user_log`: 3 → 5 bits.
+- The reader's `subp_ntracks` clamp at 8 (`dvd_iso_reader.sv` `S_ATTR`) and its per-track
+  language readout.
+- `subp_ctl_mem` and the reader's `P_SUBP` stream: 16 → 32 entries.
+- `sp_sel_log` and the shared `subp_ctl_mem` read: 4 → 5 bits, a 32:1 mux.
+- `fs_vm_ok`: accept SPRM2 values 16–31.
+- The B8 popup's `SUB n/N` field width.
+
+Spec-maximum rule: size to 32 unless the build shows a hard limit, and record the outcome.
+Manual: drop the 8-track limitation from `reference/compatibility.md` when it ships.
+
 ### ✅ A backward jump no longer stalls on a stale audio PTS (2026-09-30, ✅ MERGED PR #143)
 About 1 backward seek or chapter-back in 11 held the picture ~1.2 s and silenced audio ~2.5 s,
 then left audio ~1 s late until the next seek. The cause was a frame start carrying the old
