@@ -22,8 +22,8 @@ predate later confirmations; the `CLAUDE.md` index carries the reconciled status
 
 ## Hardware status (THIS fork, verified 2026-06-21)
 
-- 🔧 **CSS ENCRYPTED ON A DISC THAT DECRYPTS FINE: A RAW READ RAN INTO A VOB (issue #147,
-  2026-10-04; Main only, host-tested, ⏳ HW-confirm pending).** Full record: this entry and
+- ✅ **CSS ENCRYPTED ON A DISC THAT DECRYPTS FINE: A RAW READ RAN INTO A VOB (issue #147,
+  2026-10-04; Main only, HW-CONFIRMED against a v0.8.0 control arm, not yet merged).** Full record: this entry and
   `docs/physical_disc.md` "Title keys per VOB".
   - **Field report (v0.8.0):** "Queen - On Fire: Live at the Bowl" (PAL), RPC-II drive with
     no region. `CSS ENCRYPTED` and mute from the first menu, a clean picture, and no `key:`
@@ -53,8 +53,22 @@ predate later confirmations; the `CLAUDE.md` index carries the reconciled status
     the real read-ahead worker: IFO read, then a ring hit at 5779 with no retarget, and 0
     scrambled (7 of 8 before the fix). RED `css-raw-read-into-vob` deletes the clamp and is
     caught by [20b].
-  - **Next:** HW-confirm by flashing the patched Main on a disc whose menu VOB directly
-    follows its IFO and opens scrambled. Run the control arm on the shipped v0.8.0 Main first.
+  - **HW (2026-10-04, second rig, physical "Horrible Bosses", drive region set, v0.8.0
+    core throughout):** v0.8.0 Main: trailers → Menu → `read 44053+8` (the VTS_01 IFO,
+    a ring retarget), the menu VOB at 44094 served from the ring → **`CSS ENCRYPTED`**, no
+    `key:` line, the reporter's signature. Fixed Main, same disc and sequence: the same
+    retarget, menu plays clean, no popup; film → Menu also clean.
+  - ⚠ **Which discs can show it: it needs an ACTUAL ring retarget at the IFO.** At mount
+    the ring retargets at LBA 0 and streams linearly, so a menu entered straight from
+    first play sits on the 8+32k grid instead. Physical "BloodRayne" (VTS_01 menu at 416,
+    a 392+32 burst, 8 raw sectors) stayed below the 16-pack latch, and its Menu/Title
+    loop starts at RBN 27503, so the exposed head is never replayed after a retarget. It
+    cannot reproduce on either Main. The reproducing shape is: the core arrives from far
+    away (a film, a far title set's trailers) and the menu PGC replays from its VOB's
+    first sector. The IFO→VOB gap decides the raw span, and that gap is the same on a rip
+    and on its pressing. Absolute LBAs are not: both discs sat +7 from their rips. A
+    library scan (session scratch, not committed) found ~600 named discs with a ≥1000-
+    sector menu of that shape exposing ≥17 checkable packs.
 
 - ✅ **32 SUBTITLE TRACKS (2026-10-04, PR #152, stacked on
   PR #151; HW-CONFIRMED 2026-10-04 against a `main` control arm).** Full record:

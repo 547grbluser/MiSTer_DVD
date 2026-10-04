@@ -458,7 +458,7 @@ otherwise; `--red` runs its mutation arms).
 | Physical DVD + CSS (libdvdcss) in `MiSTer_DVDcss` | ✅ | `physical_disc.md` | `main/tests/run_tests.sh` |
 | Title key per VOB start; one key per title set; heal (issue #122) | ✅ on the rig | `physical_disc.md` | `main/tests/run_tests.sh --red` |
 | VOB table sized to the spec (issue #112) | ✅ | `physical_disc.md` | `main/tests` |
-| A raw (IFO) read stops at the next VOB start: read-ahead burst no longer hands a VOB's head out scrambled (issue #147) | 🔧 ⏳ HW-confirm pending | `status_log.md` | `main/tests/run_tests.sh --red` ([20]/[20b]) |
+| A raw (IFO) read stops at the next VOB start: read-ahead burst no longer hands a VOB's head out scrambled (issue #147) | ✅ HW (Horrible Bosses: v0.8.0 CSS ENCRYPTED, fix clean) ⏳ merge | `status_log.md` | `main/tests/run_tests.sh --red` ([20]/[20b]) |
 | Read-ahead ring; full read windows at VOB ends; eject EBUSY | ✅ ⏳ audio underrun is phase 3 | `physical_disc.md` | `main/tests` |
 | VCD/SVCD from `.bin`, and from a physical disc | ✅ | `vcd_svcd.md`, `physical_disc.md` | `run_vcd.sh`, `main/tests` |
 | WAV / CD-DA raw PCM; physical audio CD; visualizer | ✅ ⏳ next on last track | `cdda.md` | `run_wav.sh`, `cdda_toc_tb` |
