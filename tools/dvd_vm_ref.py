@@ -529,7 +529,7 @@ def subp_stream_map(logical, ctl_sel, dom_title, menu_dom, wide,
                     disp_mode=0, map_valid=True):
     """Golden model of dvd/subp_stream_map.sv: resolve a LOGICAL subpicture
     stream number to the PHYSICAL substream index the demux filters on, through
-    one word of the PGC's subp_control[16] table.
+    one word of the PGC's subp_control[32] table.
 
     `ctl_sel` is subp_control[logical] as a 32-bit int:
         [31]    available
@@ -563,7 +563,7 @@ def subp_stream_map(logical, ctl_sel, dom_title, menu_dom, wide,
     Falling back to the logical index (rather than libdvdnav's -1) keeps every
     disc that authors no usable map bit-identical to the pre-mapping core.
     """
-    logical &= 0xF
+    logical &= 0x1F          # 5 bits: all 32 logical streams (feature/subp-32; was 0xF)
     dom_ok = bool(dom_title) != bool(menu_dom)
     if not (map_valid and dom_ok and (ctl_sel >> 31) & 1):
         return logical
