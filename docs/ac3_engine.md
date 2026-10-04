@@ -19,9 +19,8 @@ net against ~1,125 spare.** ⏳ Next: the maintainer's call (§ "Open decisions"
 ✅ **Decided (maintainer, 2026-10-02): next is the AC-3 engine's RTL and a standalone
 fit (A2), before MP2.** ALMs are the binding resource, and the AC-3 engine's ALM cost
 is scenario E's least certain number; the same fit prices the hardwired
-bit-allocation op. The 2K ROM is accepted until then. Branch
-`feature/ac3-engine` (from `feature/dts-decode`, `CORE_VERSION dev-ac3engine`, not
-pushed).
+bit-allocation op. The 2K ROM is accepted until then. ✅ MERGED
+(PR #149, on PR #148).
 
 **Why.** `docs/dts_decoder.md` §4 scenario E estimates that moving MP2 and the AC-3
 parse onto the microcoded engine built for DTS (P1, `dvd/dts/`) saves **−1,000 …

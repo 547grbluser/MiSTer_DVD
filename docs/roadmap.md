@@ -462,21 +462,20 @@ finds the main feature, navigates to it, and plays from start.
 > **⚠️ PREMISE SUPERSEDED (2026-10-02): an in-fabric DTS *core* decoder is now being designed**
 > (maintainer decision), so a DTS track can play on a plain TV in `Decode PCM` mode.
 > Passthrough below is unchanged. Plan, decisions and phases: **`docs/dts_decoder.md`**
-> (🔧 2026-10-03: P2 (codebooks in DDR3) and P3 (the `T_DTS` arm) built and sim-proven on
-> `feature/ac3-engine`, after the AC-3 parse moved onto the same engine; ✅ plays on the
-> rig, *Ultimate T2*; ⏳ next: by-ear on more DTS discs, then a PR).
+> (✅ 2026-10-03: P2 (codebooks in DDR3) and P3 (the `T_DTS` arm) MERGED, PR #149, on
+> PR #148; plays on the rig, *Ultimate T2*, clean by ear; ⏳ by ear on more DTS discs).
 >
 > **The AC-3 parse on the same engine (scenario E)** is being measured first:
 > **`docs/ac3_engine.md`**. A0–A2d are done, and **W1 has wired it in:** the engine
 > is now the core's AC-3 front end, bit-identical to the decoder it replaced and ~290 ALM
-> smaller in core. DTS P2 and P3 are done on the same branch, `feature/ac3-engine`.
+> smaller in core. ✅ MERGED (PR #149).
 >
 > **MP2 on the same engine** (the rest of scenario E): **`docs/mp2_engine.md`**. M0 (the
 > gate corpus, with `mp2_ref.py` == `mp2_decode` on all 89 streams) and M1 (the program
 > and its emulator, bit-exact on all 89) are done, and so are M2 (the RTL), M3 (wired in:
 > `mp2_decode` left the build) and M4: −825 ALM by entity, and on the rig a VCD and two DVD
 > MP2 tracks correlate ≥ 0.9986 with `mp2_decode`'s, and by ear every codec is clean (the
-> maintainer, 2026-10-03). ⏳ Next: a PR when asked. Branch `feature/mp2-engine`.
+> maintainer, 2026-10-03). ✅ MERGED (PR #150).
 
 **Goal:** make DTS (and AC-3) tracks audible on an AV receiver.
 

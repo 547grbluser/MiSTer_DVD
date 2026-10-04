@@ -1,17 +1,15 @@
 # In-fabric DTS core decoder (`dvd/dts/`)
 
-**Status (2026-10-03): ✅ P2 + P3 BUILT AND PLAYING ON THE RIG** (`feature/ac3-engine`, not
-merged): *Ultimate T2*'s DTS track decodes, correlating 0.922 with the disc's AC-3 track over
-the same passage. ⏳ Open: the regression sweep's last gates, a by-ear pass on more DTS
-discs. The
+**Status (2026-10-03): ✅ P2 + P3 MERGED (PR #149; P0/P1 PR #148) AND PLAYING ON THE RIG**:
+*Ultimate T2*'s DTS track decodes, correlating 0.922 with the disc's AC-3 track over the same
+passage, and is clean by ear (the maintainer). ⏳ Open: a by-ear pass on more DTS discs. The
 codebooks ride in three FIFOs' power-up contents and are copied once to DDR3 over `ram2`
 (P2); the `T_DTS` arm sends DTS frames to the shared audio engine, which also runs AC-3
 since `docs/ac3_engine.md` W1 (P3). See "P2 + P3 result" below. Earlier status, kept:
 **✅ P1 BUILT (2026-10-02): the engine's RTL is bit-exact against the
 emulator on all 34 gate streams. Standalone fit: 2,227 ALM, 31 M10K, 1 DSP,
 35.8 MHz at the binding −40 °C corner. Worst frame 39.8 % of real time over 61,678 census
-frames. Not wired into the core.** Branch `feature/dts-decode` (`CORE_VERSION
-dev-dtsdecode`). ⏳ **Next: a maintainer decision.** The engine does not fit the core's
+frames. Not wired into the core.** (Was branch `feature/dts-decode`, now PR #148.) ⏳ **Next: a maintainer decision.** The engine does not fit the core's
 ~1,125 spare ALMs on its own (§10 "P1b result"), so the order of P2 (codebook residency),
 P3 (wiring) and the P4 reclaims comes first.
 
@@ -891,7 +889,7 @@ against `Machine.checksums` (same address order), and every PCM pair bit-exact.
   `w[511−i] = ±w[i]`, negated where bit 4 ≠ bit 5. That allows half a ROM (−1 M10K) for an
   add/subtract in the accumulator.
 
-### P2 + P3 result: DTS wired into the core (2026-10-03, branch `feature/ac3-engine`)
+### P2 + P3 result: DTS wired into the core (2026-10-03, PR #149)
 
 The AC-3 migration (`docs/ac3_engine.md` W1) made room, so P2 and P3 followed on the same
 branch. One engine now runs both programs.

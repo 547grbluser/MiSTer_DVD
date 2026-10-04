@@ -1,7 +1,6 @@
 # MP2 on the shared audio engine (the rest of scenario E)
 
-**Status (2026-10-03): ✅ M0 done (the model is the RTL's contract on all 89 gate streams); ✅ M1 done (the program and its emulator, bit-exact on all 89, every op's decomposition proved); ✅ M2 done (the RTL, bit-exact op for op and pair for pair on all 89; A/B against `mp2_decode`); ✅ M3 wired in; ✅ M4 fit (−825 ALM by entity) and HIL (the VCD and two DVD MP2 tracks play, correlation ≥ 0.9986 with `mp2_decode`'s). Not merged; branch `feature/mp2-engine`.** Branch `feature/mp2-engine` (from
-`feature/ac3-engine`, `CORE_VERSION dev-mp2engine`, not pushed).
+**Status (2026-10-03): ✅ M0 done (the model is the RTL's contract on all 89 gate streams); ✅ M1 done (the program and its emulator, bit-exact on all 89, every op's decomposition proved); ✅ M2 done (the RTL, bit-exact op for op and pair for pair on all 89; A/B against `mp2_decode`); ✅ M3 wired in; ✅ M4 fit (−825 ALM by entity) and HIL (the VCD and two DVD MP2 tracks play, correlation ≥ 0.9986 with `mp2_decode`'s). ✅ MERGED (PR #150, stacked on PR #149 and PR #148).**
 
 **Why.** The engine built for DTS already runs AC-3 (`docs/ac3_engine.md` W1) and DTS
 (`docs/dts_decoder.md` P2/P3). `dvd/mp2/mp2_decode.sv` is the last hardwired decoder:
@@ -300,5 +299,4 @@ other build's.
 
 **No issues with audio.** That is ✅ HW-CONFIRMED.
 
-**Next:** a PR when asked.
-The branch sits on `feature/ac3-engine`, which is itself unmerged.
+Merged as PR #150, stacked on PR #149 (AC-3 + DTS P2/P3) and PR #148 (DTS P0/P1).
