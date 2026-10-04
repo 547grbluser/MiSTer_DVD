@@ -2984,8 +2984,54 @@ wire        menu_sp_ctx   = menu_dom_live || sp_menu_early;
 // A MENU context (menu-domain menu, or an in-title multi-button game menu like
 // Scene It) resolves LOGICAL stream 0 -- but through the map, not as a constant.
 // DVD-FORK FIX (issues #60/#61): this used to short-circuit to physical 0.
+// ---- FORCED SUBTITLES (2026-10-03, feature/forced-subs; docs/subpicture.md) ----
+// A set-top player with subtitles OFF still decodes the title's subpicture stream
+// and shows the units marked FORCED (0x00 FSTA_DSP) -- typically one translated line
+// of foreign-language dialogue. Which stream: SPRM2's number with its display bit
+// ignored, else the FIRST stream the PGC declares -- exactly libdvdnav's
+// vm_get_subp_active_stream (it returns that stream with bit 7 = "only let Forced
+// display show", DVD_DOMAIN_VTSTitle only). SPRM2 defaults to 62 ("none") and most
+// films never SetSTN it, so the FALLBACK is the common path, not the exception --
+// it is also what makes this work with Disc Menus off (no VM, SPRM2 = 62).
+//
+// fs_route is the third way the title's subpicture stream gets routed. It is
+// defined as "none of the display-ON terms of sp_route_en", so it can never
+// change what a display-on path shows: the white-rabbit icon (vm_owns_route,
+// in_title_hli), the Scene It menus (sp_menu_early) and menu domains are all
+// excluded by construction. spu_decode.forced_only = fs_route.
+//
+// ⚠ SPEC BOUND, inherited and recorded (not widened here): the reader keeps 16
+// of the PGC's 32 subp_control entries (subp_ctl_mem) and sp_sel_log is 4 bits.
+// A forced stream numbered 16..31 is treated as undeclared and falls back to
+// the first declared stream instead of ALIASING onto 0..15 the way a [3:0]
+// truncation would. See docs/subpicture.md "Forced subtitles".
+wire [15:0] subp_declared;
+genvar sdi;
+generate for (sdi = 0; sdi < 16; sdi = sdi + 1) begin : g_subp_decl
+    assign subp_declared[sdi] = subp_ctl_mem[sdi][31];
+end endgenerate
+// the first declared logical stream (priority encoder; meaningful only when
+// subp_any_present, which fs_route requires)
+reg  [3:0]  subp_first_decl;
+always @* begin
+    subp_first_decl = 4'd0;
+    for (int fi = 15; fi >= 0; fi = fi - 1)
+        if (subp_declared[fi]) subp_first_decl = fi[3:0];
+end
+// SPRM2's stream, when it names a declared stream 0..15 (62/63 = none, 16..31 = past
+// the 16-entry bound); the VM only drives it with Disc Menus on.
+wire        fs_vm_ok  = menus_on && (vm_spstn[5:4] == 2'b00) && subp_declared[vm_spstn[3:0]];
+wire [3:0]  fs_log    = fs_vm_ok ? vm_spstn[3:0] : subp_first_decl;
+// Every display-ON term of sp_route_en below, named once so the forced route is
+// derived from what selects the display path rather than restating it.
+wire        sp_disp_on = sub_on | (menus_on && menu_active)
+                       | (menus_on && vm_owns_sp && vm_spstn[6])
+                       | in_title_hli | sp_menu_early;
+wire        fs_route  = ~sp_disp_on & pgc_ctl_valid & pgc_dom_tt & (|subp_declared);
+
 wire [3:0]  sp_sel_log    = menu_sp_ctx  ? 4'd0 :
-                            vm_owns_route ? vm_spstn[3:0] : {1'b0, sp_user_log};
+                            vm_owns_route ? vm_spstn[3:0] :
+                            fs_route      ? fs_log        : {1'b0, sp_user_log};
 wire [31:0] subp_ctl_sel  = subp_ctl_mem[sp_sel_log];                 // single 16:1 mux
 // Does the loaded PGC declare ANY subpicture stream? 16 flop reads, no mux -- this is
 // what separates "the table does not offer this stream" from "there is no table".
@@ -3061,7 +3107,7 @@ subp_stream_map u_subp_map (
 // Y=128. The text renders as one flat grey with no outline. Showing nothing is what
 // a conforming player does; showing it illegibly is our own invention.
 // Bound: 3 title PGCs in a 221-disc/22,733-PGC sweep (see subp_stream_map.sv).
-wire sp_user_absent = sp_stream_absent & ~(menu_sp_ctx | vm_owns_route | force_43_subp);
+wire sp_user_absent = sp_stream_absent & ~(menu_sp_ctx | vm_owns_route | force_43_subp | fs_route);
 
 // VM streams ALWAYS map (in-title HLI). The user path maps only under Force 4:3 Subpics
 // (a user-selected commentary track -> its letterbox physical substream, MiB logical 3 ->
@@ -3083,7 +3129,9 @@ wire sp_user_absent = sp_stream_absent & ~(menu_sp_ctx | vm_owns_route | force_4
 // left the button highlight with nothing to recolour. The map falls back to the
 // logical index whenever the table is absent, mid-parse or from the other
 // domain, so every disc that worked before is byte-identical.
-wire [4:0] sp_track_eff  = (menu_sp_ctx | vm_owns_route | force_43_subp)
+// fs_route resolves through the map like the VM path: a forced stream is a logical
+// number, and libdvdnav maps it by display mode exactly as it maps SPRM2.
+wire [4:0] sp_track_eff  = (menu_sp_ctx | vm_owns_route | force_43_subp | fs_route)
                            ? sp_phys_streamN : {2'b0, sp_user_log};
 
 // =========================================================================
@@ -5869,11 +5917,12 @@ end
 // hide the menu - Phase 3). Drives BOTH spu_decode.enable and ps_demux.sp_enable
 // (the demux gate was missed in round 1 -> no button graphics unless subtitles
 // were already on).
-assign sp_route_en = ~sp_user_absent &
-                   ( sub_on | (menus_on && menu_active)
-                   | (menus_on && vm_owns_sp && vm_spstn[6]) // Phase 4: SetSTN sp display
-                   | in_title_hli                            // in-title button (white rabbit)
-                   | sp_menu_early );                        // in-title multi-button menu (Scene It): open early
+// sp_disp_on (declared with the forced-subtitle block above) is exactly the five
+// display-ON terms this used to list inline: sub_on, a menu domain, a SetSTN
+// display-on, in_title_hli (the white rabbit) and sp_menu_early (Scene It).
+// fs_route adds the FORCED-ONLY route for the title with subtitles off -- the
+// decoder then shows only FSTA_DSP units (.forced_only below).
+assign sp_route_en = ~sp_user_absent & ( sp_disp_on | fs_route );
 wire       sp_en = sp_route_en;
 wire [1:0] sp_q_idx;
 wire       sp_q_inside;
@@ -5970,6 +6019,7 @@ spu_decode spu_decode_inst (
     .newcell_load (sp_newcell_load),
     .rst_n      (pipe_rst_n),
     .enable     (sp_en),
+    .forced_only(fs_route),               // subtitles off: show only FSTA_DSP (forced) units
     // "menu_mode" = windowless display: show the committed SPU whenever valid, ignoring
     // the STC show/hide window (the window is on the demux parse-front PTS, which leads the
     // displayed frame by the VBUF depth). Menus need this (keep_vbuf lead); Force 4:3 Subpics
