@@ -61,6 +61,13 @@ module dvd_vm (
     // language menu. Discs read these in nav commands to pick their LU /
     // auto-select streams.
     input      [15:0] cfg_lang,
+    // Player parameters a disc can read (feature/player-regs; computed by
+    // dvd/player_regs.sv in emu from the output settings and the disc's region mask;
+    // docs/dvd_vm.md "Player parameters SPRM14/15/20"). They were libdvdnav's
+    // constants 0x0100 / 0x7CFC / 0x0001 -- benches tie them to exactly those.
+    input      [15:0] cfg_sprm14,     // video preference: display aspect + 4:3 mode
+    input      [15:0] cfg_sprm15,     // audio capabilities
+    input      [15:0] cfg_sprm20,     // player region (one-hot): a region the disc allows
     input             nav_ready,      // reader: VIDEO_TS walk finished (level)
     input      [7:0]  auto_vts,       // reader: Auto title pick (largest VTS / OSD)
     input      [7:0]  best_menu_vts,  // reader: VTS with the largest menu VOB
@@ -341,7 +348,8 @@ wire [15:0] lfsr_seed = (|rnd_seed) ? rnd_seed : 16'hACE1;
 reg tick_pending;
 reg [3:0] tick_i;              // serial walk cursor (area pass 2026-09-10)
 
-// SPRM read mux (eval_reg, system half). Constants per libdvdnav vm_reset.
+// SPRM read mux (eval_reg, system half). 12 is libdvdnav's vm_reset constant; 14, 15
+// and 20 are the player_regs inputs (they were constants too -- see the ports).
 function [15:0] sprm_read(input [4:0] r);
     case (r)
     5'd0:  sprm_read = cfg_lang;   // player menu language (OSD "Player Language")
@@ -357,11 +365,11 @@ function [15:0] sprm_read(input [4:0] r);
     5'd10: sprm_read = sprm10;
     5'd12: sprm_read = 16'h5553;   // 'US' parental country
     5'd13: sprm_read = sprm13;
-    5'd14: sprm_read = 16'h0100;   // try pan&scan
-    5'd15: sprm_read = 16'h7CFC;   // audio caps
+    5'd14: sprm_read = cfg_sprm14; // video preference (player_regs)
+    5'd15: sprm_read = cfg_sprm15; // audio capabilities (player_regs)
     5'd16: sprm_read = cfg_lang;   // audio language preference (same OSD setting)
     5'd18: sprm_read = cfg_lang;   // subpicture language preference (same setting)
-    5'd20: sprm_read = 16'h0001;   // region mask (region free)
+    5'd20: sprm_read = cfg_sprm20; // player region: the disc's first allowed (player_regs)
     default: sprm_read = 16'd0;
     endcase
 endfunction

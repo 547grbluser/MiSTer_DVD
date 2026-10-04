@@ -454,6 +454,13 @@ module dvd_iso_reader #(
     // subp_control lookup (issue #81) -- the display aspect keeps the proven
     // sequence-header path.
     output reg        title_ar_wide,
+    // The disc's PROHIBITED-region mask: VMGI vmg_category byte 0x23, bit n set =
+    // region n+1 prohibited (feature/player-regs). Captured on the first VMGI jump
+    // (First Play or VMGM), BEFORE that PGC's commands run, so a disc's own region
+    // check reads a region it allows (emu: dvd/player_regs.sv -> dvd_vm SPRM20).
+    // 0 = every region allowed (reads region 1, the old constant) -- the value at
+    // reset and at every mount, so a previous disc's mask can never leak.
+    output reg [7:0]  vmg_rmask,
 
     // hps_io sd_* interface (directly connected)
     output reg [31:0] sd_lba,
@@ -1494,11 +1501,13 @@ localparam S_NAV_VOB      = 6'd62;   // NAV pack found: check its vobu_vob_idn
 // S_WAV_HDR took 6'd59 before the rebase; the angle work (PR #101) had claimed
 // 59/60/62 meanwhile, so it moves to the one code still free in the 6-bit space.
 localparam S_WAV_HDR      = 6'd63;   // RIFF/WAVE chunk walk (fmt/data) over sector 0
+localparam S_VMG_CAT      = 6'd14;   // capture VMGI vmg_category (region mask, byte 0x23)
 
 reg [5:0]  state;
 reg [5:0]  fetch_ret;   // state to enter after S_FETCH
 reg [5:0]  lat_ret;     // state to enter after the S_LAT one-cycle wait
 reg [10:0] fetch_base;  // parse_buf offset the shadow starts at
+reg [10:0] vmgcat_base; // the fetch S_VMG_CAT resumes after the region-mask capture (132 FP / 200 VMGM)
 reg [5:0]  fi;          // fetch byte counter
 reg        fi_cap_v;
 reg [5:0]  fi_cap;
@@ -2488,6 +2497,8 @@ always @(posedge clk or negedge rst_n) begin
         menu_ar_wide <= 1'b0;             // default 4:3 until a menu V_ATR is read
         menu_ar_df   <= 2'd0;             // both permitted = no override
         title_ar_wide<= 1'b0;             // default 4:3 until a title V_ATR is read
+        vmg_rmask    <= 8'h00;            // every region allowed (region 1) until read
+        vmgcat_base  <= 11'd0;
         attr_vatr    <= 1'b0;
         use_jcell    <= 1'b0;
         want_pgcn    <= 16'd1;
@@ -2906,6 +2917,7 @@ always @(posedge clk or negedge rst_n) begin
         if (start) begin
             state      <= S_INIT;
             tm_v       <= 1'b0;            // a new disc: no cached time map
+            vmg_rmask  <= 8'h00;           // a new disc: its region mask is read afresh
             sd_rd      <= 1'b0;
             blk_inflight <= 1'b0;
             wr_ptr     <= 0;
@@ -3007,8 +3019,11 @@ always @(posedge clk or negedge rst_n) begin
                 if (vmgi_found) begin
                     sec_base <= vmgi_lba;
                     sec_off  <= 32'd0;
-                    fetch_base <= 11'd132;
-                    fetch_ret  <= S_JMP_VMGI;
+                    // Capture the region mask first (S_VMG_CAT, from the same
+                    // resident sector), then the @132 FP pointer as before.
+                    fetch_base  <= 11'd32;
+                    vmgcat_base <= 11'd132;
+                    fetch_ret   <= S_VMG_CAT;
                     state      <= S_SECREAD;
                 end else begin
                     pgc_error  <= 1'b1;
@@ -3033,8 +3048,12 @@ always @(posedge clk or negedge rst_n) begin
                     use_jcell     <= (jcell_l != 8'd0);   // breadcrumb return cell
                     sec_base <= vmgi_lba;
                     sec_off  <= 32'd0;
-                    fetch_base <= 11'd200;
-                    fetch_ret  <= S_JMP_VMGI;
+                    // Region mask first (S_VMG_CAT), then the @200 PGCI_UT pointer:
+                    // a disc whose boot reaches the VMGM without a First Play PGC
+                    // still gets its mask before any menu command runs.
+                    fetch_base  <= 11'd32;
+                    vmgcat_base <= 11'd200;
+                    fetch_ret   <= S_VMG_CAT;
                     state      <= S_SECREAD;
                 end else begin
                     pgc_error  <= 1'b1;
@@ -5638,6 +5657,18 @@ always @(posedge clk or negedge rst_n) begin
                     fi_cap_v   <= 1'b0;
                     state      <= S_FETCH;             // parse_buf still holds VTSI_MAT
                 end
+            end
+
+            // Region-mask capture (feature/player-regs): rbuf holds VMGI bytes
+            // 32..76, so rbuf[3] is vmg_category byte 0x23. Then re-arm the
+            // original @132 / @200 fetch from the SAME resident sector (no new read).
+            S_VMG_CAT: begin
+                vmg_rmask  <= rbuf[3];
+                fetch_base <= vmgcat_base;
+                fetch_ret  <= S_JMP_VMGI;
+                fi         <= 6'd0;
+                fi_cap_v   <= 1'b0;
+                state      <= S_FETCH;
             end
 
             // Menu aspect capture: rbuf[0] = V_ATR@0x100 high byte. The display

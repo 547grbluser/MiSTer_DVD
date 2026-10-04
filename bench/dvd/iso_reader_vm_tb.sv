@@ -134,6 +134,7 @@ module iso_reader_vm_tb;
     // the POST-entered menu has no RSM to resume from (JumpSS saves none).
     reg  [63:0] btn_cmd = 64'd0;
     reg         btn_cmd_valid = 0;
+    wire [7:0]  vmg_rmask_w;     // reader -> player_regs (feature/player-regs)
 
     dvd_iso_reader #(.DRAIN_WD(31'd20000)) dut (
         // new reader inputs tied off: a floating input is X, and X on
@@ -171,10 +172,26 @@ module iso_reader_vm_tb;
         .stream_data(stream_data), .stream_valid(stream_valid), .busy(busy),
         .pal_we(), .pal_waddr(), .pal_wdata(),
         .debug_active(),   
-         .debug_iso_mode() 
+         .debug_iso_mode(),
+        .vmg_rmask(vmg_rmask_w)
     );
 
+    wire [15:0] pr_sprm14, pr_sprm15, pr_sprm20;
+    player_regs pr (.rmask(vmg_rmask_w), .aa_live(1'b0), .aa_sel(2'd0),
+                    .pass_mode(1'b0), .dts_ok(1'b1),
+                    .sprm14(pr_sprm14), .sprm15(pr_sprm15), .sprm20(pr_sprm20),
+                    .rmask_all_prohibited());
+    // the mask the reader holds when the FIRST PGC of a mount (First Play) loads:
+    // it must already be the disc's, because that PGC's PRE runs next
+    reg        rm_seen = 1'b0;
+    reg [7:0]  rm_at_fp = 8'hxx;
+    always @(posedge clk) if (pgc_loaded && !rm_seen) begin rm_seen <= 1'b1; rm_at_fp <= vmg_rmask_w; end
+
     dvd_vm vm (
+        // player parameters: the pre-player_regs constants (feature/player-regs)
+        // player parameters through player_regs, as emu wires them: the reader's
+        // VMGI region mask -> SPRM20 (feature/player-regs, T1/T10)
+        .cfg_sprm14(pr_sprm14), .cfg_sprm15(pr_sprm15), .cfg_sprm20(pr_sprm20),
         // new VM ports tied off (a floating input is X).
         .agl_set(1'b0), .agl_set_val(4'd1),
         .clk(clk), .rst_n(rst_n), .enable(1'b1), .start(start), .cfg_lang(16'h656E),
@@ -407,12 +424,15 @@ module iso_reader_vm_tb;
             be32(19*2048+132, 32'd400);
             be32(19*2048+196, 32'd1);
             be32(19*2048+200, 32'd2);
-            // FP PGC: 0 cells; pre = {g14 = 0x35, JumpTT 1}
+            // vmg_category byte 0x23 = the PROHIBITED-region mask: region 3 only
+            // (feature/player-regs, T1/T10) -> SPRM20 must read 0x0004
+            img[19*2048+35] = 8'hFB;
+            // FP PGC: 0 cells; pre = {g13 = SPRM20, g14 = 0x35, JumpTT 1}
             put_pgc(19*2048+400, 8'd0, 8'd0, 16'd0, 8'd0, 16'd236, 16'd0, 16'd0);
-            put_cmdtbl(19*2048+400, 16'd236, 2, 0, 0,
+            put_cmdtbl(19*2048+400, 16'd236, 3, 0, 0,
+                       64'h6100000D00940000,      // g[13] = SPRM20 (the region check's read)
                        64'h7100000E00350000,      // g[14] = 0x35
-                       64'h3002000000010000,      // JumpTT 1
-                       64'd0);
+                       64'h3002000000010000);     // JumpTT 1
 
             // TT_SRPT @20: 1 title -> VTS_01, vts_ttn 1
             be16(20*2048+0, 16'd1);
@@ -563,6 +583,8 @@ module iso_reader_vm_tb;
         if (cap[0]    !== 8'hB0) fail("T1: first title byte != B0");
         if (cap[4096] !== 8'hB1) fail("T1: second title cell != B1");
         if (vm.gprm[14] !== 16'h0035) fail("T1: FP pre g14 != 0x35");
+        if (rm_at_fp !== 8'hFB) begin fail("T1: vmg_rmask at the FP pgc_loaded != the disc's 0xFB"); $display("  rm_at_fp=%02x", rm_at_fp); end
+        if (vm.gprm[13] !== 16'h0004) begin fail("T1: FP pre read SPRM20 != 0x0004 (region 3)"); $display("  g13=%04x", vm.gprm[13]); end
         if (vm.sprm4 !== 16'd1) fail("T1: SPRM4 (TTN) != 1");
         if (vm.sprm5 !== 16'd1) fail("T1: SPRM5 (VTS_TTN) != 1");
         if (menu_active) fail("T1: menu_active during the title");
@@ -783,6 +805,27 @@ module iso_reader_vm_tb;
             if (bts < 4096) fail("T9: PGC2 cell 1 + PGC1 replay bytes missing");
         end
         $display("T9 Phase B: cell-cmd jump gated on vbuf_empty, timers frozen, button immediate  PASS (cap=%0d)", cap_n);
+
+        // ---------------- T10: remount -> the mask is the NEW disc's -------
+        // feature/player-regs. The previous disc's 0xFB must be gone the cycle
+        // after start (never leak into the next disc's region check), and the
+        // new image's mask (0x00 = every region) read before its First Play.
+        img[19*2048+35] = 8'h00;
+        rm_seen = 1'b0;
+        @(negedge clk); start = 1;
+        @(negedge clk); start = 0;
+        @(negedge clk);
+        if (vmg_rmask_w !== 8'h00) begin fail("T10: vmg_rmask not cleared by the remount"); $display("  vmg_rmask=%02x", vmg_rmask_w); end
+        begin : t10_wait integer t;
+            t = 0;
+            while (!rm_seen && t < 4000000) begin @(posedge clk); t = t + 1; end
+            if (!rm_seen) fail("T10: no pgc_loaded after the remount");
+            t = 0;
+            while (vm.gprm[14] !== 16'h0035 && t < 400000) begin @(posedge clk); t = t + 1; end
+        end
+        if (rm_at_fp !== 8'h00) begin fail("T10: vmg_rmask at the remount's FP != 0x00"); $display("  rm_at_fp=%02x", rm_at_fp); end
+        if (vm.gprm[13] !== 16'h0001) begin fail("T10: remount FP pre read SPRM20 != 0x0001"); $display("  g13=%04x", vm.gprm[13]); end
+        $display("T10 remount: region mask cleared, new disc's read before First Play  PASS");
 
         if (errors == 0) $display("ISO_READER_VM_TB: ALL TESTS PASSED");
         else             $display("ISO_READER_VM_TB: FAILED with %0d errors", errors);

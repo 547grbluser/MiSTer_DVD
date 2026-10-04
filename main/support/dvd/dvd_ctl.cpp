@@ -156,7 +156,9 @@ static void telem_read()
 		// flags[6]/[7]; both 0 on a core without the feature, or before one).
 		// flags.bob = the display scan under way uses the progressive bob kernel
 		// (docs/field_blend.md "Bob"; word 14 bit 8, 0 on a core without it).
-		"\"still\":%u,\"menu\":%u,\"blend\":%u,\"tmap\":%u,\"tmap_fb\":%u,\"bob\":%u}}\n",
+		// flags.rgn_allp = the disc's VMGI prohibits EVERY region, so SPRM20 fell
+		// back to region 1 (docs/dvd_vm.md "Player parameters"; word 14 bit 9).
+		"\"still\":%u,\"menu\":%u,\"blend\":%u,\"tmap\":%u,\"tmap_fb\":%u,\"bob\":%u,\"rgn_allp\":%u}}\n",
 		t, duty, w[1], w[2], w[3], w[4],
 		(int)(int16_t)w[5],                       // vid_err is SIGNED
 		(int)((w[6] >> 11) & 0x1F) - (((w[6] >> 15) & 1) ? 32 : 0),
@@ -173,7 +175,7 @@ static void telem_read()
 		(unsigned)((w[7] >> 2) & 1), (unsigned)((w[7] >> 3) & 1),
 		(unsigned)((w[7] >> 4) & 1), (unsigned)((w[7] >> 5) & 1),
 		(unsigned)((w[7] >> 6) & 1), (unsigned)((w[7] >> 7) & 1),
-		(unsigned)((w[14] >> 8) & 1));
+		(unsigned)((w[14] >> 8) & 1), (unsigned)((w[14] >> 9) & 1));
 	if (len <= 0 || len >= (int)sizeof(line)) return;
 
 	// Write via a temp file and rename, so a reader never sees a half-written

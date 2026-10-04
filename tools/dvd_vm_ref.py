@@ -62,6 +62,42 @@ class Regs(object):
         self.sprm[18] = (ord('e') << 8) | ord('n')
         self.sprm[20] = 1
 
+    def set_player(self, s14, s15, s20):
+        """The player parameters dvd/player_regs.sv computes (feature/player-regs).
+        The defaults above are the pre-player_regs constants, kept because the
+        dvd_vm_tb golden fixtures were captured with them."""
+        self.sprm[14], self.sprm[15], self.sprm[20] = s14, s15, s20
+
+
+# =============================================================================
+# Player parameters -- mirrors dvd/player_regs.sv (docs/dvd_vm.md "Player
+# parameters SPRM14/15/20"). A profile names the output setup.
+# =============================================================================
+PLAYER_PROFILES = {          # name: (aa_live, aa_sel)  aa_sel 0 Auto 1 Fit 2 LB 3 Crop
+    'hdmi':        (0, 0),
+    'analog-auto': (1, 0),
+    'analog-fit':  (1, 1),
+    'analog-lb':   (1, 2),
+    'analog-crop': (1, 3),
+}
+
+
+def player_regs(rmask, aa_live, aa_sel, pass_mode=0, dts_ok=1):
+    """(sprm14, sprm15, sprm20, all_prohibited), exactly as player_regs.sv."""
+    s20 = 1
+    for r in range(8):
+        if not (rmask >> r) & 1:
+            s20 = 1 << r
+            break
+    if not aa_live or aa_sel == 1:
+        s14 = 0x0C00                 # 16:9 TV, wide
+    elif aa_sel == 3:
+        s14 = 0x0100                 # 4:3 TV, pan&scan
+    else:
+        s14 = 0x0200                 # 4:3 TV, letterbox
+    s15 = 0x5000 | (0x0800 if (pass_mode or dts_ok) else 0)
+    return s14, s15, s20, rmask == 0xFF
+
     def tick(self):
         """One elapsed second: counter-mode GPRMs +1 (16-bit wrap). Mirrors the
         RTL's idle-gated sec_tick (dvd_vm.sv) and libdvdnav's wall-clock GPRM
@@ -393,11 +429,14 @@ class IsoNav(object):
                                  key=lambda kv: kv[1][1])[0] if self.menu_vob else 0
         # TT_SRPT
         self.tt = {}
+        self.vmg_rmask = 0
         if self.vmgi_lba is not None:
             mat = self.sec(self.vmgi_lba)
             tsp = struct.unpack('>I', mat[196:200])[0]
             self.fp_off = struct.unpack('>I', mat[132:136])[0]
             self.vmgm_ut = struct.unpack('>I', mat[200:204])[0]
+            # vmg_category byte 0x23: the PROHIBITED-region mask (bit n = region n+1)
+            self.vmg_rmask = mat[0x23]
             if 0 < tsp <= 0xFFFFF:
                 tt = self.sec(self.vmgi_lba + tsp)
                 for i in range(min(struct.unpack('>H', tt[0:2])[0], 99)):
@@ -1167,8 +1206,26 @@ def main():
     if mode == "selftest":
         ok = selftest(emit="--emit" in sys.argv)
         sys.exit(0 if ok else 1)
+    # --player PROFILE: SPRM14/15/20 as player_regs computes them for that output
+    # setup (SPRM20 from the disc's region mask); --rmask HEX overrides the disc's
+    # mask (a synthetic region test). Without --player: the old constants.
+    player = rmask = None
+    argv = []
+    it = iter(sys.argv)
+    for a in it:
+        if a == '--player': player = next(it)
+        elif a == '--rmask': rmask = int(next(it), 16)
+        else: argv.append(a)
+    sys.argv[:] = argv
     nav = IsoNav(sys.argv[2])
     vm = VM(nav)
+    if player is not None or rmask is not None:
+        live, sel = PLAYER_PROFILES[player or 'hdmi']
+        m = nav.vmg_rmask if rmask is None else rmask
+        s14, s15, s20, allp = player_regs(m, live, sel)
+        vm.regs.set_player(s14, s15, s20)
+        vm.log("player %s: rmask=%02x -> SPRM14=%04x SPRM15=%04x SPRM20=%04x%s"
+               % (player or 'hdmi', m, s14, s15, s20, " (ALL PROHIBITED)" if allp else ""))
     if mode == "boot":
         vm.boot()
     elif mode == "runboot":
