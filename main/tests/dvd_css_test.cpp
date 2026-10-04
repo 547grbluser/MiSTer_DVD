@@ -768,6 +768,66 @@ int main(void)
     check("[19] orphan parts counted", g_orphan_parts, 1);
     check("[19] the orphan keys at its own start", (long)g_vobs[vob_index(6000u)].key, 6000);
 
+    // [20] ISSUE #147, "Queen - On Fire: Live at the Bowl", its real VTS_01 layout:
+    //      the IFO is 5728..5778 and VTS_01_0.VOB opens at 5779 with a NAV pack and
+    //      then scrambled packs. A read that STARTS in the IFO was read whole and raw
+    //      -- only a read starting inside a VOB was clamped at an edge -- so it
+    //      carried the VOB's head out undecrypted and unscanned. The core never asks
+    //      for such a window; the read-ahead does: after the core reads 5728+8 it runs
+    //      on 5736+32, 5768+32, and 5768..5799 holds 20 scrambled packs, past
+    //      css_detect's 16-pack latch. CSS ENCRYPTED and mute, from the first menu.
+    printf("[20] a read that starts in the IFO and runs into the VOB\n");
+    model_setup();
+    dir_add("VTS_01_0.IFO;1", 5728u, 51u * 2048u, 0);
+    vob("VTS_01_0.VOB;1", 5779u, 184344u);
+    vob("VTS_01_1.VOB;1", 190123u, 524276u);
+    add_scr(5780u, 5779u + 184344u, 7, 0);
+    add_scr(190124u, 190123u + 524276u, 7, 0);
+    model_mount();
+    nreadcalls = 0; bad_n = noise_n = 0;
+    {
+        static uint8_t burst[32 * 2048];
+        check("[20] sectors returned for the 5768+32 burst", dvd_css_read(burst, 5768u, 32), 32);
+        score(burst, 32);
+        int misplaced = 0;
+        for (int i = 0; i < 32; i++) if (get_lba(burst + i * 2048) != 5768u + (uint32_t)i) misplaced++;
+        check("[20] sectors carrying another LBA", misplaced, 0);
+    }
+    check("[20] sectors reaching the core scrambled", bad_n, 0);
+    check("[20] sectors decrypted with a wrong key", noise_n, 0);
+    // CONTROL against "decrypt everything": the IFO's 11 sectors are still raw.
+    check("[20] first libdvdcss read stops at the VOB start", readcall_count[0], 11);
+    check("[20] raw reads (the IFO tail only)", reads_raw, 1);
+    check("[20] SEEK_KEY calls at the VOB's key block", key_seeks_at(5779u), 1);
+    check("[20] title keys cracked by the burst", key_acquisitions, 0);
+
+    // [20b] The field path end to end: the read-ahead's own burst sizes, from the
+    //       core's IFO read to its first window of the menu VOB, served from the ring.
+    printf("[20b] the same edge through the read-ahead ring\n");
+    model_setup();
+    dir_add("VTS_01_0.IFO;1", 5728u, 51u * 2048u, 0);
+    vob("VTS_01_0.VOB;1", 5779u, 184344u);
+    add_scr(5780u, 5779u + 184344u, 7, 0);
+    model_mount();
+    bad_n = noise_n = 0;
+    {
+        static uint8_t w[8 * 2048];
+        int hits = 0;
+        check("[20b] read-ahead started", dvd_ra_start(css_src_read, 5779u + 64u), 0);
+        for (int t = 0; t < 2000 && !dvd_ra_ready(5728u, 8); t++) usleep(1000);
+        if (dvd_ra_read(w, 5728u, 8) == 8) hits++;          // the core reads the IFO
+        for (int t = 0; t < 2000 && !dvd_ra_ready(5779u, 8); t++) usleep(1000);
+        if (dvd_ra_read(w, 5779u, 8) == 8) { hits++; score(w, 8); }   // ...then plays the VOB
+        // A hit at 5779 without a retarget is the field condition: the window came
+        // from a burst that began in the IFO, not from a read at the VOB start.
+        uint32_t g = gen;
+        dvd_ra_stop();                                       // the worker owns the fake until joined
+        check("[20b] windows served from the ring", hits, 2);
+        check("[20b] the VOB window was not a retarget", (long)g, 1);
+    }
+    check("[20b] sectors reaching the core scrambled", bad_n, 0);
+    check("[20b] sectors decrypted with a wrong key", noise_n, 0);
+
     printf("\ndvd_css_test: %s (%d error%s)\n", errs ? "FAIL" : "PASS", errs, errs == 1 ? "" : "s");
     return errs ? 1 : 0;
 }

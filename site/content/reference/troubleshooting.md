@@ -102,7 +102,11 @@ itself. Once the warning appears it stays until the disc is reloaded.
     produce. Later builds require sustained evidence instead, so an isolated glitch no
     longer trips it.
 
-    If you see it on v0.5.0 or later, please
+    The custom Main in **v0.8.0** could also do this on some physical discs, from the
+    first menu onwards. Its read-ahead passed the first few sectors of a menu to the
+    core without decrypting them. Later releases fix this.
+
+    If you see it on v0.5.0 or later in any other case, please
     [send a report](reporting-a-bug.md) — it means something is still wrong.
 
 ### The core loads but a physical disc does nothing

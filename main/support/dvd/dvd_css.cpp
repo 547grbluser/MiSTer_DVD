@@ -561,6 +561,17 @@ static int vob_index(uint32_t lba)
 	return -1;
 }
 
+// Start of the first VOB extent above `lba` (UINT32_MAX if none), the edge a raw
+// read of filesystem/IFO sectors must stop at. g_vobs is in DIRECTORY order, not
+// LBA order, so this is a minimum over the table, not "the next entry".
+static uint32_t next_vob_start(uint32_t lba)
+{
+	uint32_t s = UINT32_MAX;
+	for (int i = 0; i < g_nvobs; i++)
+		if (g_vobs[i].start > lba && g_vobs[i].start < s) s = g_vobs[i].start;
+	return s;
+}
+
 // Enumerate every VOB extent from ISO9660 (root -> VIDEO_TS). Raw reads only, no keys.
 // Returns 1 if at least one VOB was found.
 static int enumerate_vobs(void)
@@ -1175,7 +1186,8 @@ static int heal_key(int vi, uint32_t at)
 
 // One libdvdcss read that stays inside ONE key domain (a single VOB, or the
 // non-VOB sectors between them). It may return fewer than `count` -- it clamps at
-// a VOB end -- and dvd_css_read() below is what turns that into a full window.
+// a VOB's end, and a non-VOB read at the next VOB's start -- and css_src_read()
+// below is what turns that into a full window.
 static int css_read_chunk(void *buf, uint32_t lba, uint32_t count)
 {
 
@@ -1245,6 +1257,18 @@ static int css_read_chunk(void *buf, uint32_t lba, uint32_t count)
 	else
 	{
 		// Filesystem/IFO sector: raw positioning, NEVER decrypt (would corrupt it).
+		//
+		// ★ And stop at the next VOB (issue #147). The VOB branch above clamps at a
+		// VOB's END; this one must clamp at the next VOB's START, or a read that
+		// begins in an IFO carries the VOB's head out raw -- undecrypted, and never
+		// scanned by first_scrambled() (vi < 0). The core never asks for such a
+		// window, but the read-ahead does: after the core's IFO read it runs on in
+		// 32-sector bursts, and on "Queen - On Fire" the burst at 5768 covered
+		// 5779..5799 of VTS_01_0.VOB -- 20 scrambled packs in the ring, served to the
+		// core as a hit, past css_detect's 16-pack latch: CSS ENCRYPTED and mute,
+		// from the first menu, on a disc that decrypts fine.
+		uint32_t next_vob = next_vob_start(lba);
+		if (lba + count > next_vob) count = next_vob - lba;
 		if ((int)lba != css_pos)
 		{
 			if (p_seek(css, (int)lba, DVDCSS_NOFLAGS) < 0)
@@ -1317,7 +1341,8 @@ static long ms_since(const struct timespec *t0)
 // So a short return does not mean "the rest is unread" to Main -- it means the
 // tail of buffer[disk] still holds the PREVIOUS window's sectors, which are then
 // handed to the core as if they were these. css_read_chunk() returns short at
-// every VOB end (one read must not span two title keys), and a DVD's VOB parts
+// every VOB edge (one read must not span two title keys, nor raw sectors and
+// scrambled ones -- issue #147), and a DVD's VOB parts
 // are 524287 sectors -- odd -- so an 8-sector window almost never lines up with
 // one: every linear crossing of a 1 GB VTS_xx_N.VOB boundary used to feed the
 // decoder up to 7 stale sectors. So: keep reading, one key domain at a time, and

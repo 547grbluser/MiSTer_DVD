@@ -82,8 +82,13 @@ while the core is open plays it (`dvd_phys` polls for media change).
   deferred popup asks the user to run `install_dvdcss.sh` (immediate reads would black-screen
   on many drives). The fabric core's own `pes_scrambled` → `CSS ENCRYPTED` + mute is the
   backstop.
-- **Title keys per VOB** at each VOB start sector (libdvdread's pattern), lazily so the
-  mount does not freeze; filesystem/IFO sectors read NOFLAGS (raw), VOB payload DECRYPT.
+- **One title key per title-set domain**, taken at its key block (`VTS_nn_0`'s start for
+  the menu, `VTS_nn_1`'s for every title part; issue #122), libdvdread's pattern; filesystem/IFO sectors read NOFLAGS (raw), VOB payload DECRYPT.
+  A raw read stops at the next VOB's start, as a VOB read stops at its end (issue #147):
+  the read-ahead's 32-sector bursts start wherever the core's last read left off, so one
+  that began in an IFO used to carry the following VOB's head out undecrypted.
+  A burst that hits the edge now shows `2 chunks` in a `slow read` line of
+  `/tmp/dvdcss.log`.
 
 ## Relationship to MiSTer Physical Disc (Anime0t4ku)
 

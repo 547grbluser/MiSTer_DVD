@@ -287,6 +287,17 @@ if [ "$RED" -eq 1 ]; then
         "s/return scr > 0 \&\& sc >= HEAL_MIN_SC;/return 1;/" \
         css-heal-unverified
 
+    # ---- dvd_css: a raw read stops at the next VOB (issue #147) -----------------
+    # The shipped behaviour: a read that starts in an IFO is read whole and raw, so
+    # the read-ahead's burst carries the VOB's first packs to the core scrambled.
+    # Expect string names [20b], the ring arm, so the field path itself must catch it
+    # ([20] fails as well; a mutant caught only by the direct arm would leave [20b]
+    # decorative).
+    red_case dvd_css.cpp dvd_css_test.cpp \
+        "FAIL \[20b\] sectors reaching the core scrambled" \
+        "/if (lba + count > next_vob) count = next_vob - lba;/d" \
+        css-raw-read-into-vob
+
     # ---- dvd_css: every window comes back full --------------------------------
     # The shipped behaviour: stop at the VOB clamp and return short. Main then caches
     # the whole window, so its tail serves the PREVIOUS window's sectors -- up to 7

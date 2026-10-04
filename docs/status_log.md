@@ -22,6 +22,54 @@ predate later confirmations; the `CLAUDE.md` index carries the reconciled status
 
 ## Hardware status (THIS fork, verified 2026-06-21)
 
+- ✅ **CSS ENCRYPTED ON A DISC THAT DECRYPTS FINE: A RAW READ RAN INTO A VOB (issue #147,
+  2026-10-04; Main only, HW-CONFIRMED against a v0.8.0 control arm, MERGED PR #153).** Full record: this entry and
+  `docs/physical_disc.md` "Title keys per VOB".
+  - **Field report (v0.8.0):** "Queen - On Fire: Live at the Bowl" (PAL), RPC-II drive with
+    no region. `CSS ENCRYPTED` and mute from the first menu, a clean picture, and no `key:`
+    line in `/tmp/dvdcss.log`. v0.7.0 played it. The reporter's analysis (LLM-assisted,
+    unbuilt) was checked line by line against the source and held.
+  - **Cause:** `css_read_chunk()` clamped a read at a VOB's END but not a non-VOB read at
+    the next VOB's START. A read that began in an IFO was read whole with `NOFLAGS`, and
+    `first_scrambled()` never saw it (`vi < 0`). Before v0.8.0 only the core's 8-sector
+    windows reached it, and they do not straddle. The read-ahead (first shipped in v0.8.0,
+    `1a0c2f7`) runs on past the core's IFO read in 32-sector bursts, so on this disc
+    5728+8 → 5736+32 → **5768+32** covered `VTS_01_0.VOB` 5779..5799: a NAV pack plus 20
+    scrambled packs in the ring, served as a hit when the menu played from its start.
+    `css_detect` latches at 16 and stays latched for the mount. The same log shows
+    264+32 crossing into `VIDEO_TS.VOB` at 294. Condition: `(VOB start − (IFO read + 8))
+    % 32 ≠ 0`, a VOB that opens scrambled, and the VOB played from its start while the
+    burst is still in the ring. It does not depend on region or key.
+  - **Fix:** the non-VOB branch clamps at `next_vob_start(lba)`, which is the minimum over
+    `g_vobs` because that table is in directory order. `css_src_read()` already loops over
+    short chunks, so the next one lands on the VOB start, takes the cached SEEK_KEY at the
+    key block and is scanned. This also closes the same hole on the synchronous path. A
+    core window straddling an IFO→VOB edge could hit it there too, but rarely.
+    A burst that crosses the edge now reports `2 chunks` in a `slow read` line of
+    `/tmp/dvdcss.log`, so a user's log shows the clamp firing.
+  - **Gate:** `main/tests/run_tests.sh --red`. `dvd_css_test` [20] uses the disc's real
+    layout: the 5768+32 burst carries 0 scrambled sectors (20 before the fix), the raw
+    read stops at 11, and there is one SEEK_KEY at 5779. [20b] runs the same edge through
+    the real read-ahead worker: IFO read, then a ring hit at 5779 with no retarget, and 0
+    scrambled (7 of 8 before the fix). RED `css-raw-read-into-vob` deletes the clamp and is
+    caught by [20b].
+  - **HW (2026-10-04, second rig, physical "Horrible Bosses", drive region set, v0.8.0
+    core throughout):** v0.8.0 Main: trailers → Menu → `read 44053+8` (the VTS_01 IFO,
+    a ring retarget), the menu VOB at 44094 served from the ring → **`CSS ENCRYPTED`**, no
+    `key:` line, the reporter's signature. Fixed Main, same disc and sequence: the same
+    retarget, menu plays clean, no popup; film → Menu also clean.
+  - ⚠ **Which discs can show it: it needs an ACTUAL ring retarget at the IFO.** At mount
+    the ring retargets at LBA 0 and streams linearly, so a menu entered straight from
+    first play sits on the 8+32k grid instead. Physical "BloodRayne" (VTS_01 menu at 416,
+    a 392+32 burst, 8 raw sectors) stayed below the 16-pack latch, and its Menu/Title
+    loop starts at RBN 27503, so the exposed head is never replayed after a retarget. It
+    cannot reproduce on either Main. The reproducing shape is: the core arrives from far
+    away (a film, a far title set's trailers) and the menu PGC replays from its VOB's
+    first sector. The IFO→VOB gap decides the raw span, and that gap is the same on a rip
+    and on its pressing. Absolute LBAs are not: both discs sat +7 from their rips. A
+    library scan (session scratch, not committed) found ~600 named discs with a ≥1000-
+    sector menu of that shape exposing ≥17 checkable packs.
+
 - ✅ **32 SUBTITLE TRACKS (2026-10-04, PR #152, stacked on
   PR #151; HW-CONFIRMED 2026-10-04 against a `main` control arm).** Full record:
   `docs/track_selection.md` "32 subtitle tracks".
