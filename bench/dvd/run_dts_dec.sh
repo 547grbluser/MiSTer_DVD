@@ -73,7 +73,7 @@ PYEOF
     rm -rf "$d"
   }
   D=dvd/dvd_audio_decode.sv; E=dvd/audio_engine.sv
-  mut D1 "+stem=$ROOT/$GEN/t2" $D ".quant    ((cdda_mode || dts_active) ? 2'd0 : lpcm_quant)," ".quant    (cdda_mode ? 2'd0 : lpcm_quant)," "\[(pcm|count|hang)\]" &
+  mut D1 "+stem=$ROOT/$GEN/t2" $D ".quant    ((cdda_mode || eng_pcm) ? 2'd0 : lpcm_quant)," ".quant    (cdda_mode ? 2'd0 : lpcm_quant)," "\[(pcm|count|hang)\]" &
   mut D2 "+stem=$ROOT/$GEN/t2" $D "(ser_k == 2'd0) ? ser_pair[31:24] : (ser_k == 2'd1) ? ser_pair[23:16]" "(ser_k == 2'd0) ? ser_pair[23:16] : (ser_k == 2'd1) ? ser_pair[31:24]" "\[pcm\]" &
   mut D3 "+stem=$ROOT/$GEN/t2 +notables" $D "wire         dts_ok_frame = (cur_type == T_DTS) && dts_tables_ok;" "wire         dts_ok_frame = (cur_type == T_DTS);" "\[off\]" &
   wait
@@ -88,7 +88,7 @@ PYEOF
   #   -- which itself waits for pcm_out's drain. So the engine is already idle at FRAME.
   # The [ac3] arm (every AC-3 block decoded across the change) scores the consequence.
   mut D5 "+stem=$ROOT/$GEN/t2" $D "            else if (dts_tables_ok) cur_codec <= T_LPCM;" "" "\[out\]" &
-  mut D6 "+stem=$ROOT/$GEN/t2 +ac3=$ROOT/$GEN/ac3" $D "            if (eng_frame) eng_codec_req <= (cur_type == T_AC3);" "" "\[(pcm|count|hang)\]" &
+  mut D6 "+stem=$ROOT/$GEN/t2 +ac3=$ROOT/$GEN/ac3" $D "            if (eng_frame) eng_codec_req <= (cur_type == T_AC3) ? 2'd1 : (cur_type == T_MP2) ? 2'd2 : 2'd0;" "" "\[(pcm|count|hang)\]" &
   wait
   for f in "$RES"/*; do grep -v MUTFAIL "$f"; grep -q MUTFAIL "$f" && fail=1; done
   rm -rf "$RES"
