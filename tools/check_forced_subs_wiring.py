@@ -21,7 +21,7 @@ the file (the check_subp_map_wiring.py pattern):
   7. fs_log uses SPRM2 only when it names a declared stream 0..31 (vm_spstn[5]
      clear: 62/63 are "none"/"forced", not streams) and otherwise falls back to the
      first declared stream -- never an aliasing truncation of 62 / 63. (All 32
-     streams since feature/subp-32; it was 0..15 with a [5:4] guard.)
+     streams since PR #152; it was 0..15 with a [5:4] guard.)
   8. sp_user_absent does not mute the forced route.
 
     python3 tools/check_forced_subs_wiring.py [emu.sv]     # exit 0 = wired right

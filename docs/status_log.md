@@ -22,7 +22,7 @@ predate later confirmations; the `CLAUDE.md` index carries the reconciled status
 
 ## Hardware status (THIS fork, verified 2026-06-21)
 
-- ✅ **32 SUBTITLE TRACKS (2026-10-04, branch `feature/subp-32`, stacked on
+- ✅ **32 SUBTITLE TRACKS (2026-10-04, PR #152, stacked on
   PR #151; HW-CONFIRMED 2026-10-04 against a `main` control arm).** Full record:
   `docs/track_selection.md` "32 subtitle tracks".
   - **Was:** the Subtitle button reached 8 tracks and the disc's own choice 16. **98 of
@@ -90,7 +90,7 @@ predate later confirmations; the `CLAUDE.md` index carries the reconciled status
       Ordinary subtitles are unchanged.
   - **Build:** SEED 1, `clk_dec` 88.89 MHz at 100 °C and 90.43 MHz at −40 °C (gate 86.0).
     38,763 ALMs vs the control's 38,791, i.e. free within fitter noise. M10K/DSP unchanged.
-  - **Pre-merge regression round (2026-10-04, on the `feature/subp-32` build, which
+  - **Pre-merge regression round (2026-10-04, on the `PR #152` build, which
     contains this branch), against a `main` control arm:**
     - **Menu highlights, 11 discs** (`tools/hil_nav_test.py`'s menu-highlight arm list:
       ATFIRSTSIGHT, T2 ×2, The Matrix, MiB, Tomb Raider, The Office, Akira, Scene It,

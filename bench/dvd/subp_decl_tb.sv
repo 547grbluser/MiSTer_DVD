@@ -1,5 +1,5 @@
 // bench/dvd/subp_decl_tb.sv -- dvd/subp_decl.sv: the declared-stream bookkeeping
-// behind the Subtitle button's 32-stream cycle (feature/subp-32).
+// behind the Subtitle button's 32-stream cycle (PR #152).
 //
 // The reference is written differently from the RTL on purpose (a scan with early
 // exit instead of last-write-wins loops, and an explicit index compare instead of

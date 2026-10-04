@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# 32 subtitle tracks (feature/subp-32; docs/track_selection.md "32 subtitle tracks").
+# 32 subtitle tracks (PR #152; docs/track_selection.md "32 subtitle tracks").
 #
 #   bench/dvd/run_subp32.sh          GREEN: wiring checks + every bench this change touched
 #   bench/dvd/run_subp32.sh --red    + mutation arms: each must be caught by its bench

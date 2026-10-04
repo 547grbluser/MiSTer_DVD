@@ -599,7 +599,7 @@ reg [15:0] a_lang_mem [0:7];    // ISO-639 language
 assign attr_a_fmt  = a_fmt_mem [attr_a_sel];
 assign attr_a_lang = a_lang_mem[attr_a_sel];
 // SUBPICTURE languages: all 32 entries, the DVD-Video spec maximum (2026-10-04,
-// feature/subp-32; docs/track_selection.md "32 subtitle tracks"). 8 audio is
+// PR #152; docs/track_selection.md "32 subtitle tracks"). 8 audio is
 // already the spec maximum. A 32x16 table in flops plus a 32:1 read would cost
 // ~400 registers and a wide mux at ~3 % ALM headroom, so it lives in a block RAM:
 // written by the S_ATTR sweep (one full-word write per stream: the high byte is

@@ -1,5 +1,5 @@
 // subp_decl.sv -- which of the 32 subpicture streams the loaded PGC DECLARES
-// Part of MiSTer DVD Player Core (feature/subp-32; docs/track_selection.md
+// Part of MiSTer DVD Player Core (PR #152; docs/track_selection.md
 // "32 subtitle tracks").
 //
 // DVD-Video allows 32 subpicture streams; the PGC's subp_control[32] table says

@@ -724,7 +724,7 @@ it the same way as Audio and Subtitle, so it is a candidate follow-up with the s
 - Presses inside a menu do nothing.
 - The chord no longer steps the tracks.
 
-## 32 subtitle tracks (2026-10-04, branch `feature/subp-32`; ✅ HW-CONFIRMED: The Naked Gun 11 tracks, MOST 19)
+## 32 subtitle tracks (2026-10-04, PR #152; ✅ HW-CONFIRMED: The Naked Gun 11 tracks, MOST 19)
 
 **Why.** DVD-Video allows 32 subpicture streams. The core reached **8** with the Subtitle
 button (3-bit `sub_idx`, and the reader clamped `subp_ntracks` to 8) and **16** through

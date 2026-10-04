@@ -2,7 +2,7 @@
 // control tables and streams them out on the shared pgc_ctl_we/waddr/wdata bus
 // at PGC load:
 //   waddr  0..31 = subp_control[32] @ PGC+0x1C (all 32, the spec maximum, since
-//                  feature/subp-32; it was 0..15 = 16 entries) - the data
+//                  PR #152; it was 0..15 = 16 entries) - the data
 //                  behind the subpicture display-mode substream mapping (Matrix
 //                  "Follow the White Rabbit": logical 1 -> substream 0x22/0x23).
 //   waddr 32..39 = audio_control[8] @ PGC+0x0C (EVERY domain; was 16..23) - the libdvdnav
@@ -179,7 +179,7 @@ module iso_reader_subpctl_tb;
         img[22*2048+16+16'h20+2]=8'h03; img[22*2048+16+16'h20+3]=8'h00;
         // subp_control[3] @ +0x1C+12 = 0x81000000 (present, all zero map)
         img[22*2048+16+16'h28+0]=8'h81;
-        // feature/subp-32: entries PAST 16, which the pre-32 reader never read.
+        // PR #152: entries PAST 16, which the pre-32 reader never read.
         // [17] @ +0x1C+68 = 0x84050607, [31] @ +0x1C+124 = 0x9F1E1D1C (the LAST word
         // of the table, ending exactly at PGC+0x9C = 156, where the header walk starts)
         img[22*2048+16+16'h1C+68+0]=8'h84; img[22*2048+16+16'h1C+68+1]=8'h05;
@@ -209,7 +209,7 @@ module iso_reader_subpctl_tb;
             errors=errors+1; $display("  FAIL: subp_control[1] expected 0x80020300"); end
         if (!cap_seen[3] || cap_mem[3] !== 32'h81000000) begin
             errors=errors+1; $display("  FAIL: subp_control[3] expected 0x81000000"); end
-        // [5] feature/subp-32: all 32 entries, byte-exact past 16, exactly once each
+        // [5] PR #152: all 32 entries, byte-exact past 16, exactly once each
         if (!cap_seen[17] || cap_mem[17] !== 32'h84050607) begin
             errors=errors+1; $display("  FAIL [5]: subp_control[17] = 0x%08x, expected 0x84050607", cap_mem[17]); end
         if (!cap_seen[31] || cap_mem[31] !== 32'h9F1E1D1C) begin

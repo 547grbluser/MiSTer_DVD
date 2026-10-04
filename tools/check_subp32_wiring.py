@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Gate for the 32-subtitle-track change (feature/subp-32; docs/track_selection.md
+"""Gate for the 32-subtitle-track change (PR #152; docs/track_selection.md
 "32 subtitle tracks").
 
 DVD-Video allows 32 subpicture streams. The core used to keep 16 subp_control

@@ -2779,7 +2779,7 @@ wire [2:0] aud_log;                          // effective logical audio track (b
 wire [4:0] sp_sel;                           // effective logical subpicture track 0..31 (below)
 wire       sub_on_eff;                       // effective subtitle display (below)
 // ---- THE LOADED PGC'S SUBTITLE TABLE: which of the 32 streams it DECLARES ----
-// (2026-10-04, feature/subp-32; docs/track_selection.md "32 subtitle tracks".)
+// (2026-10-04, PR #152; docs/track_selection.md "32 subtitle tracks".)
 // DVD-Video allows 32 subpicture streams. The 32 subp_control words live in a
 // block RAM (subp_ctl_ram, below); only their "declared" bit [31] is kept here as
 // flops, because three things need all 32 at once:
@@ -3045,7 +3045,7 @@ wire        menu_sp_ctx   = menu_dom_live || sp_menu_early;
 // in_title_hli), the Scene It menus (sp_menu_early) and menu domains are all
 // excluded by construction. spu_decode.forced_only = fs_route.
 //
-// All 32 streams since feature/subp-32 (subp_declared / subp_first_decl are the
+// All 32 streams since PR #152 (subp_declared / subp_first_decl are the
 // table state declared ahead of the Subtitle-button logic).
 // SPRM2's stream, when it names a declared stream 0..31 (62/63 = none/forced are
 // not streams: bit 5 set); the VM only drives it with Disc Menus on.
@@ -3061,7 +3061,7 @@ wire        fs_route  = ~sp_disp_on & pgc_ctl_valid & pgc_dom_tt & subp_any_decl
 wire [4:0]  sp_sel_log    = menu_sp_ctx  ? 5'd0 :
                             vm_owns_route ? vm_spstn[4:0] :
                             fs_route      ? fs_log        : sp_user_log;
-// THE 32 subp_control WORDS, in a block RAM (feature/subp-32). Two 32-word tables
+// THE 32 subp_control WORDS, in a block RAM (PR #152). Two 32-word tables
 // in flops plus a 32:1 x 32-bit read would cost ~1,000 registers and a wide mux at
 // ~3 % ALM headroom; the routing note below already records one 16:1 mux that
 // failed to fit. Written by the reader's pgc_ctl walk, read ONCE per cycle at the

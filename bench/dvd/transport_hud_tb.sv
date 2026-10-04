@@ -50,7 +50,7 @@ module transport_hud_tb;
     reg  [6:0]  seek_min = 7'd0;
     reg  [2:0]  seek_sec = 3'd0;
     reg  [3:0]  aud_no = 0, aud_cnt = 0;
-    reg  [5:0]  sub_no = 0, sub_cnt = 0;   // 1..32 subtitle tracks (feature/subp-32)
+    reg  [5:0]  sub_no = 0, sub_cnt = 0;   // 1..32 subtitle tracks (PR #152)
     reg  [3:0]  ang_no = 0, ang_cnt = 0;
     reg  [15:0] aud_lang = 0, sub_lang = 0;
     reg         sub_enabled = 0;

@@ -5,7 +5,7 @@ tools/dvd_vm_ref.py subp_stream_map() (the libdvdnav vm_get_subp_stream port,
 with this core's documented forced-wide-for-menus deviation).
 
 Vector format, one hex word per line, 48 bits (logical widened to 5 bits for the
-32-stream spec maximum, feature/subp-32):
+32-stream spec maximum, PR #152):
 
   bit layout, LSB first:
     [0]     map_valid

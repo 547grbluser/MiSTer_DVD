@@ -138,7 +138,7 @@ module iso_reader_menu_tb;
     // pinned to physical substream 0x20. Two PAL 16:9 discs map logical 0 -> 1,
     // so their menu SPU (0x21) was discarded and no button highlight could render.
     wire        pgc_ctl_we;
-    wire [5:0]  pgc_ctl_waddr;        // 0..31 subp, 32..39 audio (feature/subp-32)
+    wire [5:0]  pgc_ctl_waddr;        // 0..31 subp, 32..39 audio (PR #152)
     wire [31:0] pgc_ctl_wdata;
     wire        pgc_ctl_valid;
     wire        pgc_dom_tt;
@@ -761,7 +761,7 @@ module iso_reader_menu_tb;
         // msubp_writes is 0 and every check below fails.
         $display("TEST10 menu subp_control: menu_writes=%0d title_writes=%0d [0]=%08x [2]=%08x",
                  msubp_writes, tsubp_writes, mcap[0], mcap[2]);
-        // Every menu PGC load streams all 32 words (16 before feature/subp-32), and many
+        // Every menu PGC load streams all 32 words (16 before PR #152), and many
         // menu jumps -- so the invariant is "a whole number of complete tables",
         // never a partial walk.
         chk(msubp_writes >= 32 && (msubp_writes % 32) == 0,

@@ -45,7 +45,7 @@ module iso_reader_attr_tb;
 
     // Phase-10 enumeration outputs under test
     wire [3:0]  audio_ntracks;
-    wire [5:0]  subp_ntracks;                 // 1..32 since feature/subp-32
+    wire [5:0]  subp_ntracks;                 // 1..32 since PR #152
     reg  [2:0]  attr_a_sel = 0;
     reg  [4:0]  attr_s_sel = 0;               // 0..31
     wire [2:0]  attr_a_fmt;
@@ -82,7 +82,7 @@ module iso_reader_attr_tb;
     // Real VTS_21_0.IFO VTSI_MAT sector (ISO LBA 1683520)
     reg [7:0] vtsimat [0:2047];
     initial $readmemh("bench/dvd/test_vobs/mib_vts21_vtsi_mat.hex", vtsimat);
-    // 32-TRACK ARMS (feature/subp-32), OPT-IN so the default run stays the real disc
+    // 32-TRACK ARMS (PR #152), OPT-IN so the default run stays the real disc
     // byte for byte:
     //   +x32       write distinct languages into subpicture entries 9 and 31 (the disc
     //              has 4; the sweep reads all 32 regardless of the count)
@@ -154,7 +154,7 @@ module iso_reader_attr_tb;
         end
     endtask
 
-    // attr_s_lang is REGISTERED since feature/subp-32 (block RAM, one cycle after
+    // attr_s_lang is REGISTERED since PR #152 (block RAM, one cycle after
     // attr_s_sel): wait an edge, never sample combinationally.
     task chk_s(input [4:0] trk, input [15:0] lang);
         begin

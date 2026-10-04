@@ -155,7 +155,7 @@ def main():
     g = one_guard('A1', r"aud_cur\s*<=\s*\(", 'aud_cur <= (...)')
     guard_is('A1', g, 'aud_step_w',
              'The Audio press must only SHOW; a raw-edge guard is the old cycle-on-every-press.')
-    # Since feature/subp-32 the Subtitle step has TWO branches inside `if (sub_step_w)`:
+    # Since PR #152 the Subtitle step has TWO branches inside `if (sub_step_w)`:
     # step over the PGC's declared streams, or (no table) over the stream count. So
     # the rule is structural: every `if (!sub_on_eff)` step branch in the file must
     # lie inside the single `if (sub_step_w) begin ... end` block.
