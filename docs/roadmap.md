@@ -475,8 +475,8 @@ finds the main feature, navigates to it, and plays from start.
 > gate corpus, with `mp2_ref.py` == `mp2_decode` on all 89 streams) and M1 (the program
 > and its emulator, bit-exact on all 89) are done, and so are M2 (the RTL), M3 (wired in:
 > `mp2_decode` left the build) and M4: −825 ALM by entity, and on the rig a VCD and two DVD
-> MP2 tracks correlate ≥ 0.9986 with `mp2_decode`'s. ⏳ Next: a by-ear listen, then a PR
-> when asked. Branch `feature/mp2-engine`.
+> MP2 tracks correlate ≥ 0.9986 with `mp2_decode`'s, and by ear every codec is clean (the
+> maintainer, 2026-10-03). ⏳ Next: a PR when asked. Branch `feature/mp2-engine`.
 
 **Goal:** make DTS (and AC-3) tracks audible on an AV receiver.
 

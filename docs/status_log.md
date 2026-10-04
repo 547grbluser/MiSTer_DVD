@@ -27,7 +27,9 @@ predate later confirmations; the `CLAUDE.md` index carries the reconciled status
   mutations. M3: wired in, `mp2_decode` out of the build, the rate via MFS, long frames
   decoded and counted. M4: −825 ALM by entity (fit 38,791 ALM, SEED 1), and on the rig
   the VCD and two DVD MP2 tracks correlate 0.9994 / 0.9986 / 0.9998 with `mp2_decode`'s,
-  0 refused. The record is `docs/mp2_engine.md` M2–M4.
+  0 refused. By ear (the maintainer), every codec on the build is clean: the full VCD, the DVD
+  MP2 clips, AC-3 5.1, T2's DTS ↔ AC-3 switching, and the MP2 → DTS handoff. The record is
+  `docs/mp2_engine.md` M2–M4.
 - 🔧 **(earlier) MP2 ON THE SHARED AUDIO ENGINE (2026-10-03: M0 + M1 done; branch
   `feature/mp2-engine` from `feature/ac3-engine`, `CORE_VERSION dev-mp2engine`, not
   pushed).** Full record: `docs/mp2_engine.md`.

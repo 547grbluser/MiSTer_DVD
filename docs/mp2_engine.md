@@ -285,5 +285,15 @@ other build's.
   different windows of a 75 s clip, not a level change. The DVD clips, captured whole,
   agree to 0.0 dB.
 
-**Next:** a by-ear listen on a long VCD (the maintainer's call), then a PR when asked.
+**By ear (2026-10-03, the maintainer, on the rig):** every codec on this build.
+
+- MP2: the full *ew-dino* VCD at 44.1 kHz, and the three MP2 clips.
+- AC-3: *Men in Black*, a 5.1 downmix.
+- DTS and AC-3: *Ultimate T2*, tracks 1 ↔ 2 switched repeatedly.
+- The MP2 → DTS handoff, a VCD and then T2 on its DTS track.
+- LPCM and WAV.
+
+**No issues with audio.** That is ✅ HW-CONFIRMED.
+
+**Next:** a PR when asked.
 The branch sits on `feature/ac3-engine`, which is itself unmerged.
