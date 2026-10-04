@@ -1,10 +1,11 @@
 // iso_reader_subpctl_tb.sv - verify dvd_iso_reader parses the PGC stream
 // control tables and streams them out on the shared pgc_ctl_we/waddr/wdata bus
 // at PGC load:
-//   waddr  0..15 = subp_control[16] @ PGC+0x1C (TITLE domain only) - the data
+//   waddr  0..31 = subp_control[32] @ PGC+0x1C (all 32, the spec maximum, since
+//                  feature/subp-32; it was 0..15 = 16 entries) - the data
 //                  behind the subpicture display-mode substream mapping (Matrix
 //                  "Follow the White Rabbit": logical 1 -> substream 0x22/0x23).
-//   waddr 16..23 = audio_control[8] @ PGC+0x0C (EVERY domain) - the libdvdnav
+//   waddr 32..39 = audio_control[8] @ PGC+0x0C (EVERY domain; was 16..23) - the libdvdnav
 //                  vm_get_audio_stream logical->physical audio map (GET_SMART
 //                  VTS2 maps everything to substream 0x83; identity assumed =
 //                  the "language menu -> movie plays silent" bug).
@@ -41,7 +42,7 @@ module iso_reader_subpctl_tb;
     wire [7:0]  stream_data;  wire stream_valid;
 
     wire        pgc_ctl_we;
-    wire [4:0]  pgc_ctl_waddr;
+    wire [5:0]  pgc_ctl_waddr;
     wire [31:0] pgc_ctl_wdata;
     wire        pgc_ctl_valid;
     wire        pgc_dom_tt;
@@ -49,8 +50,9 @@ module iso_reader_subpctl_tb;
     reg  [7:0]  img [0:IMG_BYTES-1];
 
     // capture stream-control writes into shadows the test can check
-    reg [31:0] cap_mem  [0:15];      // subp_control words
-    reg        cap_seen [0:15];
+    reg [31:0] cap_mem  [0:31];      // subp_control words (all 32)
+    reg        cap_seen [0:31];
+    integer    subp_writes;
     reg [15:0] cap_aud  [0:7];       // audio_control words
     reg        cap_aseen[0:7];
     reg        valid_at_aud_write;   // pgc_ctl_valid sampled DURING an audio write
@@ -61,7 +63,7 @@ module iso_reader_subpctl_tb;
     integer k;
     always @(posedge clk) begin
         if (pgc_ctl_we) begin
-            if (pgc_ctl_waddr[4]) begin
+            if (pgc_ctl_waddr[5]) begin
                 cap_aud  [pgc_ctl_waddr[2:0]] <= pgc_ctl_wdata[15:0];
                 cap_aseen[pgc_ctl_waddr[2:0]] <= 1'b1;
                 aud_writes <= aud_writes + 1;
@@ -71,13 +73,14 @@ module iso_reader_subpctl_tb;
                              $time, pgc_ctl_waddr[2:0], aud_writes);
                 end
             end else begin
-                cap_mem [pgc_ctl_waddr[3:0]] <= pgc_ctl_wdata;
-                cap_seen[pgc_ctl_waddr[3:0]] <= 1'b1;
+                cap_mem [pgc_ctl_waddr[4:0]] <= pgc_ctl_wdata;
+                cap_seen[pgc_ctl_waddr[4:0]] <= 1'b1;
+                subp_writes <= subp_writes + 1;
                 if (aud_writes != 8) aud_before_subp_ok <= 1'b0; // audio must precede
                 if (pgc_ctl_valid) begin
                     valid_at_subp_write <= 1'b1;  // must stay 0
                     $display("  [probe] t=%0t subp write addr=%0d while valid=1",
-                             $time, pgc_ctl_waddr[3:0]);
+                             $time, pgc_ctl_waddr[4:0]);
                 end
             end
         end
@@ -176,6 +179,13 @@ module iso_reader_subpctl_tb;
         img[22*2048+16+16'h20+2]=8'h03; img[22*2048+16+16'h20+3]=8'h00;
         // subp_control[3] @ +0x1C+12 = 0x81000000 (present, all zero map)
         img[22*2048+16+16'h28+0]=8'h81;
+        // feature/subp-32: entries PAST 16, which the pre-32 reader never read.
+        // [17] @ +0x1C+68 = 0x84050607, [31] @ +0x1C+124 = 0x9F1E1D1C (the LAST word
+        // of the table, ending exactly at PGC+0x9C = 156, where the header walk starts)
+        img[22*2048+16+16'h1C+68+0]=8'h84; img[22*2048+16+16'h1C+68+1]=8'h05;
+        img[22*2048+16+16'h1C+68+2]=8'h06; img[22*2048+16+16'h1C+68+3]=8'h07;
+        img[22*2048+16+16'h1C+124+0]=8'h9F; img[22*2048+16+16'h1C+124+1]=8'h1E;
+        img[22*2048+16+16'h1C+124+2]=8'h1D; img[22*2048+16+16'h1C+124+3]=8'h1C;
         // one cell @ pgc+256: first_sector@8=0, last_sector@20=1
         img[22*2048+16+256+8]=0; img[22*2048+16+256+9]=0; img[22*2048+16+256+10]=0; img[22*2048+16+256+11]=0;
         img[22*2048+16+256+20]=0; img[22*2048+16+256+21]=0; img[22*2048+16+256+22]=0; img[22*2048+16+256+23]=1;
@@ -183,7 +193,8 @@ module iso_reader_subpctl_tb;
 
     integer errors = 0;
     initial begin
-        for (k=0;k<16;k=k+1) begin cap_mem[k]=0; cap_seen[k]=0; end
+        for (k=0;k<32;k=k+1) begin cap_mem[k]=0; cap_seen[k]=0; end
+        subp_writes=0;
         for (k=0;k<8;k=k+1)  begin cap_aud[k]=0; cap_aseen[k]=0; end
         valid_at_aud_write=0; valid_at_subp_write=0;
         aud_before_subp_ok=1; dom_tt_at_valid=0; aud_writes=0;
@@ -198,6 +209,15 @@ module iso_reader_subpctl_tb;
             errors=errors+1; $display("  FAIL: subp_control[1] expected 0x80020300"); end
         if (!cap_seen[3] || cap_mem[3] !== 32'h81000000) begin
             errors=errors+1; $display("  FAIL: subp_control[3] expected 0x81000000"); end
+        // [5] feature/subp-32: all 32 entries, byte-exact past 16, exactly once each
+        if (!cap_seen[17] || cap_mem[17] !== 32'h84050607) begin
+            errors=errors+1; $display("  FAIL [5]: subp_control[17] = 0x%08x, expected 0x84050607", cap_mem[17]); end
+        if (!cap_seen[31] || cap_mem[31] !== 32'h9F1E1D1C) begin
+            errors=errors+1; $display("  FAIL [5]: subp_control[31] = 0x%08x, expected 0x9F1E1D1C", cap_mem[31]); end
+        for (k=0;k<32;k=k+1) if (!cap_seen[k]) begin
+            errors=errors+1; $display("  FAIL [5]: subp_control[%0d] was never written", k); end
+        if (subp_writes != 32) begin
+            errors=errors+1; $display("  FAIL [5]: %0d subp writes, expected exactly 32", subp_writes); end
         // verify the mapping the RTL enables: logical 1, 16:9 wide -> substream 0x22
         if ((32'h80020300 >> 16 & 32'h1f) + 32'h20 !== 32'h22) begin
             errors=errors+1; $display("  FAIL: wide map != 0x22"); end
