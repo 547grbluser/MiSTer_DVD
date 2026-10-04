@@ -22,7 +22,13 @@ predate later confirmations; the `CLAUDE.md` index carries the reconciled status
 
 ## Hardware status (THIS fork, verified 2026-06-21)
 
-- 🔧 **MP2 ON THE SHARED AUDIO ENGINE (2026-10-03: M0 + M1 done; branch
+- ✅ **MP2 ON THE SHARED AUDIO ENGINE (2026-10-03: M0–M4 done, HW-confirmed on the rig,
+  not merged).** M2: the RTL, bit-exact op for op on all 89 gate streams, with 18
+  mutations. M3: wired in, `mp2_decode` out of the build, the rate via MFS, long frames
+  decoded and counted. M4: −825 ALM by entity (fit 38,791 ALM, SEED 1), and on the rig
+  the VCD and two DVD MP2 tracks correlate 0.9994 / 0.9986 / 0.9998 with `mp2_decode`'s,
+  0 refused. The record is `docs/mp2_engine.md` M2–M4.
+- 🔧 **(earlier) MP2 ON THE SHARED AUDIO ENGINE (2026-10-03: M0 + M1 done; branch
   `feature/mp2-engine` from `feature/ac3-engine`, `CORE_VERSION dev-mp2engine`, not
   pushed).** Full record: `docs/mp2_engine.md`.
   - **Why:** `mp2_decode` is the last hardwired decoder: 839 ALM, 37 M10K and 5 DSP in

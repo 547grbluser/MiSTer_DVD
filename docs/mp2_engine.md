@@ -1,6 +1,6 @@
 # MP2 on the shared audio engine (the rest of scenario E)
 
-**Status (2026-10-03): ✅ M0 done (the model is the RTL's contract on all 89 gate streams); ✅ M1 done (the program and its emulator, bit-exact on all 89, every op's decomposition proved); ✅ M2 done (the RTL, bit-exact op for op and pair for pair on all 89; A/B against `mp2_decode`); 🔧 M3 wired in (sim: the DVD and VCD chains bit-exact), ⏳ M4 fit and HIL.** Branch `feature/mp2-engine` (from
+**Status (2026-10-03): ✅ M0 done (the model is the RTL's contract on all 89 gate streams); ✅ M1 done (the program and its emulator, bit-exact on all 89, every op's decomposition proved); ✅ M2 done (the RTL, bit-exact op for op and pair for pair on all 89; A/B against `mp2_decode`); ✅ M3 wired in; ✅ M4 fit (−825 ALM by entity) and HIL (the VCD and two DVD MP2 tracks play, correlation ≥ 0.9986 with `mp2_decode`'s). Not merged; branch `feature/mp2-engine`.** Branch `feature/mp2-engine` (from
 `feature/ac3-engine`, `CORE_VERSION dev-mp2engine`, not pushed).
 
 **Why.** The engine built for DTS already runs AC-3 (`docs/ac3_engine.md` W1) and DTS
@@ -241,3 +241,49 @@ and two new ROMs, N 2,048 × 16 and D 512 × 18). `dts_seq` and `dts_top` take a
   reframers → ring → `dvd_audio_decode`: 13,824 pairs bit-exact against the model),
   `run_vcd.sh` and `run_wav.sh` pass, as do `check_dts_wiring.py` and
   `test_mp2_isa.py`. The rest of the regression set is running.
+
+## M4: fit and HIL (2026-10-03)
+
+**Fit** (`releases/DVD_mp2engine_20261003_2332.rbf`, SEED 1, clean tree at `d349c56`):
+
+| | v0.8.0 (re-cut, SEED 7) | the last `ac3engine` build | `dev-mp2engine` |
+|---|---|---|---|
+| ALM | 40,793 (97 %) | 40,848 | **38,791 (93 %)** |
+| M10K | 512 | 527 | 517 |
+| DSP | 95 | 92 | 87 |
+| clk_dec 100 °C / −40 °C | 90.87 / 90.44 | 89.98 / 91.19 | 91.46 / 88.40 MHz (gate 86) |
+
+- **By entity, MP2's move is about −825 ALM.** `mp2_decode` (878, including its bit
+  reader) is gone. `audio_engine` grew only 4,627 → 4,674, and `cb_host_ram` is 6.
+  The estimate was −400 … −600. It came in better because the window's split and MDQ's
+  decomposition reuse the datapath as it was, and the sequencer gained no unit.
+- **The whole fit falls 2,057** against the previous build. The extra ~1,200 is packing:
+  Quartus reports a 93 %-full design differently from a 97 %-full one, so count the
+  entity figure.
+- **Against v0.8.0 the whole fit is −2,002 ALM.** That span also contains PRs #144 and
+  #145, the AC-3 front end's move (W1, about −290) and the DTS decoder (P2 + P3, about
+  +550).
+- **M10K:** −10 against the previous build. `mp2_decode`'s 37 are gone. Its 16-block PCM
+  FIFO stays as the codebook host, and N, D, the widened ring and X are new.
+
+**HIL** (the .236 rig; `.sim`-local script, three clips cut from the local media).
+Each clip ran through the old build first, the `ac3engine` build with `mp2_decode`, as
+the control, then the new build. Each capture was then cross-correlated with the
+other build's.
+
+| Clip | Old | New | Correlation | Engine frames / refused |
+|---|---|---|---|---|
+| VCD, 44.1 kHz 224k joint stereo (MPEG-1 `.mpg`) | −15.8 dBFS | −16.4 dBFS | **0.9994** | 1,077 / 0 |
+| DVD VTS, 48 kHz 256k stereo (`.VOB` slice) | −18.9 | −18.9 | **0.9986** | 430 / 0 |
+| DVD VTS, 48 kHz 384k with CRC (`.VOB` slice) | −26.3 | −26.3 | **0.9998** | 305 / 0 |
+
+- On the control arm `eng_frames` stays 0 (it is `mp2_decode`), and on the new one the
+  engine counts every frame and refuses none.
+- **The rate is right.** A 44.1 kHz stream played on a 48 kHz NCO would be stretched by
+  8.8 % and could not correlate at 0.9994. So MFS reaches the NCO in time.
+- The VCD pair's 0.6 dB level difference and its large lag are the two captures'
+  different windows of a 75 s clip, not a level change. The DVD clips, captured whole,
+  agree to 0.0 dB.
+
+**Next:** a by-ear listen on a long VCD (the maintainer's call), then a PR when asked.
+The branch sits on `feature/ac3-engine`, which is itself unmerged.
