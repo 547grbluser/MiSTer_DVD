@@ -621,6 +621,28 @@ in `CONF_STR`. Design: `docs/cdda.md` "`.cue` sheets". ⛔ CHD still not support
 > **top gap confirmed = exact chapters/PTT (7/7 discs); interactive GPRM-counter/NVTMR promoted
 > above parental on measured prevalence (3/7 game discs).** Phase 3 = close gaps in that order.
 
+### 🔧 Next/Prev chapter at the title's edges (2026-10-05, branch `feature/chapter-edge`; sim-proven, ⏳ HW — see `docs/dvd_nav.md` "Chapter skip at the title's edges")
+
+The 3rd-edition audit's item 7. With Disc Menus on:
+- **Next from a title's last chapter runs the PGC's POST** (usually the menu, or the next
+  title). A fall-through, or no POST, follows `next_pgcn`. A chain that ends without a jump
+  is a no-op.
+- **Prev at chapter 1's start follows `prev_pgcn`** to that PGC's last program, when it
+  names another PGC.
+
+This is libdvdnav `vm_jump_next_pg` / `vm_jump_prev_pg`. Decisions (user, 2026-10-05):
+- a user POST chain, not the natural `vm_pgc_end` path;
+- clamp, then edge;
+- a self-pointing `prev_pgcn` restarts.
+
+The HW-confirmed cross-PGC PTT skip is untouched, and Auto (Disc Menus off) is unchanged.
+Census: POST on the last chapter's PGC in 89.8 % of 24,381 titles; `prev_pgc_nr` on 802
+titles (162 discs). Gate: `bench/dvd/run_chap_edge.sh --red`.
+**Next:** the HIL round (control arm `main` first, then Next/Prev at the edges on a CallSS
+disc, Dr. Seuss title 1, a Signs extra), and then the build's timing.
+**Follow-up found here:** a TT jump by PGCN reloads the PTT table as `cur_ttn = 1`, so after
+an in-title PGC link the HUD's chapter total can be title 1's (pre-existing).
+
 ### ✅ BT.601 as the default colour matrix (HW A/B-measured 2026-10-05, ✅ MERGED PR #156 — see `docs/status_log.md` "BT.601 default colour matrix")
 
 The 3rd-edition audit's item 6.

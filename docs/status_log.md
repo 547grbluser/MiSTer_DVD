@@ -22,6 +22,61 @@ predate later confirmations; the `CLAUDE.md` index carries the reconciled status
 
 ## Hardware status (THIS fork, verified 2026-06-21)
 
+- 🔧 **NEXT/PREV CHAPTER AT THE TITLE'S EDGES (audit item 7, 2026-10-05, branch
+  `feature/chapter-edge`, `dev-chapedge`; sim-proven, ⏳ HW round and build timing pending).**
+  - **Gap.** A chapter skip with nowhere left to go clamped. Next on the last chapter did
+    nothing, and Prev at chapter 1 restarted it. libdvdnav (`vm.c` `vm_jump_next_pg` /
+    `vm_jump_prev_pg`) instead runs the PGC's POST, or follows `prev_pgc_nr` to that PGC's
+    last program.
+  - **Census** (1,520 images, 24,381 titles, every VTS/PGC; a scratch script on `IsoNav` +
+    `ptt_ref` + `eval_block`):
+    - **POST on the last chapter's PGC:** 89.8 % of titles, and 1,498 of 1,519 main
+      features. With default GPRMs a main feature's POST does CallSS to a menu 84 % of the
+      time and JumpVTS_TT 12 %.
+    - **`prev_pgc_nr` ≠ 0 at chapter 1:** 802 titles on 162 discs, 19 of them main
+      features. 408 point at their own PGC (124 multi-program), about 350 at 0-second stubs
+      whose PRE does CallSS to a menu (Signs, Maze Runner extras), and the rest at another
+      in-title PGC (Moulin Rouge).
+    - 24 images failed the IFO parse (Casino Royale, Pursuit of Happyness …). That is a
+      parser finding, not a gap here.
+  - **Decisions (user, 2026-10-05):**
+    - **A user POST chain** in the VM, shaped like a button's LinkTailPGC (`nat_src=0`,
+      immediate jump), **not** the natural `vm_pgc_end` path. That path would play out about
+      1 s of tail, gate POST's jump on `nat_done`, and park in `S_DONE` on a fall-through,
+      where libdvdnav keeps playing.
+    - **Clamp, then edge.** An overshooting burst lands on the last or first chapter.
+    - **A `prev_pgcn` naming this PGC restarts**, a deliberate libdvdnav deviation: no
+      wrap from chapter 1 to the last chapter on the 124 multi-program self-loops.
+  - **★ The audit row misquoted the book.** The 3rd edition (L13884, L14067) has Prev/Next
+    follow the PGCI's next/prev **links**, landing Prev on the previous PGC's **beginning**.
+    libdvdnav runs POST and lands on the **last** program. We follow libdvdnav; its POST
+    fall-through to `next_pgcn` covers the book's letter on the 103 no-POST titles. The
+    correction belongs on the unmerged `docs/demystified-3rd-audit` branch's
+    `conformance.md` row 7.
+  - **Built.**
+    - **Reader:** `chap_edge` / `_dir` pulse from the two legacy within-PGC resolve arms
+      only (the cross-PGC `CH_G*`/`CH_T*` path is untouched). A single-chapter title now
+      arms the walk with Disc Menus on, so Next skips a trailer or extra. `jump_pgn` 0xFF
+      means "last program".
+    - **VM:** `key_chedge` → `ev_chedge` → POST (with a fall-through to `next_pgcn`) or the
+      `prev_pgcn` jump. `usr_edge` masks `vm_adv` for the chain, because its no-op arms would
+      otherwise answer a cell-command wait.
+    - **emu:** one wire pair, gated by `tools/check_chap_edge_wiring.py`.
+    - **Auto (Disc Menus off):** unchanged.
+    - Full design: `docs/dvd_nav.md` "Chapter skip at the title's edges".
+  - **Gates.**
+    - `bench/dvd/run_chap_edge.sh --red`: `iso_reader_chapedge_tb` A–L and `dvd_vm_tb` S27
+      V1–V8, with 15 mutations, each failing exactly its own arms.
+    - The chapter/PTT regressions and the 13 other `dvd_vm` benches stay green. Their new
+      ports are tied off, and ten of them had left `key_cmenu` floating; that is fixed.
+    - Oracle: `nav_diff.py --script "1 > > >"` (new `>`/`<` tokens). On Dr. Seuss title 1,
+      libdvdnav lands on VTS1 PGCN 10, which agrees with `dvd_vm_ref.next_pg_edge`.
+  - **Found, not fixed (pre-existing):** a TT jump by PGCN reloads the PTT table as
+    `cur_ttn = 1`, so after an in-title PGC link in another title the HUD total can be
+    title 1's.
+  - **Next:** the build's timing (clk_dec ≥ 86, clk_mem ≥ 90), then a HIL round, control arm
+    (`main`) first.
+
 - ✅ **CLK_MEM TIMING: THE VICTIM INVALIDATE DEFERRED ONE CYCLE (2026-10-05; sim
   cycle-exact, HW smoke matches `main`; ✅ MERGED PR #157).**
   - **Found** while answering "do we have negative slack?". `clk_mem` (90 MHz, the DDR3

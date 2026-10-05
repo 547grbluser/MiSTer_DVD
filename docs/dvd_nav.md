@@ -2099,7 +2099,9 @@ mini-FSM (`chap_st`: `CH_A/B/R/C/D`, parallel to the main FSM) walks it on `chap
 
 - Scan `pmap[0..nr_pgm-1]`, tracking `chap_best` = the largest program whose entry cell
   ≤ the current cell (`cell_i`), and its start cell `chap_best_cell`.
-- **Next:** target = `chap_best+1` (a **no-op at the last chapter** — `chap_do=0`).
+- **Next:** target = `chap_best+1`. At the last chapter `chap_do=0`: a no-op with Disc
+  Menus off, and with Disc Menus on the burst goes to the VM instead (see "Chapter skip at
+  the title's edges" below).
 - **Prev:** **restart the current chapter** (the standard player behaviour) unless we're
   right at its start — `chap_at_start` (from emu: DSI `c_eltm` cell-elapsed ≤ ~5 s) **and**
   we're in the chapter's first cell (`cell_i == chap_best_cell`) — in which case step to the
@@ -2122,6 +2124,116 @@ through `ptt_mem` and a target leaving the current PGC dispatches an internal
 JumpVTS_PTT-shaped jump instead — multi-PGC titles (Scene_It, PNP0NNS1) can finally
 skip across PGC boundaries, and the HUD `CH n` becomes the global PTT index. See
 "Resident PTT table" in the Phase-6 section above for the full mechanics.
+
+### Chapter skip at the title's edges (audit item 7) — 🔧 sim-proven, ⏳ HW
+
+A burst with **nowhere left to go in the title** no longer clamps silently when Disc Menus
+is on. The reader hands it to the VM, which does what libdvdnav does (`vm.c`
+`vm_jump_next_pg` / `vm_jump_prev_pg`, through `dvdnav_*_pg_search`):
+
+- **Next from the title's last chapter** runs the PGC's **POST** commands. In the library
+  that is usually the menu: 1,498 of 1,519 main features author a POST, and with default
+  GPRMs it does CallSS to a menu 84 % of the time and JumpVTS_TT 12 % of the time. If POST
+  falls through, or there is none, the VM follows `next_pgcn` (`play_PGC_post`). A chain
+  that ends with no jump (Exit, or a fall-through with `next_pgcn` 0) is a **strict no-op
+  and playback continues**: libdvdnav runs `next_pg` on a *copy* of the VM and treats a
+  stopped copy as failure.
+- **Prev at the start of chapter 1** follows `prev_pgcn` when it names **another** PGC:
+  that PGC loads (its PRE runs) and starts at its **last** program. Otherwise (no
+  `prev_pgcn`, or one naming this PGC) it restarts chapter 1 as before.
+
+**Measured, not guessed.** A census of 1,520 library images (24,381 titles, every VTS and
+title PGC; `IsoNav` + `ptt_ref.read_ptt_table` + `eval_block`) found:
+- **POST on the last chapter's PGC:** 21,903 titles (89.8 %).
+- **`prev_pgc_nr` ≠ 0 on the first chapter's PGC:** 802 titles on 162 discs, 19 of them
+  main features.
+  - **408** point at **the PGC itself**, 124 of them multi-program.
+  - About **350** point at 0-second stub PGCs whose PRE does CallSS to a menu (Signs and
+    Maze Runner extras). That is, the author's own "Prev at the start returns to the menu".
+  - The rest point at another PGC of the title (Moulin Rouge).
+
+**Decisions (user, 2026-10-05):**
+1. **A user POST, not `vm_pgc_end`.** Reusing the reader's natural PGC-end path would have
+   cost three things:
+   - It fires only after the cache and VBUF drain, so about 1 s more of the chapter
+     would play.
+   - `ev_pgcend` tags the chain natural, so the POST's jump would wait on `nat_done`
+     as well.
+   - A fall-through in `S_VM_WAIT` parks in `S_DONE`, i.e. playback stops, where
+     libdvdnav keeps playing.
+
+   The edge is instead a USER chain shaped like a button's LinkTailPGC (the HW-proven Tomb
+   Raider Select path, `nat_src=0`). Its jump flushes and executes at once, like a
+   chapter skip.
+2. **Clamp, then edge.** An overshooting burst (Next ×3 from the second-to-last chapter)
+   lands on the last chapter, as before. Only a burst that *starts* on the last chapter
+   (Next) or at chapter 1's start (Prev) is an edge. Mashing Next cannot throw you out of
+   the movie, and in RTL the edge is exactly the old `chap_do==0` case.
+3. **A `prev_pgcn` naming this PGC restarts**, rather than wrapping from chapter 1 to the
+   last chapter (the 124 multi-program self-loops). This is a deliberate libdvdnav
+   deviation, likely an authoring-tool default rather than intent.
+
+**The book and libdvdnav disagree, and the audit row misquoted the book.** The 3rd edition
+(`DVD_Demystified_3rd.txt` L13884) says Prev/Next "jump between programs until there is no
+previous or next program, in which case they follow the previous and next **links** (if
+present) in the PGCI". L14067 says LinkPrevPG "can go to the **beginning** of the previous
+PGC". So the book follows `next_pgcn` (not POST) and lands Prev on the first program.
+libdvdnav, the project baseline, runs POST and lands on the last program. We follow
+libdvdnav. Its POST fall-through to `next_pgcn` also satisfies the book's letter on the 103
+titles with no POST and a `next_pgcn`. The audit's conformance row says "the book and
+libdvdnav run the post commands"; that is half right.
+
+**Mechanism.**
+- **Reader** (`dvd/dvd_iso_reader.sv`):
+  - `chap_edge` / `chap_edge_dir` pulse from the two **legacy within-PGC resolve arms**
+    only: `CH_R` with no PTT table, and `CH_GR`'s legacy branch. Reaching those arms already
+    means the PTT table offers no way out of this PGC, so the HW-confirmed cross-PGC
+    `CH_G*`/`CH_T*` path is untouched.
+  - Predicates `chap_nx_edge` / `chap_pv_edge` / `chap_edge_go`, gated by `vm_mode`.
+  - A single-chapter title now arms the walk with Disc Menus on, because its one chapter
+    is the last. That is the extras/trailer shape, where Next skips the clip.
+    Program-less PGCs stay unarmed.
+  - `jump_pgn == 8'hFF` means "start at the last program" (`P_PMAP` takes the final entry);
+    0xFF is never a real pgn.
+- **VM** (`dvd/dvd_vm.sv`):
+  - `key_chedge` / `key_chedge_dir` → `ev_chedge`, a `V_IDLE` arm after `ev_pgcend`.
+    Next sets the POST block and enters `V_NEXT` (an empty block falls straight through).
+    Prev issues `{DOM_TT, cur_vts, prev_pgcn, pgn 0xFF}`.
+  - `usr_edge` holds for the chain and masks `vm_adv` at the port. The chain has
+    `wait_verdict=1`, so every no-op arm (fall-through, Exit, LinkTailPGC "already there",
+    LinkRSM with no RSM, Link*PGC to 0) would pulse `vm_adv` while the reader streams, and
+    a reader parked on a cell command would take that as its verdict.
+  - A natural `ev_pgcend` or a new PGC's load drops a pending edge press.
+- **emu**: the reader's `chap_edge_w` / `chap_edge_dir_w` go to the VM, gated by
+  `tools/check_chap_edge_wiring.py`. The HUD needs nothing: at an edge the burst projection
+  clamps to the chapter already playing, so `chap_disp_hold` releases at once.
+
+**Scope.**
+- **Disc Menus off (Auto):** unchanged. There is no VM, so there is no POST to run, and
+  Next at the last chapter stays a no-op.
+- **Menus:** unchanged. The chapter keys are title-only on both sides.
+- **Linear `.VOB`/`.mpg`, VCD and CD-DA:** never reach `chap_go` (`cell_mode` is 0), and
+  CD-DA has its own `cdda_toc` skip.
+- **Angle and seamless-branch titles:** nothing special. The edge is the program walk, and
+  the action is the PGC's own POST or `prev_pgcn`.
+
+**Known limitations.**
+- If the `prev_pgcn` PGC's PRE jumps elsewhere (the stub → menu case), we land on that
+  jump. libdvdnav would then apply `vm_jump_pg(last)` to the PGC it reached.
+- Pre-existing, not new: a TT jump by PGCN reloads the PTT table for `cur_ttn = 1`
+  (`S_PTTLD_MAT` takes `want_ttn ?: 1`). After any in-title PGC link in a title other than
+  vts_ttn 1, which now includes a Prev landing, the HUD's "CH n/N" can read title 1's
+  chapter total until the next title load. Worth its own fix.
+
+**Gates.**
+- `bench/dvd/run_chap_edge.sh --red`:
+  - `iso_reader_chapedge_tb` arms A–L.
+  - `dvd_vm_tb` S27 V1–V8.
+  - Fifteen mutations, each failing exactly its own arms.
+  - The chapter/PTT regressions, and `check_chap_edge_wiring.py --red`.
+- Navigation oracle: `tools/nav_diff.py <disc> --script "1 > > >"` (chapter tokens are
+  compared on the immediate landing). Third opinion: `dvd_vm_ref.VM.next_pg_edge` /
+  `prev_pg_edge`.
 
 **Multi-press debounce (`feature/chapter-skip-debounce`).** A single B2/B3 press used to
 fire an immediate seek, so a rapid multi-press *scrubbed* — the video visibly jumped through

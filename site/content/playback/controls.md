@@ -392,6 +392,32 @@ Progressive, where `Analog Aspect` acts only as Letterbox or Crop, the button st
 Rapid presses settle before anything is applied, so holding down or mashing the button does
 not make the display re-sync over and over.
 
+### Stepping chapters
+
+**B2 / B3 (Prev / Next Chapter)** move one chapter at a time. Press several times quickly
+and the presses add up: the player jumps straight to the chapter you counted to, without
+stopping at each one on the way, and the status line counts as you press. Prev restarts the
+current chapter if you are more than a few seconds into it. Press it again, or press it right
+at a chapter's start, to go back a chapter.
+
+At the edges of a title, with **Disc Menus** on, the player does what the disc's author set
+up, as a set-top player does:
+
+- **Next on the last chapter** leaves the title the way the disc does when the title ends by
+  itself. That is usually back to the menu, and sometimes on to the next title, such as the
+  next episode or trailer. On a title with only one chapter, such as a trailer or an extra,
+  Next skips it.
+- **Prev at the start of the first chapter** goes wherever the disc points "back" to. On some
+  discs that is the end of the previous part, and on some extras it is the menu. Most discs
+  set nothing here, and Prev restarts the first chapter.
+- If the disc defines nothing for that edge, the press does nothing and playback continues.
+
+Pressing several times quickly never carries you past the edge. The presses stop at the last
+(or first) chapter, and only a press from there leaves the title.
+
+With **Disc Menus** off, Next on the last chapter does nothing, and Prev on the first chapter
+restarts it.
+
 ### Chapter menu
 
 **B16 (Chapter Menu)** jumps straight to the disc's own scene-selection page, rather than
