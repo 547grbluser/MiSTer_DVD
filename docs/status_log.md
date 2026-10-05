@@ -22,9 +22,9 @@ predate later confirmations; the `CLAUDE.md` index carries the reconciled status
 
 ## Hardware status (THIS fork, verified 2026-06-21)
 
-- 🔧 **USER STILL OFF: PLAY/PAUSE OR SELECT ENDS A STILL WITH NO BUTTONS (audit item 5,
-  2026-10-05, `dev-stilloff`, branch `feature/still-off`; sim-verified, ⏳ HW-confirm
-  pending).**
+- ✅ **USER STILL OFF: PLAY/PAUSE OR SELECT ENDS A STILL WITH NO BUTTONS (audit item 5,
+  2026-10-05, `dev-stilloff`, branch `feature/still-off`; sim-verified, ✅ HW-CONFIRMED on
+  timed stills, Play and Select, A/B against `main`; ⏳ an indefinite still on HW, ⏳ seed).**
   - **Gap.** Still off (UOP18) is a mandatory user operation (3rd ed. Table 9.15). `S_STILL`
     exited only on its timer, a VM jump or a seek. A timed still or a button-less indefinite
     still could be escaped only with a chapter skip, and a menu-domain one not at all.
@@ -58,10 +58,36 @@ predate later confirmations; the `CLAUDE.md` index carries the reconciled status
   - **Audit bookkeeping.** This resolves row 5 of the A/B table in `docs/conformance.md` on
     the unmerged `docs/demystified-3rd-audit` branch (and its roadmap item 5). Mark it there
     when that branch lands.
-  - **Next step:** HIL. Find a button-less still: a census of cells with `still_time != 0`
-    in PGCs whose VOBUs carry no HLI. Then check Play and Select on a timed one, an
-    indefinite one mid-PGC and one at a PGC end, plus a menu with buttons, where nothing
-    may change. Full design: `docs/dvd_nav.md` "Still off".
+  - **HW (2026-10-05, rig `.201`, control arm first, same script on each build).**
+    - **Vehicle:** CASTLE_IN_THE_SKY. Its boot chain parks on VMGM PGC 5, two timed (5 s +
+      5 s) button-less stills, then plays trailers. libdvdnav `trace_nav` agrees.
+    - **Instrument:** the reader's {PGCN, VTS} and `still_active`, read off the HUD with
+      Debug Overlay on.
+    - **Results:**
+
+      | Build | Key | Presses | Time in PGC 5 | Next title | Menu with buttons + Play |
+      |---|---|---|---|---|---|
+      | `main` (PR #158 build) | Play | 2 | 13.0 s (the 10 s timer) | clock 0:03 → 0:04 in 13 s | PGCN 1 unchanged |
+      | `dev-stilloff` | Play | 1 | 5.3 s | clock 0:00 → 0:12, playing | PGCN 1 unchanged |
+      | `dev-stilloff` | Select | 1 | 6.3 s | clock 0:01 → 0:18, playing | PGCN 1 unchanged |
+
+    - One press ends one still: the first card is skipped, and the second runs its own 5 s.
+    - The control's trailer barely moved, which is the stuck-pause trap the design avoids.
+      On `main`, the POST jump's `jump_ack` cleared the first press's pause, and the second
+      press then paused the trailer.
+    - Times include ~4 s of screenshot latency per reading.
+  - **Build:** `releases/DVD_stilloff_20261005_2105.rbf`, SEED 9.
+    - clk_dec passes: 91.68 / 90.55 MHz.
+    - ⚠ clk_mem WARNs at 79.92 / 79.02 MHz (runs at 90). All worst paths are inside
+      `mem_shim_burst` (`tag_ram`, `S_PEEK2`) into the framestore. That is the known
+      placement-sensitive cluster, and none of this change's logic is on it.
+    - A seed sweep that reads both clocks (13, 1, 7, 29) is running.
+  - **Next:**
+    - Pin the seed whose `clk_dec` and `clk_mem` both close.
+    - Optionally, run an indefinite (0xFF) button-less still on HW. The menu scan finds
+      these on BIG_BUCK_BUNNY and Beverly Hills Chihuahua 3, but none is on a boot path,
+      so reaching one needs a scripted walk.
+  - Full design: `docs/dvd_nav.md` "Still off".
 
 - ✅ **NEXT/PREV CHAPTER AT THE TITLE'S EDGES (audit item 7, 2026-10-05,
   `dev-chapedge`; sim-proven and ✅ HW-CONFIRMED against libdvdnav on the rig, control arm
