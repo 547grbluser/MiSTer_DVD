@@ -358,7 +358,7 @@ module vld(clk, clk_en, rst,
   wire        [2:0]video_format;
   wire        [7:0]colour_primaries;
   wire        [7:0]transfer_characteristics;
-  output wire [7:0]matrix_coefficients;
+  output reg  [7:0]matrix_coefficients; /* DVD-FORK FIX (colour matrix): now a per-picture commit of mc_seq, see below */
   output wire[13:0]display_horizontal_size;
   output wire[13:0]display_vertical_size;
 
@@ -1373,6 +1373,36 @@ module vld(clk, clk_en, rst,
     else if (clk_en && (state == STATE_START_CODE) && (getbits[7:0] == CODE_PICTURE_START) && sequence_header_seen) mpeg1 <= ~sequence_extension_seen;
     else mpeg1 <= mpeg1;
 
+  /* DVD-FORK FIX (colour matrix, docs/status_log.md "BT.601 default colour matrix").
+   * Upstream loaded matrix_coefficients straight from STATE_SEQUENCE_DISPLAY_EXT0, which
+   * the FSM visits only when a sequence_display_extension carries colour_description=1.
+   * MPEG-1, colour_description=0 and an MPEG-2 sequence without the extension never
+   * visit it, so they silently KEPT THE PREVIOUS SEQUENCE'S MATRIX (13818-2 6.3.6 says
+   * "absent" means the default, not "unchanged"). Measured: ~60% of DVD features carry
+   * no colour description at all (tools/colour_scan.py).
+   *
+   * mc_seq is the matrix of the sequence being parsed: cleared to 0 ("not signalled") at
+   * every sequence header, loaded when the extension carries one. The output register
+   * takes it at the picture start code -- the same acceptance the mpeg1 latch uses --
+   * NOT at the sequence header. Clearing the output at the header would drop a tagged
+   * stream to 0 for the few dozen decode clocks before its extension reloads it, once
+   * per GOP (repeated sequence headers): a short streak of wrong-matrix pixels on the
+   * raster. Committing at the picture changes the output only when the value in force
+   * really changes. What 0 decodes as is yuv2rgb's decision (BT.601 for this SD core).
+   * bench/dvd/run_colour_matrix.sh mutates the two "CM:" lines below -- keep them one
+   * statement per line. */
+  reg [7:0] mc_seq;
+  always @(posedge clk)
+    if (~rst) mc_seq <= 8'd0;
+    else if (clk_en && (state == STATE_SEQUENCE_HEADER)) mc_seq <= 8'd0; // CM: per-sequence clear
+    else if (clk_en && (state == STATE_SEQUENCE_DISPLAY_EXT0)) mc_seq <= getbits[7:0]; // matrix_coefficients: bits 16..23 of the 24-bit colour description
+    else mc_seq <= mc_seq;
+
+  always @(posedge clk)
+    if (~rst) matrix_coefficients <= 8'd0;
+    else if (clk_en && (state == STATE_START_CODE) && (getbits[7:0] == CODE_PICTURE_START) && sequence_header_seen) matrix_coefficients <= mc_seq; // CM: commit at picture
+    else matrix_coefficients <= matrix_coefficients;
+
   /* DVD-FORK FIX (mpeg1): D-pictures (picture_coding_type == 4; MPEG-1 only, illegal
    * on DVD/VCD) use a different macroblock syntax (end_of_macroblock bit, no EOB) that
    * the I/P/B slice FSM would mis-decode into STATE_ERROR spam. Guard: route a
@@ -1562,7 +1592,8 @@ module vld(clk, clk_en, rst,
   loadreg #( .offset(0), .width(3), .fsm_state(STATE_SEQUENCE_DISPLAY_EXT))          loadreg_video_format(.fsm_reg(video_format), .clk(clk), .clk_en(clk_en), .rst(rst), .state(state), .getbits(getbits));
   loadreg #( .offset(0), .width(8), .fsm_state(STATE_SEQUENCE_DISPLAY_EXT0))         loadreg_colour_primaries(.fsm_reg(colour_primaries), .clk(clk), .clk_en(clk_en), .rst(rst), .state(state), .getbits(getbits));
   loadreg #( .offset(8), .width(8), .fsm_state(STATE_SEQUENCE_DISPLAY_EXT0))         loadreg_transfer_characteristics(.fsm_reg(transfer_characteristics), .clk(clk), .clk_en(clk_en), .rst(rst), .state(state), .getbits(getbits));
-  loadreg #( .offset(16), .width(8), .fsm_state(STATE_SEQUENCE_DISPLAY_EXT0))        loadreg_matrix_coefficients(.fsm_reg(matrix_coefficients), .clk(clk), .clk_en(clk_en), .rst(rst), .state(state), .getbits(getbits));
+  // DVD-FORK FIX (colour matrix): matrix_coefficients is no longer a loadreg -- it is mc_seq,
+  // committed at the picture start code. See the block beside the mpeg1 latch.
   loadreg #( .offset(0), .width(14), .fsm_state(STATE_SEQUENCE_DISPLAY_EXT1))        loadreg_display_horizontal_size(.fsm_reg(display_horizontal_size), .clk(clk), .clk_en(clk_en), .rst(rst), .state(state), .getbits(getbits));
   loadreg #( .offset(0), .width(14), .fsm_state(STATE_SEQUENCE_DISPLAY_EXT2))        loadreg_display_vertical_size(.fsm_reg(display_vertical_size), .clk(clk), .clk_en(clk_en), .rst(rst), .state(state), .getbits(getbits));
 

@@ -621,6 +621,19 @@ in `CONF_STR`. Design: `docs/cdda.md` "`.cue` sheets". ⛔ CHD still not support
 > **top gap confirmed = exact chapters/PTT (7/7 discs); interactive GPRM-counter/NVTMR promoted
 > above parental on measured prevalence (3/7 game discs).** Phase 3 = close gaps in that order.
 
+### ✅ BT.601 as the default colour matrix (HW A/B-measured 2026-10-05, ✅ MERGED PR #156 — see `docs/status_log.md` "BT.601 default colour matrix")
+
+The 3rd-edition audit's item 6.
+- **Census first:** `tools/colour_scan.py`. About 60% of features carry no colour
+  description, and no disc is tagged 709.
+- **"Not signalled" now decodes BT.601** in `yuv2rgb`. Explicit tags are still honoured.
+- **The vld commits a per-sequence matrix at each picture start**, so MPEG-1,
+  `colour_description=0` and extension-less sequences no longer inherit the previous
+  sequence's matrix.
+- **Gate:** `bench/dvd/run_colour_matrix.sh --red`.
+- **HW A/B:** a tagged-6 menu is bit-identical vs `main`, and an untagged menu changes by
+  exactly the 709→601 re-encode.
+
 ### ✅ Player parameters SPRM14/15/20 from the setup, not constants (HW-CONFIRMED 2026-10-05, MERGED PR #154 — see `docs/dvd_vm.md` "Player parameters SPRM14/15/20")
 
 The 3rd-edition audit's items 2 and 3. `dvd/player_regs.sv` gives each disc:
