@@ -143,7 +143,7 @@ module iso_reader_vm_tb;
         .clk(clk), .rst_n(rst_n), .start(start), .file_size(file_size), .title_sel(4'd0), .lu_lang_pref(16'h656E), .aud_drained(1'b1), .vbuf_empty(vbuf_empty), 
         .keep_vbuf(keep_vbuf_w),
         .jump_ttn(vm_jump_ttn), .jump_pgn(vm_jump_pgn), .jump_ptt(vm_jump_ptt),
-        .vm_mode(1'b1), .vm_adv(vm_adv_w), .vm_replay(vm_replay_w),
+        .still_off(1'b0), .vm_mode(1'b1), .vm_adv(vm_adv_w), .vm_replay(vm_replay_w),
         .vm_cell_cmd(vm_cell_cmd_w), .vm_pgc_end(vm_pgc_end_w),
         .nav_ready_o(nav_ready_w), .auto_vts(auto_vts_w),
         .cell_count_o(cell_count_w), .res_ttn(res_ttn_w),

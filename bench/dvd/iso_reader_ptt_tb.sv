@@ -77,7 +77,7 @@ module iso_reader_ptt_tb;
         .agl_vm(4'd0), .agl_vm_en(1'b0), .vm_pre_done(1'b0),
         .clk(clk), .rst_n(rst_n), .start(start), .file_size(file_size), .title_sel(4'd0), .aud_drained(1'b1), .vbuf_empty(1'b0), 
         .jump_ttn(jump_ttn), .jump_pgn(jump_pgn[7:0]), .jump_ptt(jump_ptt),
-        .vm_mode(1'b1), .vm_adv(1'b0), .vm_replay(1'b0),
+        .still_off(1'b0), .vm_mode(1'b1), .vm_adv(1'b0), .vm_replay(1'b0),
         .vm_cell_cmd(), .vm_pgc_end(), .nav_ready_o(nav_ready_w),
         .auto_vts(auto_vts_w), .cell_count_o(cell_count_w), .res_ttn(res_ttn_w),
         .pm_we(), .pm_waddr(), .pm_wdata(), .cmd_nr_pgm(),

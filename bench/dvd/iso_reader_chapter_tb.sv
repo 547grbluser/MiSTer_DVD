@@ -89,7 +89,7 @@ module iso_reader_chapter_tb;
         .chap_pulse(chap_pulse), .chap_dir(chap_dir), .chap_mag(chap_mag), .chap_at_start(chap_at_start),
         .seek_ack(seek_ack), .cur_cell(cur_cell), .cell_ready(cell_ready),
         .jump_ttn(7'd0), .jump_pgn(8'd0),
-        .vm_mode(1'b0), .vm_adv(1'b0), .vm_replay(1'b0),
+        .still_off(1'b0), .vm_mode(1'b0), .vm_adv(1'b0), .vm_replay(1'b0),
         .vm_cell_cmd(), .vm_pgc_end(), .nav_ready_o(), .auto_vts(), .cell_count_o(),
         .pm_we(pm_we), .pm_waddr(pm_waddr), .pm_wdata(pm_wdata), .cmd_nr_pgm(nr_pgm),
         .cur_pgm(cur_pgm), .cur_cell_start(cur_cell_start),

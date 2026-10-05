@@ -117,7 +117,7 @@ module iso_reader_auddrain_tb;
         .vbuf_empty(1'b1), 
         .keep_vbuf(keep_vbuf_w), .jump_cross(jump_cross_w),
         .jump_ttn(vm_jump_ttn), .jump_pgn(vm_jump_pgn), .jump_ptt(vm_jump_ptt),
-        .vm_mode(1'b1), .vm_adv(vm_adv_w), .vm_replay(vm_replay_w),
+        .still_off(1'b0), .vm_mode(1'b1), .vm_adv(vm_adv_w), .vm_replay(vm_replay_w),
         .vm_cell_cmd(vm_cell_cmd_w), .vm_pgc_end(vm_pgc_end_w),
         .nav_ready_o(nav_ready_w), .auto_vts(auto_vts_w),
         .cell_count_o(cell_count_w), .res_ttn(res_ttn_w),

@@ -400,6 +400,7 @@ otherwise; `--red` runs its mutation arms).
 | IR / media-remote keys work unmapped (Main-side remap, `DVD_IR_REMAP`; PR #124) | ✅ | `ir_remote.md` | `main/tests/run_tests.sh`, `test_ir_integration.py`, `check_ir_remap.py` |
 | Show-first Audio/Subtitle: first press shows, a press while shown steps; popup shows the effective (menu-chosen) track (PR #145) | 🔧 MERGED ⏳ HW-confirm pending | `track_selection.md` "Show-first" | `run_track_show.sh --red`, `check_track_step_wiring.py` |
 | Remote buttons: Stop, Aspect, Chapter Menu, A-B, Frame Step, Eject, Volume | ✅ | `dvd_nav.md`, `screensaver.md` | `run_frame_step.sh`, `check_frame_step_wiring.py` |
+| Still off (UOP18): Play/Pause or Select ends a still with no buttons armed or pending (audit 5); a jump no longer leaves a stale still timer | ✅ HW (timed stills, Play + Select, A/B vs `main`; SEED 7), MERGED PR #159 | `dvd_nav.md` "Still off" | `run_still_off.sh --red`, `check_still_off_wiring.py`, `check_select_noop.py` |
 | Frame step as a pause route; unbounded steps; clock follows the step | ✅ | `dvd_nav.md` | `run_frame_step.sh` |
 | Screensaver, and overlays blanked with the picture | ✅ | `screensaver.md` | `run_screensaver.sh`, `check_saver_overlay_wiring.py` |
 | Launch feedback: config versioning, startup OSD, idle logo | ✅ | `idle_screen.md` | — |

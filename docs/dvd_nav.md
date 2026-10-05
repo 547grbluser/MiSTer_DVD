@@ -961,6 +961,89 @@ slot alias (the decoder writing into the slot being scanned out). Fixed in
 `rtl/mpeg2/motcomp_picbuf.v`; see `docs/dvd_menu_refinements.md` §5. The `menu_dom`-only gate on
 the cold re-decode remains a separate, deliberate open item.
 
+### Still off — Play/Pause or Select ends a still with no buttons (audit item 5, 2026-10-05) — ✅ HW-CONFIRMED on timed stills (Play and Select, A/B vs `main`; `docs/status_log.md`), ✅ MERGED (PR #159), ⏳ an indefinite still on HW
+
+**What.** "Still off" (UOP18) is a *mandatory* user operation (*DVD Demystified* 3rd ed.,
+Table 9.15). Before this, `S_STILL` exited only on its timer, a VM jump or a seek. A timed
+still (up to 254 s, or a duration-residual hold) and an indefinite still with no buttons
+could be escaped only with a chapter skip, and a **menu-domain** one not at all: Next/Prev
+are gated off while a menu is up. That covers warning cards, the "wrong region" dead ends
+the region audit found, and narrated character screens (Atmosfear).
+
+**Keys (user decision, 2026-10-05): Play/Pause (B1, Space, remote Play) and Select (B4,
+Enter, remote OK).** Precedent: VLC 2026 (`modules/access/dvdnav.c`
+`StillSkipIfNoButtons`, called from both `DEMUX_SET_PAUSE_STATE` and `DEMUX_NAV_ACTIVATE`)
+and Kodi (Select/Next/Right/Up skip a still when `GetTotalButtons() == 0`). Next was
+rejected: it already means chapter skip in a title. **Both timed and indefinite stills**
+(user decision, same day). VLC skips only indefinite ones, but the audit named the timed
+holds too, and the spec's Still off ends any still.
+
+**When the key acts** (`dvd/emu.sv` `still_off_ok`, gated by `tools/check_still_off_wiring.py`):
+
+| Term | Why |
+|---|---|
+| `still_active` | The reader is **parked** in `S_STILL`. A menu transition is a playing cell, so Select during one is still the strict no-op `check_select_noop.py` guards. |
+| `!hl_btns_armed` | A still with buttons is a menu, and the user picks a button. Thayer's timed choices, Scene It's park screen and every menu are untouched. |
+| `!hl_btns_pend` | `nav_pci`'s new output: an HLI **with buttons** parsed but not yet promoted (either pending slot). At a menu still's park the HLI is usually still pending until `menu_settled` promotes it, and a press in that window must not skip the menu. |
+| `menus_on` | The reader's own gate (`still_act`) needs the VM to run the continuation anyway. |
+| `!stopped_w` | While stopped, B1 means Play and belongs to `stop_ctl`. |
+
+The press **preempts the pause toggle and clears `pause_q`**: it means Play. If it toggled as
+well, a `STILL_NEXT` exit (which raises no `jump_ack` to clear a pause) would land the next
+cell paused. With a button armed, both keys do what they did before.
+
+**What it runs** (`dvd/dvd_iso_reader.sv` `S_STILL`). The still's own deferred action
+(`still_next`), the one its timer runs at expiry. One body, two triggers, so a skipped still
+can never continue differently from an expired one:
+
+| Still | `still_next` | libdvdnav (`dvdnav_still_skip` → `vm_get_next_cell`) |
+|---|---|---|
+| Timed or duration-residual, cell command | `STILL_CMD`: the cell command (VM) | same |
+| Indefinite (0xFF), not the last cell | `STILL_NEXT`: the next cell | same |
+| Indefinite (0xFF) or timed, the last cell | `STILL_PGEND`: PGC end → POST | same |
+
+The 0xFF entry now records `still_next`/`still_last` (it set neither before, since only the
+timer read them). With `vm_mode` the cell command outranks a 0xFF still (the HW-proven
+Phase-3 ordering, commented at the reader's cell-end branch), so `STILL_CMD` never applies
+there.
+
+**Holds the key ignores (`still_act = 0`).** These are the holds with no continuation of
+their own, and the key is a no-op there, as it is at a dead end on a real player:
+- the POST fall-through hold (a PGC still, or no `next_pgcn`);
+- the malformed-menu-cell hold;
+- the menus-off menu hold;
+- any still with Disc Menus off.
+
+**The stale timer (fixed in the same change).** `jump_go`, `seek_jump` and the mount never
+cleared `still_timed`. A timed still left by a button jump (Thayer's choices) therefore left
+its countdown behind, and the next hold that does not set `still_timed` (the three dead-end
+holds above) counted down the stale `still_secs` and fired the stale `still_next`, which
+could be a cell command for a PGC that was no longer loaded. Every non-action exit now
+clears `still_timed` and `still_act`. Arm E reproduces it: mutation R5 (the old exits)
+fails E alone.
+
+**Known limitations.**
+- A press while the still is still **draining** (`still_pend`, before `S_STILL`) is not
+  remembered (arm H). Press again once it is up.
+- On a button-less still **with audio** (a narrated screen), Play/Pause now ends the still
+  rather than pausing the narration.
+- A PGC still time is still never timed (the 2026-10-01 audit counted 0 of 1,430 library
+  discs authoring one; its table lives on the unmerged `docs/demystified-3rd-audit` branch),
+  so its hold is a dead end and the key ignores it.
+- The disc's own UOP18 prohibition is not read, consistent with the UOP decision (⛔, user
+  2026-10-01): none of the three UOP levels is honoured.
+
+**Gate.** `bench/dvd/run_still_off.sh --red`:
+- `iso_reader_stilloff_tb` arms A–H;
+- the still/menu reader benches that share `S_STILL`;
+- `nav_pci_tb` T1a/T1/T7a/T7 (`btns_pend`);
+- `check_still_off_wiring.py --red` (ten miswirings);
+- `check_select_noop.py` (amended: the Still off decode is Select's one named, gated
+  exception; `run_select_noop.sh` R7/R8 cover it).
+
+Eight mutations, each failing exactly its own arms. `run_reader_regress.sh` is bit-identical
+to `main` on every arm with the key never pressed.
+
 ### Proto-nav glue (emu.sv, replaced by the VM in Phase 4)
 
 `J1,Pause,Prev Chapter,Next Chapter,Select,Menu` (buttons = `joystick_0[4..8]`).

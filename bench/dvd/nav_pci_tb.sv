@@ -50,6 +50,7 @@ module nav_pci_tb;
     wire [63:0] btn_cmd;
     wire btn_cmd_valid;
     wire btns_armed;
+    wire btns_pend;      // an HLI with buttons parsed, not yet promoted (user Still off gate)
     wire [5:0] btn_sel, dbg_btn_ns;
 
     always #5 clk = ~clk;
@@ -71,7 +72,7 @@ module nav_pci_tb;
         .hl_on(hl_on), .hl_x1(hl_x1), .hl_x2(hl_x2), .hl_y1(hl_y1), .hl_y2(hl_y2),
         .hl_coli(hl_coli),
         .btn_cmd(btn_cmd), .btn_cmd_valid(btn_cmd_valid),
-        .btns_armed(btns_armed), .btn_sel(btn_sel), .dbg_btn_ns(dbg_btn_ns)
+        .btns_armed(btns_armed), .btns_pend(btns_pend), .btn_sel(btn_sel), .dbg_btn_ns(dbg_btn_ns)
     );
 
     // count activation pulses + last cmd
@@ -171,11 +172,13 @@ module nav_pci_tb;
         stc = 33'd0;
         feed_pci(0);
         chk(btns_armed === 1'b0, "T1a not armed before s_ptm");
+        chk(btns_pend === 1'b1, "T1a btns_pend while the HLI waits for s_ptm");
         stc = 33'd2579300;                       // cross s_ptm=2579208
         repeat (120) @(posedge clk);
         $display("T1: armed=%b btn_ns=%0d sel=%0d hl_on=%b (expect 1 7 1 1)",
                  btns_armed, dbg_btn_ns, btn_sel, hl_on);
         chk(btns_armed === 1'b1, "T1 armed at s_ptm");
+        chk(btns_pend === 1'b0, "T1 btns_pend clears once promoted");
         chk(dbg_btn_ns == 6'd7, "T1 btn_ns");
         chk(btn_sel == 6'd1, "T1 initial selection (fosl=0 -> button 1)");
         chk(hl_on === 1'b1, "T1 hl_on");
@@ -237,6 +240,7 @@ module nav_pci_tb;
         feed_pci(0);
         repeat (400) @(posedge clk);            // aged, but video DEAD
         chk(btns_armed === 1'b0, "T7a no fallback while video dead");
+        chk(btns_pend === 1'b1, "T7a btns_pend while the fallback waits");
         video_live = 1;
         repeat (100) @(posedge clk);            // video live but not yet aged (<300)
         chk(btns_armed === 1'b0, "T7b fallback waits for the age threshold");
@@ -244,6 +248,7 @@ module nav_pci_tb;
         $display("T7: armed=%b btn_ns=%0d (STC never reached s_ptm)",
                  btns_armed, dbg_btn_ns);
         chk(btns_armed === 1'b1, "T7 fallback promoted with STC stuck below s_ptm");
+        chk(btns_pend === 1'b0, "T7 btns_pend clears on the fallback promotion");
         chk(dbg_btn_ns == 6'd7, "T7 fallback armed the 7-button HLI");
 
         // ---- Build a synthetic ss=0 DISARM packet in scratch sector @4096:

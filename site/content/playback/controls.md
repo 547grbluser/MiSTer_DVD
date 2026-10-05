@@ -6,7 +6,7 @@ standard numbering — whatever you mapped B1 to in the MiSTer menu is what "B1"
 
 | Button | Action | | Button | Action |
 |---|---|---|---|---|
-| B1 | Pause — and Play, when stopped | | B10 | Fast Fwd (hold to scrub) |
+| B1 | Pause — and Play, when stopped or on a [still](#still-pictures) | | B10 | Fast Fwd (hold to scrub) |
 | B2 | Prev Chapter | | B11 | Rewind (hold to scrub) |
 | B3 | Next Chapter | | B12 | Title menu |
 | B4 | Select | | B13 | Return (go up) |
@@ -95,7 +95,7 @@ plus the media keys in the table below.
 
 | Remote key | Does |
 |---|---|
-| Play, Pause, Play/Pause | Pause and resume |
+| Play, Pause, Play/Pause | Pause and resume; on a [still](#still-pictures), continue |
 | Stop | Stop (two-stage — see [Stopping a disc](#stopping-a-disc)) |
 | Fast Fwd, Rewind | Seek ±10 s per press |
 | Next, Previous | Chapter forward and back |
@@ -174,7 +174,7 @@ Your remote's **transport keys** work as you would expect:
 
 | Remote key | Does |
 |---|---|
-| Play / Pause | Pause and resume |
+| Play / Pause | Pause and resume; on a [still](#still-pictures), continue |
 | Stop | Stop (two-stage — see [Stopping a disc](#stopping-a-disc)) |
 | Fast Fwd / Rewind | Seek ±10 s per press |
 | Prev / Next | Chapter back and forward |
@@ -268,9 +268,10 @@ the disc provides one.
 **B5 (Menu)** and **B12 (Title)** are the two menu keys a set-top remote has. Menu goes to
 the disc's root menu; Title goes to the title menu. Many discs make them the same thing.
 
-If no button is highlighted, **Select does nothing**. To get back to the film, press
-**Menu** — if you opened the menu with Menu in the first place, it takes you back to
-exactly where you left off.
+If no button is highlighted, **Select does nothing**, with one exception: on a
+[still picture with nothing to select](#still-pictures) it moves the disc on. To get back
+to the film, press **Menu** — if you opened the menu with Menu in the first place, it takes
+you back to exactly where you left off.
 
 !!! note "Presses during a menu's own animations"
     Many discs animate between menu screens, and there is nothing to press while that is
@@ -288,6 +289,30 @@ discs, DVD games especially, author their per-title Root "menu" as a *dispatcher
 routes based on where you pressed Menu from. Followed literally during the opening chain,
 that drops you into a random clip rather than a menu. Once you have been to a menu at least
 once, Menu behaves exactly as the disc specifies.
+
+## Still pictures
+
+Discs often stop on a still picture and wait. Examples are a copyright or warning card, a
+studio logo, a title card, or a screen with a voice reading over it. Some of these move on
+by themselves after a set time, and some wait for ever.
+
+If the picture has **nothing on it to select**, press **B1 (Play/Pause)** or
+**B4 (Select)** to move on. The disc continues exactly as it would have when the wait ran
+out: the next part plays, or the disc follows its own instructions for what comes next.
+This is the DVD standard's "still off", which every player has to offer.
+
+If the picture **has buttons**, it is a menu: pick a button as usual. Play/Pause still
+pauses and Select still activates the highlighted button there. Right after a menu
+appears, its buttons can take a moment to show up. Until they do, the keys wait for them
+rather than skipping the menu.
+
+!!! note "When the keys do nothing on a still"
+    - **Disc Menus is Off.** The core is then not running the disc's own instructions, so
+      there is nothing to continue to.
+    - **The disc has nowhere left to go.** A screen that is the last thing a disc does,
+      with no instructions after it, stays up. Press **Menu** or **Title** to leave it.
+    - **The picture is still arriving.** A press while the picture is still being drawn is
+      not remembered. Press again once it is up.
 
 ## During playback
 

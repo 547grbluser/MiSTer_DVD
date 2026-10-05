@@ -75,7 +75,7 @@ module iso_reader_scrub_tb;
         .agl_vm(4'd0), .agl_vm_en(1'b0), .vm_pre_done(1'b0),
         .clk(clk), .rst_n(rst_n), .start(start), .file_size(file_size), .title_sel(4'd0), .aud_drained(1'b1), .vbuf_empty(1'b0), 
         .jump_ttn(7'd0), .jump_pgn(8'd0),
-        .vm_mode(1'b0), .vm_adv(1'b0), .vm_replay(1'b0),
+        .still_off(1'b0), .vm_mode(1'b0), .vm_adv(1'b0), .vm_replay(1'b0),
         .vm_cell_cmd(), .vm_pgc_end(), .nav_ready_o(), .auto_vts(), .cell_count_o(),
         .pm_we(), .pm_waddr(), .pm_wdata(), .cmd_nr_pgm(),
         .seek_pulse(seek_pulse), .seek_natural(1'b0), .seek_cell(seek_cell), .seek_ack(seek_ack),

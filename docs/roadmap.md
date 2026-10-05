@@ -621,6 +621,19 @@ in `CONF_STR`. Design: `docs/cdda.md` "`.cue` sheets". ⛔ CHD still not support
 > **top gap confirmed = exact chapters/PTT (7/7 discs); interactive GPRM-counter/NVTMR promoted
 > above parental on measured prevalence (3/7 game discs).** Phase 3 = close gaps in that order.
 
+### ✅ User Still off: Play/Pause or Select ends a still with no buttons (2026-10-05; ✅ HW-CONFIRMED on timed stills, A/B vs `main`, ✅ MERGED PR #159 — see `docs/dvd_nav.md` "Still off")
+
+The 3rd-edition audit's item 5, a mandatory user operation (UOP18). With Disc Menus on, on a
+parked still with no button armed or pending, Play/Pause or Select runs what the still's
+timer would have run: the next cell, the cell command, or the PGC end. Dead-end holds ignore
+the key. Decisions (user, 2026-10-05): those two keys, after VLC 2026 and Kodi; and timed as
+well as indefinite stills. Fixed on the way: a jump out of a timed still left its countdown
+behind for the next dead-end hold. Gate: `bench/dvd/run_still_off.sh --red`.
+HW: on CASTLE_IN_THE_SKY's two 5 s boot cards, one Play or Select press left the first card
+at once, where `main` sat out the timer, and a menu with buttons was untouched.
+SEED 7 pinned (SEED 9 missed `clk_mem` on this netlist; 7 is best on both clocks).
+**Next:** optionally an indefinite still on HW.
+
 ### ✅ Next/Prev chapter at the title's edges (2026-10-05; ✅ HW-CONFIRMED vs libdvdnav, ✅ MERGED PR #158 — see `docs/dvd_nav.md` "Chapter skip at the title's edges")
 
 The 3rd-edition audit's item 7. With Disc Menus on:

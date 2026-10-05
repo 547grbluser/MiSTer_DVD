@@ -127,7 +127,7 @@ for tb in iso_reader_vm iso_reader_menu iso_reader_cluedo_menu iso_reader_intitl
           iso_reader_predispatch iso_reader_montage iso_reader_linkptt iso_reader_celldur; do
     T=bench/dvd/${tb}_tb.sv
     [ -f "$T" ] || { failed "$tb: bench missing"; continue; }
-    if iv "$TMP/$tb" dvd/dvd_iso_reader.sv dvd/dvd_vm.sv dvd/bcd_time_add.sv "$T" \
+    if iv "$TMP/$tb" dvd/dvd_iso_reader.sv dvd/dvd_vm.sv dvd/bcd_time_add.sv dvd/player_regs.sv "$T" \
          > "$TMP/$tb.log" 2>&1; then
         vvp "$TMP/$tb" > "$TMP/$tb.out" 2>&1 || true
         # ⚠ Require the PASS marker positively, and never sniff for "error": these
@@ -199,6 +199,17 @@ if grep -q "key_resume_p <= 1'b1;" "$E"; then
 else
     failed "R4: the comment no longer quotes the deleted code -- the trap is undocumented"
 fi
+
+# R7/R8 -- the ONE named exception, user Still off (2026-10-05). Select may end a
+# PARKED still with no button armed or pending; without that gate it is an
+# ordinary second consumer again, and without the no-buttons terms it would mean
+# something other than Activate where a highlight can exist.
+mut R7 "$E" "$TMP/R7.sv" \
+    "s|^wire still_off_go = still_off_ok \&\& (pause_edge \|\| sel_edge);|wire still_off_go = (pause_edge \|\| sel_edge);|" \
+    && red_emu "R7 Still off decode loses its gate" "$TMP/R7.sv" "second consumer"
+mut R8 "$E" "$TMP/R8.sv" \
+    "s|^wire still_off_ok = menus_on \&\& still_active \&\& !hl_btns_armed \&\& |wire still_off_ok = menus_on \&\& still_active \&\& |" \
+    && red_emu "R8 Still off allowed with a button armed" "$TMP/R8.sv" "lacks \`!hl_btns_armed\`"
 
 echo "== RED (the VM: both V_WAIT doors) =="
 V=dvd/dvd_vm.sv

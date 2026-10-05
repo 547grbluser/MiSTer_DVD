@@ -22,6 +22,101 @@ predate later confirmations; the `CLAUDE.md` index carries the reconciled status
 
 ## Hardware status (THIS fork, verified 2026-06-21)
 
+- ✅ **USER STILL OFF: PLAY/PAUSE OR SELECT ENDS A STILL WITH NO BUTTONS (audit item 5,
+  2026-10-05, `dev-stilloff`; sim-verified, ✅ HW-CONFIRMED on
+  timed stills, Play and Select, A/B against `main`, on the pinned SEED 7 build; ✅ MERGED
+  (PR #159); ⏳ an indefinite still on HW).**
+  - **Gap.** Still off (UOP18) is a mandatory user operation (3rd ed. Table 9.15). `S_STILL`
+    exited only on its timer, a VM jump or a seek. A timed still or a button-less indefinite
+    still could be escaped only with a chapter skip, and a menu-domain one not at all.
+  - **Decisions (user, 2026-10-05):**
+    - **Keys: Play/Pause and Select**, after VLC 2026 (`StillSkipIfNoButtons` on both pause
+      and activate) and Kodi (Select/Next skip a button-less still). Next keeps meaning
+      chapter skip.
+    - **Timed and indefinite stills both**, where VLC does indefinite only.
+  - **Built.**
+    - **Reader:** `still_off` runs the still's own `still_next` (next cell / cell command /
+      PGC end), the action its timer runs at expiry. The 0xFF entry now records it.
+      `still_act` is 0 on the dead-end holds (POST fall-through, malformed menu cell,
+      menus-off), which ignore the key.
+    - **nav_pci:** `btns_pend`, an HLI with buttons parsed but not yet promoted.
+    - **emu:** `still_off_ok` = Disc Menus on, parked, no button armed or pending, not
+      stopped. The press preempts the pause toggle and clears pause.
+    - **`check_select_noop.py` amended:** the Still off decode is Select's one named, gated
+      exception to "one meaning". Any other new reader of `sel_edge` still fails.
+  - **Found and fixed on the way: a stale still timer.** `jump_go`, `seek_jump` and the
+    mount never cleared `still_timed`. A timed still left by a button jump (Thayer) left its
+    countdown behind, and the next dead-end hold fired the stale `still_next`. Arm E
+    reproduces it, and mutation R5 (the old exits) fails E alone.
+  - **Gates.**
+    - `bench/dvd/run_still_off.sh --red`: `iso_reader_stilloff_tb` A–H, `nav_pci_tb`
+      `btns_pend` checks, `check_still_off_wiring.py --red` (10 miswirings) and 8 RTL
+      mutations, each failing exactly its arms.
+    - `run_reader_regress.sh`: bit-identical to `main` on every arm (key tied 0).
+    - `run_select_noop.sh --red` green with new arms R7/R8. Its `iso_reader_vm` compile had
+      been failing on `main` since PR #154 (`player_regs` missing from its file list), and
+      is fixed here.
+  - **Audit bookkeeping.** This resolves row 5 of the A/B table in `docs/conformance.md` on
+    the unmerged `docs/demystified-3rd-audit` branch (and its roadmap item 5). Mark it there
+    when that branch lands.
+  - **HW (2026-10-05, rig `.201`, control arm first, same script on each build).**
+    - **Vehicle:** CASTLE_IN_THE_SKY. Its boot chain parks on VMGM PGC 5, two timed (5 s +
+      5 s) button-less stills, then plays trailers. libdvdnav `trace_nav` agrees.
+    - **Instrument:** the reader's {PGCN, VTS} and `still_active`, read off the HUD with
+      Debug Overlay on.
+    - **Results:**
+
+      | Build | Key | Presses | Time in PGC 5 | Next title | Menu with buttons + Play |
+      |---|---|---|---|---|---|
+      | `main` (PR #158 build) | Play | 2 | 13.0 s (the 10 s timer) | clock 0:03 → 0:04 in 13 s | PGCN 1 unchanged |
+      | `dev-stilloff` | Play | 1 | 5.3 s | clock 0:00 → 0:12, playing | PGCN 1 unchanged |
+      | `dev-stilloff` | Select | 1 | 6.3 s | clock 0:01 → 0:18, playing | PGCN 1 unchanged |
+
+    - One press ends one still: the first card is skipped, and the second runs its own 5 s.
+    - ⚠ **Unexplained, on `main` only:** after the two Play presses, the control's next
+      trailer barely moved (0:03 → 0:04 over 13 s, on both rigs). Both presses were sent
+      while PGC 5 was still parked, so a jump between them does not explain it. It is
+      consistent with a pause surviving into the next title, but that is unmeasured. Read
+      `pause_q` (telemetry flags) through the same script to settle it. The feature build
+      does not show it: its trailers played.
+    - **Not exercised on HW:** the `btns_pend` window, a press between a still menu's park
+      and its highlight's promotion. Castle's menu is a looping motion menu, so it never
+      parks on a still. That gate is covered in sim (`nav_pci_tb` T1a/T7a) and by
+      `check_still_off_wiring.py`.
+    - Times include ~4 s of screenshot latency per reading.
+  - **Build: `releases/DVD_stilloff_20261005_2238.rbf`, SEED 7.**
+    - **First fit, SEED 9 (`..._2105.rbf`, not for testers):** clk_dec passed at 91.68 /
+      90.55 MHz. But clk_mem fell to 79.92 / 79.02 MHz against its 90 MHz run rate.
+    - Every worst path there is inside `mem_shim_burst` (`tag_ram`, `S_PEEK2`) into the
+      framestore. That is the known placement-sensitive cluster, and none of this change's
+      logic is on it.
+    - **Sweep:** `clk_dec` / `clk_mem` in MHz, @100 °C / @−40 °C (per-seed table in
+      `DVD.qsf`):
+
+      | Seed | `clk_dec` | `clk_mem` |
+      |---|---|---|
+      | 13 | 92.23 / 89.44 | 94.64 / 93.94 |
+      | 1 | 89.41 / 85.86 | 70.38 / 71.45 (fails both) |
+      | 7 | 93.55 / 89.74 | 95.22 / 96.38 |
+      | 29 | 89.08 / 86.69 | 94.00 / 94.58 |
+
+    - **SEED 7 pinned:** best on both clocks.
+    - The sweep wrote SEED 29 into the qsf (the last seed it fitted), so it was corrected by
+      hand. The `.rbf.json`'s `fit.seed` had to be corrected too.
+    - **Re-run on the SEED 7 build:** one Play press left PGC 5 (5.7 s), the next trailer
+      played (clock 0:01 → 0:13), the menu with buttons was untouched, and the picture is
+      clean.
+  - **libdvdnav boot sweep:** `trace_nav ""` over all 1,431 root images found no disc whose
+    boot parks on an indefinite button-less still. The one `buttons=0` park
+    (SLEEPY_HOLLOW) is a 1 s timed still. Indefinite button-less stills are reached only
+    through menus, as dead ends.
+  - **Next:**
+    - Optionally, run an indefinite (0xFF) button-less still on HW. `tools/still_scan.py`
+      (menu-domain cells with a still time and no buttons in their NAV pack) finds these on
+      BIG_BUCK_BUNNY and Beverly Hills Chihuahua 3. None is on a boot path, so reaching one
+      needs a scripted walk.
+  - Full design: `docs/dvd_nav.md` "Still off".
+
 - ✅ **NEXT/PREV CHAPTER AT THE TITLE'S EDGES (audit item 7, 2026-10-05,
   `dev-chapedge`; sim-proven and ✅ HW-CONFIRMED against libdvdnav on the rig, control arm
   first; ✅ MERGED PR #158).**

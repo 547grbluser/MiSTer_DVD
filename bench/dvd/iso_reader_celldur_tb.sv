@@ -113,7 +113,7 @@ module iso_reader_celldur_tb;
         .aud_drained(1'b1), .vbuf_empty(1'b1), 
         .disp_tick(disp_tick), .disp_fps(6'd4),
         .jump_ttn(vm_jump_ttn), .jump_pgn(vm_jump_pgn), .jump_ptt(vm_jump_ptt),
-        .vm_mode(1'b1), .vm_adv(vm_adv_w), .vm_replay(vm_replay_w),
+        .still_off(1'b0), .vm_mode(1'b1), .vm_adv(vm_adv_w), .vm_replay(vm_replay_w),
         .vm_cell_cmd(vm_cell_cmd_w), .vm_pgc_end(vm_pgc_end_w),
         .nav_ready_o(nav_ready_w), .auto_vts(auto_vts_w),
         .cell_count_o(cell_count_w), .res_ttn(res_ttn_w),

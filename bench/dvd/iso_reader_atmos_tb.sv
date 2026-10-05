@@ -56,7 +56,7 @@ module iso_reader_atmos_tb;
         .jump_vts(jump_vts), .jump_pgcn(jump_pgcn), .jump_entry(jump_entry),
         .jump_cell(jump_cell), .jump_ttn(jump_ttn), .jump_pgn(jump_pgn),
         .jump_ptt(jump_ptt),
-        .vm_mode(1'b1), .vm_adv(1'b0), .vm_replay(1'b0),
+        .still_off(1'b0), .vm_mode(1'b1), .vm_adv(1'b0), .vm_replay(1'b0),
         .vm_cell_cmd(), .vm_pgc_end(), .nav_ready_o(), .auto_vts(), .cell_count_o(),
         .pm_we(), .pm_waddr(), .pm_wdata(), .cmd_nr_pgm(),
         .jump_ack(), .pgc_loaded(pgc_loaded), .pgc_error(pgc_error),
