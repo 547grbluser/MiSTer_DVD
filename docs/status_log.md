@@ -79,7 +79,7 @@ predate later confirmations; the `CLAUDE.md` index carries the reconciled status
     `run_field_blend.sh`'s W0 checked a checker against `git show main:`. Each went green
     the moment its feature merged, and failed every `--red` run after that. Do not
     reintroduce the pattern.
-  - **Next:** the maintainer's eye check on a 4:3 display, then a PR.
+  - **Next:** a PR.
   - **Known limitations:**
     - SIF content is never corrected. Lifting that needs `vsz_eff`-derived overlay bars.
     - SPRM14 still follows `aa_live` on a SIF title.
@@ -166,17 +166,30 @@ predate later confirmations; the `CLAUDE.md` index carries the reconciled status
     - **PAL 576 Letterbox** (THE_OFFICE_UK, Progressive): Fit spans rows 1–574 (the
       disc's edge half-lines, §11). Letterbox gives 430 lines at rows 73–502, which is
       574 × ¾ under the 72-line bar.
-  - **Not covered on HW:** a 31 kHz analog display (VGA CRT, 480p component) or a 4:3
-    HDMI set judged by eye. Every check here was on the raw raster. Left to the
-    maintainer.
-    - An analog-path capture through a RetroTINK on the rig (2026-10-05) was
-      inconclusive.
-      - The capture card returned a flat level-7 frame and silent audio (−87 dB) in
-        every mode, Interlaced included.
-      - That means no source lock, not a core result.
-      - Possible cause: the RetroTINK's output mode. The card takes 1080p up to 60 Hz,
-        but 1440p only at 30 Hz.
-      - The raw rasters captured alongside it were correct.
+  - **Not covered on HW:** a VGA CRT, a 480p component TV or a 4:3 HDMI set judged by
+    eye. The analog path itself is covered below, through a RetroTINK.
+    - ✅ **Analog path through a RetroTINK (2026-10-05, rig ini `vga_scaler=0`, RGB
+      csync, Video Output = Progressive → 480p on the pins), captured at 1280×720.**
+      - The RetroTINK locks to the progressive analog raster and frames it as a 4:3
+        window (columns ≈151–1127).
+      - One paused frame, Analog Aspect switched live:
+
+        | Setting | Through the RetroTINK |
+        |---|---|
+        | Fit | full height, the anamorphic squeeze (the reported problem) |
+        | Letterbox | 540 of 720 lines, bars 91/89; matches Fit scaled ¾: 0.898 against 0.326 as-is |
+        | Crop | full height, stretched; matches Fit's stretched centre: 0.793 against 0.618 as-is |
+
+      - The HUD stays anchored at the bottom in all three.
+      - The first attempt failed because the RetroTINK was on the wrong input.
+      - ⚠ Instrument notes, for whoever captures next:
+        - The capture card's 1080p MJPEG mode stopped delivering frames during the
+          session, while 720p and 480p still worked.
+        - The card sometimes returns a whole capture of its flat no-signal frame
+          (level 7, std 0) on open, with nothing changed; retry.
+        - OBS holding the card makes captures fail outright.
+        - A title running to its end gives a black raster with lates at 60/s (one per
+          refresh) and 0 fps: read the HUD time before calling that a fault.
 
 - ✅ **PLAYER PARAMETERS SPRM14/15/20 FROM THE SETUP, NOT CONSTANTS (PR #154,
   2026-10-04; HW-CONFIRMED against a `main` control arm, MERGED PR #154).** Design: `docs/dvd_vm.md` "Player

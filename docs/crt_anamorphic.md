@@ -832,5 +832,10 @@ that exists; pre-existing on the interlaced raster).
   THE_OFFICE_UK and Thayer's Quest (`pacing_matrix.py --aspect`), so the ~4/3 display
   read rate costs nothing measurable.
 
-Numbers are in `docs/status_log.md`. Not checked here: a real 31 kHz or 4:3 HDMI display
-by eye.
+- **The real analog path** (Progressive 480p on the pins → a RetroTINK → capture), one
+  paused frame:
+  - Fit shows the anamorphic squeeze.
+  - Letterbox is 540/720 lines with bars (0.898 against the ¾-scaled Fit).
+  - Crop is full-height and stretched.
+
+Numbers are in `docs/status_log.md`.

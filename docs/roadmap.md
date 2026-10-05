@@ -658,7 +658,7 @@ HW (two rounds, against the playerregs control):
 - 0 lates on ROGER, Office and Thayer.
 
 **Next:**
-- The maintainer's eye check on a 31 kHz / 4:3 HDMI display, then a PR.
+- A PR (the analog path is confirmed through a RetroTINK).
 - Possible follow-up: `vsz_eff`-derived overlay bars. That would lift the SIF guard and fix
   forced-PAL over 480-line content.
 
