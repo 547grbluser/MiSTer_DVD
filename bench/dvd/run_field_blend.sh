@@ -19,6 +19,12 @@
 #   chain +bob=1 (pickup scans keep the first field [C9], held re-scans the second and
 #   are byte-identical [C1 C5], film untouched [C4], the fields arm unmarked [C8],
 #   both kinds of scan actually scored [C10])
+#   LETTERBOX AFTER BLEND/BOB (feature/progressive-aspect, docs/crt_anamorphic.md §13):
+#   chain +vscale=1 with Blend, Bob and film -- disp_vscale scored as a module pair
+#   against the field_blend scans it consumed: exact 3/4 blend, H*3/4 lines, ROW_0 /
+#   ROW_1 / ROW_X tags [C11], and not vacuous [C11V]. disp_vscale's own mutations live
+#   in bench/dvd/run_vscale_frame.sh; main's pre-fix disp_vscale fails all three here
+#   (measured 2026-10, docs/status_log.md).
 #
 # --red  each arm must FAIL exactly where designed:
 #   RED-K  -Pfield_blend_tb.BLEND=0 (the pre-feature weave) vs the model   -> K1
@@ -153,6 +159,9 @@ launch chain chain_bob_film pass - +bob=1 +pfr=1
 launch chain chain_bob_mix  pass - +bob=1 +mix=1
 launch chain chain_bob_pause pass - +bob=1 +pause=1
 launch chain chain_bob_ilace pass - +bob=1 +ilace=1
+launch chain chain_vscale      pass - +vscale=1
+launch chain chain_bob_vscale  pass - +vscale=1 +bob=1
+launch chain chain_film_vscale pass - +vscale=1 +pfr=1
 score
 
 if [ $RED = 1 ]; then
@@ -211,9 +220,10 @@ if [ $RED = 1 ]; then
       echo "  FAIL  $label: the wiring checker CRASHED (see $OUT/$label.log)"; fail=1
     else echo "  ok    $label (fail: $(grep -m1 -- '  - ' "$OUT/$label.log" | cut -c5-60))"; fi
   }
-  git show refs/heads/main:dvd/emu.sv >"$OUT/w_emu_main.sv" 2>/dev/null && \
-  git show refs/heads/main:rtl/mpeg2/mpeg2video.v >"$OUT/w_mpeg_main.v" 2>/dev/null && \
-    wred W0_pre_feature --emu "$OUT/w_emu_main.sv" --mpeg "$OUT/w_mpeg_main.v"
+  # (W0_pre_feature -- the checker against `git show refs/heads/main` -- stood here. It went
+  # green the moment field blend merged, since main then WAS the feature, and failed every
+  # --red run after that. Retired in feature/progressive-aspect, like run_player_regs.sh's
+  # identical arm: the W1..W11 mutations carry the proof permanently.)
   m=$(mutate W1 dvd/emu.sv "s/wire blend_en = (deint_mode == 2.d2) \& ~interlaced_eff;/wire blend_en = (deint_mode == 2${Q}d0) \& ~interlaced_eff;/") && wred W1_default_on --emu "$m"
   m=$(mutate W2 dvd/emu.sv "s/wire blend_en = (deint_mode == 2.d2) \& ~interlaced_eff;/wire blend_en = (deint_mode == 2${Q}d2) \& ~fields_eff;/") && wred W2_fields_gate --emu "$m"
   m=$(mutate W3 dvd/emu.sv "s/\.blend_en          (blend_en_dec)/.blend_en          (blend_en)/") && wred W3_no_cdc --emu "$m"
