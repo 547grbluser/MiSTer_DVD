@@ -199,7 +199,7 @@ libdvdnav's constants (`0x0100` / `0x7CFC` / `0x0001`). `dvd/player_regs.sv` now
 them, and `dvd_vm`'s `sprm_read` returns its `cfg_sprm14/15/20` ports. The block is
 combinational, with no functions and no casts (the Quartus 17 lessons).
 
-**Why (measured in the 2026-10-01 *DVD Demystified* audit, `docs/conformance.md` §1.4):**
+**Why (measured in the 2026-10-01 *DVD Demystified* 3rd-edition audit):**
 - **SPRM20:** 507 of 1,430 library discs read it.
   - `0x0001` is **region 1**, not "region free". The bit is one-hot, so no value means
     "every region".
@@ -255,6 +255,11 @@ paths now fetch @32 first.
 - **On HDMI, SPRM14 always says 16:9**, even on a 4:3 HDMI display. ascal letterboxes
   16:9 content there anyway, so a disc's 16:9 choice still looks right. `disp_wide_q`
   (emu) already knows the HDMI display shape, if that is ever wanted.
+- **libdvdnav is no longer an oracle for the discs that read SPRM14.** It still answers
+  `0x0100`/`0x7CFC`/`1`, so `tools/nav_diff.py` reports a boot divergence on HARTSWAR_169,
+  SPECIES2 and the 21 others in the status log entry on an HDMI setup. That divergence is
+  by design, not a regression. Compare under the analog Crop profile, whose SPRM14 matches
+  libdvdnav's, or use `dvd_vm_ref.py --player`.
 - **The SPRMs are read live.** A disc that reads one, and then sees the user change
   Analog Aspect mid-session, keeps whatever branch it already took. That is the same
   as a set-top player whose TV setting is changed mid-disc.
