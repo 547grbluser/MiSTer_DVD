@@ -72,9 +72,16 @@ predate later confirmations; the `CLAUDE.md` index carries the reconciled status
       | `dev-stilloff` | Select | 1 | 6.3 s | clock 0:01 → 0:18, playing | PGCN 1 unchanged |
 
     - One press ends one still: the first card is skipped, and the second runs its own 5 s.
-    - The control's trailer barely moved, which is the stuck-pause trap the design avoids.
-      On `main`, the POST jump's `jump_ack` cleared the first press's pause, and the second
-      press then paused the trailer.
+    - ⚠ **Unexplained, on `main` only:** after the two Play presses, the control's next
+      trailer barely moved (0:03 → 0:04 over 13 s, on both rigs). Both presses were sent
+      while PGC 5 was still parked, so a jump between them does not explain it. It is
+      consistent with a pause surviving into the next title, but that is unmeasured. Read
+      `pause_q` (telemetry flags) through the same script to settle it. The feature build
+      does not show it: its trailers played.
+    - **Not exercised on HW:** the `btns_pend` window, a press between a still menu's park
+      and its highlight's promotion. Castle's menu is a looping motion menu, so it never
+      parks on a still. That gate is covered in sim (`nav_pci_tb` T1a/T7a) and by
+      `check_still_off_wiring.py`.
     - Times include ~4 s of screenshot latency per reading.
   - **Build:** `releases/DVD_stilloff_20261005_2105.rbf`, SEED 9.
     - clk_dec passes: 91.68 / 90.55 MHz.
@@ -84,9 +91,10 @@ predate later confirmations; the `CLAUDE.md` index carries the reconciled status
     - A seed sweep that reads both clocks (13, 1, 7, 29) is running.
   - **Next:**
     - Pin the seed whose `clk_dec` and `clk_mem` both close.
-    - Optionally, run an indefinite (0xFF) button-less still on HW. The menu scan finds
-      these on BIG_BUCK_BUNNY and Beverly Hills Chihuahua 3, but none is on a boot path,
-      so reaching one needs a scripted walk.
+    - Optionally, run an indefinite (0xFF) button-less still on HW. `tools/still_scan.py`
+      (menu-domain cells with a still time and no buttons in their NAV pack) finds these on
+      BIG_BUCK_BUNNY and Beverly Hills Chihuahua 3. None is on a boot path, so reaching one
+      needs a scripted walk.
   - Full design: `docs/dvd_nav.md` "Still off".
 
 - ✅ **NEXT/PREV CHAPTER AT THE TITLE'S EDGES (audit item 7, 2026-10-05,
