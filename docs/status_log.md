@@ -29,8 +29,8 @@ predate later confirmations; the `CLAUDE.md` index carries the reconciled status
     nothing, and Prev at chapter 1 restarted it. libdvdnav (`vm.c` `vm_jump_next_pg` /
     `vm_jump_prev_pg`) instead runs the PGC's POST, or follows `prev_pgc_nr` to that PGC's
     last program.
-  - **Census** (1,520 images, 24,381 titles, every VTS/PGC; a scratch script on `IsoNav` +
-    `ptt_ref` + `eval_block`):
+  - **Census** (1,520 images, 24,381 titles, every VTS/PGC; `tools/chap_edge_census.py`, on
+    `IsoNav` + `ptt_ref` + `eval_block`):
     - **POST on the last chapter's PGC:** 89.8 % of titles, and 1,498 of 1,519 main
       features. With default GPRMs a main feature's POST does CallSS to a menu 84 % of the
       time and JumpVTS_TT 12 %.
@@ -74,7 +74,7 @@ predate later confirmations; the `CLAUDE.md` index carries the reconciled status
       libdvdnav lands on VTS1 PGCN 10, which agrees with `dvd_vm_ref.next_pg_edge`.
   - **Found, not fixed (pre-existing):** a TT jump by PGCN reloads the PTT table as
     `cur_ttn = 1`, so after an in-title PGC link in another title the HUD total can be
-    title 1's.
+    title 1's. HUD only: SPRM5 is set only on a JumpTT resolve.
   - **HW (2026-10-05, rig, `nav_diff.py` against libdvdnav; the control arm `dev-clkmem`, whose
     `dvd/` tree is `main`'s, ran first).**
     - **Control fails, as it must.** Dr. Seuss "1 > > >": the edge Next stays in PGC 1, where
@@ -85,8 +85,9 @@ predate later confirmations; the `CLAUDE.md` index carries the reconciled status
         that one-chapter title goes to VMGM PGC 6 (the single-chapter arm).
       - Civil War 2, 8 chapters: the edge Next goes to VTS 2 PGC 1, the disc's POST GPRM
         path.
-      - National Treasures 1: Prev at chapter 1 goes to VMGM PGC 8 (`prev_pgcn` 3 → its PRE
-        → the menu).
+      - National Treasures 1, title 1 (VTS 1 PGC 1): Prev at chapter 1 goes to VMGM PGC 8.
+        `prev_pgcn` 3's PRE does CallSS to the VMGM, and the board reads it armed.
+        libdvdnav additionally applies pgN 2 to that menu PGC (the documented deviation).
       - Dr. Seuss, `prev_pgcn` 0: Prev restarts chapter 1 and stays in PGC 1.
     - **HUD reads:**
       - A Next ×3 burst from chapter 1 clamps to `CH 3/3` and stays in the title, and one

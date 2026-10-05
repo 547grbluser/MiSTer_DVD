@@ -2143,7 +2143,8 @@ is on. The reader hands it to the VM, which does what libdvdnav does (`vm.c`
   `prev_pgcn`, or one naming this PGC) it restarts chapter 1 as before.
 
 **Measured, not guessed.** A census of 1,520 library images (24,381 titles, every VTS and
-title PGC; `IsoNav` + `ptt_ref.read_ptt_table` + `eval_block`) found:
+title PGC; `tools/chap_edge_census.py`, built on `IsoNav` + `ptt_ref.read_ptt_table` +
+`eval_block`) found:
 - **POST on the last chapter's PGC:** 21,903 titles (89.8 %).
 - **`prev_pgc_nr` ≠ 0 on the first chapter's PGC:** 802 titles on 162 discs, 19 of them
   main features.
@@ -2223,7 +2224,8 @@ libdvdnav run the post commands"; that is half right.
 - Pre-existing, not new: a TT jump by PGCN reloads the PTT table for `cur_ttn = 1`
   (`S_PTTLD_MAT` takes `want_ttn ?: 1`). After any in-title PGC link in a title other than
   vts_ttn 1, which now includes a Prev landing, the HUD's "CH n/N" can read title 1's
-  chapter total until the next title load. Worth its own fix.
+  chapter total until the next title load. Only the HUD is affected: SPRM5 is written
+  only on a JumpTT resolve (`tt_resolve`), never on a PGCN jump. Worth its own fix.
 
 **Gates.**
 - `bench/dvd/run_chap_edge.sh --red`:
@@ -2240,7 +2242,10 @@ control diverges at exactly the edge steps.
 - Dr. Seuss: the edge Next goes to PGC 10, and Next on that one-chapter title to VMGM
   PGC 6.
 - Civil War 2: the edge Next goes to VTS 2 PGC 1.
-- National Treasures 1: Prev at chapter 1 goes to VMGM PGC 8.
+- National Treasures 1, title 1 (VTS 1 PGC 1, `prev_pgcn` 3, whose PRE does CallSS to the
+  VMGM): Prev at chapter 1 goes to the menu, VMGM PGC 8, armed. libdvdnav also applies its
+  "last program" to that menu PGC (pgN 2), which is the documented deviation; the PGCN
+  agrees.
 - With `prev_pgcn` 0, Prev restarts chapter 1.
 - A Next ×3 burst clamps to `CH 3/3`, and Disc Menus Off is unchanged.
 
