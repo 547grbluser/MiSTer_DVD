@@ -24,7 +24,8 @@ predate later confirmations; the `CLAUDE.md` index carries the reconciled status
 
 - ✅ **USER STILL OFF: PLAY/PAUSE OR SELECT ENDS A STILL WITH NO BUTTONS (audit item 5,
   2026-10-05, `dev-stilloff`, branch `feature/still-off`; sim-verified, ✅ HW-CONFIRMED on
-  timed stills, Play and Select, A/B against `main`; ⏳ an indefinite still on HW, ⏳ seed).**
+  timed stills, Play and Select, A/B against `main`, on the pinned SEED 7 build; ⏳ an
+  indefinite still on HW).**
   - **Gap.** Still off (UOP18) is a mandatory user operation (3rd ed. Table 9.15). `S_STILL`
     exited only on its timer, a VM jump or a seek. A timed still or a button-less indefinite
     still could be escaped only with a chapter skip, and a menu-domain one not at all.
@@ -83,14 +84,33 @@ predate later confirmations; the `CLAUDE.md` index carries the reconciled status
       parks on a still. That gate is covered in sim (`nav_pci_tb` T1a/T7a) and by
       `check_still_off_wiring.py`.
     - Times include ~4 s of screenshot latency per reading.
-  - **Build:** `releases/DVD_stilloff_20261005_2105.rbf`, SEED 9.
-    - clk_dec passes: 91.68 / 90.55 MHz.
-    - ⚠ clk_mem WARNs at 79.92 / 79.02 MHz (runs at 90). All worst paths are inside
-      `mem_shim_burst` (`tag_ram`, `S_PEEK2`) into the framestore. That is the known
-      placement-sensitive cluster, and none of this change's logic is on it.
-    - A seed sweep that reads both clocks (13, 1, 7, 29) is running.
+  - **Build: `releases/DVD_stilloff_20261005_2238.rbf`, SEED 7.**
+    - **First fit, SEED 9 (`..._2105.rbf`, not for testers):** clk_dec passed at 91.68 /
+      90.55 MHz. But clk_mem fell to 79.92 / 79.02 MHz against its 90 MHz run rate.
+    - Every worst path there is inside `mem_shim_burst` (`tag_ram`, `S_PEEK2`) into the
+      framestore. That is the known placement-sensitive cluster, and none of this change's
+      logic is on it.
+    - **Sweep:** `clk_dec` / `clk_mem` in MHz, @100 °C / @−40 °C (per-seed table in
+      `DVD.qsf`):
+
+      | Seed | `clk_dec` | `clk_mem` |
+      |---|---|---|
+      | 13 | 92.23 / 89.44 | 94.64 / 93.94 |
+      | 1 | 89.41 / 85.86 | 70.38 / 71.45 (fails both) |
+      | 7 | 93.55 / 89.74 | 95.22 / 96.38 |
+      | 29 | 89.08 / 86.69 | 94.00 / 94.58 |
+
+    - **SEED 7 pinned:** best on both clocks.
+    - The sweep wrote SEED 29 into the qsf (the last seed it fitted), so it was corrected by
+      hand. The `.rbf.json`'s `fit.seed` had to be corrected too.
+    - **Re-run on the SEED 7 build:** one Play press left PGC 5 (5.7 s), the next trailer
+      played (clock 0:01 → 0:13), the menu with buttons was untouched, and the picture is
+      clean.
+  - **libdvdnav boot sweep:** `trace_nav ""` over all 1,431 root images found no disc whose
+    boot parks on an indefinite button-less still. The one `buttons=0` park
+    (SLEEPY_HOLLOW) is a 1 s timed still. Indefinite button-less stills are reached only
+    through menus, as dead ends.
   - **Next:**
-    - Pin the seed whose `clk_dec` and `clk_mem` both close.
     - Optionally, run an indefinite (0xFF) button-less still on HW. `tools/still_scan.py`
       (menu-domain cells with a still time and no buttons in their NAV pack) finds these on
       BIG_BUCK_BUNNY and Beverly Hills Chihuahua 3. None is on a boot path, so reaching one
