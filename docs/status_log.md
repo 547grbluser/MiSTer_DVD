@@ -22,6 +22,70 @@ predate later confirmations; the `CLAUDE.md` index carries the reconciled status
 
 ## Hardware status (THIS fork, verified 2026-06-21)
 
+- 🔧 **CLK_MEM TIMING: THE VICTIM INVALIDATE DEFERRED ONE CYCLE (2026-10-05; branch
+  `feature/clkmem-timing`, sim cycle-exact, ⏳ HW smoke).**
+  - **Found** while answering "do we have negative slack?". `clk_mem` (90 MHz, the DDR3
+    bridge plus the decoder's memory side) closed at **82.2 MHz** on the main+bt601 fit.
+    `fmax_check` printed it as "info, no gate … infra domain, never closes". That was never
+    true. Fits on disk ranged 55.7 / 73.0 / 82.6 / 90.8 / 93.9 MHz, including
+    HW-confirmed ones, with nobody watching.
+  - **Reading the rest of the negative slack.**
+    - Every other negative figure is a crossing between `clk_dec`, `clk_mem` and `clk_sys`:
+      setup down to −4.9 ns, recovery down to −6.0 ns, hold down to −0.4 ns.
+    - Each of those worst paths is inside a `xilinx_fifo_dc` dual-clock FIFO or a
+      `sync_reset` release. `sys_top.sdc` deliberately keeps transfers between `sys_pll`
+      outputs timed (`docs/history.md` §10), so those numbers are expected and not
+      meaningful.
+    - The HDMI PLL's −2.2 ns is framework infrastructure.
+    - Only the same-clock `clk_mem` figure was real.
+  - **Root cause:** all 400 worst intra-`clk_mem` paths ended at `cache_valid`. Both miss
+    sites, the fast miss in `S_STREAM` and pair B in `S_PEEK2`, cleared
+    `cache_valid[set][victim_c]` on the edge that chose `victim_c`. One cycle held the
+    candidate mux, a 128:1 `cache_valid` read, the victim priority logic and a 512-flop
+    write decode (9 levels, 11.4 ns against 11.1).
+  - **Fix:** each site sets a pending flag instead. The clear lands next cycle, from
+    registers already latched on that edge (`cur_set`/`sel_way`, `ifb_set`/`ifb_way`).
+    That is 2 flops.
+    - It is unobservable by construction: the lookup outputs are consumed only in
+      `S_STREAM` and `S_PEEK2`, and the cycle after each site is `S_FILL_CMD` or
+      `S_ISSUE2`/`S_FILL_DAT`. The full consumer list is in the RTL comment.
+    - A sim-only guard (`translate_off`) fails any bench where a lookup state runs with a
+      clear pending, or where a fill validate hits a pending element.
+  - **Gate:** `bench/dvd/run_mem_shim.sh --red`.
+    - It adds a **LOCKSTEP** arm. `mem_shim_ab_tb -DMSAB_LOCKSTEP` gives both rigs shared
+      seeds, against the pre-retime module built from git at `RETIME_BASE=1ee4f2b`. Every
+      output is compared with `!==` on every cycle: 43–50k cycles, **0 mismatches**, in
+      all four cwf/dual combos, covering 1,351 misses and 210 pairs.
+    - RED arms: a wrong-way clear at either site is caught (mismatch at about cycle
+      13,000), and a stuck pending flag trips the guard by its message.
+    - ⚠ The arm pins one intended no-op. A later timing-changing edit must move
+      `RETIME_BASE` or drop the arm.
+  - **Seeds** (a new netlist re-rolls the fit). Restricted Fmax, `clk_dec` / `clk_mem`,
+    @100C / @−40C:
+
+    | Seed | `clk_dec` | `clk_mem` |
+    |---|---|---|
+    | 1 | 83.0 / 86.89 ✗ | 90.44 / 92.37 |
+    | 7 | 90.46 / 88.14 | 88.21 / 87.27 ✗ |
+    | 29 | 91.58 / 89.77 | 89.37 / 91.41 ✗ |
+    | **9** | **93.62 / 89.57** | **93.93 / 93.16** |
+    | 13 | 88.94 / 91.32 | 95.06 / 95.42 |
+
+    - **SEED 9 is pinned**, for the largest worst-case margin over both clocks.
+    - `seed_sweep.sh` ranks on `clk_dec` only, and would have kept SEED 29. It now logs
+      `clk_mem` per seed so the choice can be made by reading both lines.
+  - **Tooling:** `fmax_check.sh` now WARNs when `clk_mem` is below `CLK_MEM_MIN` (90.0).
+    It is not a FAIL yet, because 2 of 5 seeds still miss 90 on this netlist.
+  - **Known limitation:** the next cluster is the speculative pop (`sk_valid` →
+    `mem_req_rd_en` → request-FIFO read port). On the old fit it sat at **+0.08 ns**, so
+    `clk_mem` still depends on placement. Real margin needs that path retimed, and the pop
+    is behaviour-critical: a larger change than this one.
+  - **Next:**
+    - HIL smoke: one disc, `telem` lates 0, no picture faults. A bit-exact sim of this
+      bridge has been wrong on silicon before.
+    - Then a PR.
+    - Then decide whether `clk_mem` becomes a FAIL in `fmax_check`.
+
 - ✅ **EXPLICIT ANALOG ASPECT LETTERBOX/CROP ON THE PROGRESSIVE RASTER
   (2026-10-04/05; HW-CONFIRMED on the rig, MERGED PR #155).** Full design:
   `docs/crt_anamorphic.md` §13 (and §11 for the `disp_vscale` defect it made reachable).

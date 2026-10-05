@@ -424,6 +424,7 @@ otherwise; `--red` runs its mutation arms).
 | 16:9 menu `permitted_df` overrides Analog Aspect Letterbox↔Crop (menus only) | ✅ | `crt_anamorphic.md` §12 | `run_menu_panscan.sh`, `check_menu_panscan_wiring.py` |
 | Explicit Analog Aspect Letterbox/Crop on Progressive (`aa_live`; Auto/Fit unchanged); `disp_vscale` frame-path fix | ✅ HW (vs playerregs control; 0 lates; analog path via RetroTINK), MERGED PR #155 | `crt_anamorphic.md` §13, §11 | `run_prog_aspect.sh --red`, `run_vscale_frame.sh --red`, `check_prog_aspect_wiring.py` |
 | mem_shim tag/LRU store in M10K | ✅ | `history.md` §11 | `run_mem_shim.sh` |
+| clk_mem closes 90 MHz: victim invalidate deferred a cycle (82.2 → 93.2 worst corner, SEED 9); `fmax_check` WARNs on clk_mem | 🔧 sim cycle-exact ⏳ HW smoke | `status_log.md` "clk_mem timing" | `run_mem_shim.sh --red` (LOCKSTEP arm) |
 | Logic reclaim (AC-3, nav/VM, reader ×2; debug overlay retired) | ✅ (D HW-confirmed 2026-09-26) | `logic_reclaim.md` §8 | `bench/ac3` suites, `run_reader_regress.sh` |
 | Logic reclaim E: VM GPRMs in an M10K (−1,129 ALUTs) | ✅ | `logic_reclaim.md` §9 | `run_gprm_ram.sh`, `check_gprm_ram.py` |
 | Decode pacing × output mode: Progressive lates = display re-read contention; `dec_duty` telemetry (PR #137) | ✅ fixed by F1 + F2 (whole census 0; §6c resolved) | `decode_pacing.md` | `run_telem.sh`, `check_decode_duty_wiring.py` |
