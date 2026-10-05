@@ -22,8 +22,8 @@ predate later confirmations; the `CLAUDE.md` index carries the reconciled status
 
 ## Hardware status (THIS fork, verified 2026-06-21)
 
-- 🔧 **BT.601 DEFAULT COLOUR MATRIX (2026-10-05; branch `feature/bt601-default`,
-  sim-verified, ⏳ HW A/B pending).** *DVD Demystified* 3rd-edition audit, A/B #6.
+- ✅ **BT.601 DEFAULT COLOUR MATRIX (2026-10-05; branch `feature/bt601-default`,
+  sim-verified and HW A/B-measured on the rig; not yet merged).** *DVD Demystified* 3rd-edition audit, A/B #6.
   - **Defects** (both pre-existing, both in upstream `rtl/mpeg2`):
     1. `yuv2rgb.v` decoded `matrix_coefficients` 0 ("no colour description") as BT.709,
        the ISO 13818-2 §6.3.6 default. DVD permits only matrix 5 or 6, both BT.601
@@ -85,11 +85,21 @@ predate later confirmations; the `CLAUDE.md` index carries the reconciled status
   - **Known limitation (pre-existing):** the matrix changes when the vld *parses* a
     picture, roughly a frame before that picture is displayed. It is visible only at a
     709↔601 junction, which no library disc has.
-  - **Next:** HIL A/B.
-    - An untagged feature (SPACE_COWBOYS, FINDING_FORRESTER) must change colour vs `main`,
-      and a subtitle must match its old palette colour.
-    - **Null control:** a tagged-6 disc (FAMILY_MAN, big-buck-bunny-NTSC) must give a
-      bit-identical screenshot.
+  - **HW A/B (2026-10-05):** `main`'s RTL (the `progaspect` build) vs `dev-bt601`, same
+    script on each. Each disc was launched to its menu with two shots 4 s apart; only
+    frames static in BOTH arms were compared.
+    - **Null control, `Angel_And_The_Badman` (menu tagged 6): bit-identical.**
+    - **Untagged `CELINE_DION` (skin-tone still): changed.** The fix build's frame equals
+      the control's frame re-encoded 709→601, inverted per pixel through the 709 matrix.
+      Over 302,934 unclipped pixels, the mean error under the 709→601 model is 0.34, vs
+      3.03 under "no change". The change is the matrix and nothing else.
+    - **Untagged `09114_SCN` (near-monochrome still):** the same signature at low
+      amplitude (0.32 vs 0.64).
+    - Motion menus were excluded: FAMILY_MAN, BILL_AND_TEDS, QUIPIT.
+    - The instrument is `.sim/`-local (screenshots plus a numpy model). The method is in
+      this entry.
+  - **Next:** merge (PR). Optional extra look: a subtitle over skin on an untagged
+    feature.
 
 - ✅ **EXPLICIT ANALOG ASPECT LETTERBOX/CROP ON THE PROGRESSIVE RASTER
   (2026-10-04/05; HW-CONFIRMED on the rig, MERGED PR #155).** Full design:
