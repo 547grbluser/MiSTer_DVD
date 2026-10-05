@@ -30,6 +30,15 @@ So this file asserts the INVARIANT rather than the deletion:
     sel_edge also writes nav_act_p, no net named key_resume* is driven anywhere,
     and the dvd_vm instance has no .key_resume port.
 
+AMENDED 2026-10-05 (user decision): ONE named exception, the user STILL OFF
+(UOP18). `wire still_off_go = still_off_ok && (pause_edge || sel_edge)` may read
+sel_edge, provided still_off_ok requires a PARKED still (still_active) with NO
+button armed (!hl_btns_armed) and NONE pending (!hl_btns_pend). That is not the
+window this file guards: a menu transition is a playing cell, never S_STILL, and
+with a highlight armed or on its way Select still means only "activate". Any OTHER
+new reader of sel_edge still fails as a second consumer. The rest of that seam
+(keys, reader port, pause precedence) is gated by tools/check_still_off_wiring.py.
+
 ★ The last three checks are ANTI-VACUITY controls, and without them a file that
 deleted Select altogether -- or deleted the Menu key, which now solely owns the
 resume toggle -- would pass the first three cleanly. "Nothing drives it" is not the
@@ -155,18 +164,38 @@ def main():
     # ELSE is a second meaning for the button -- the shape of the defect, and the
     # shape the next "Select should also..." patch will take.
     readers = 0
+    still_off_readers = 0
     for chunk in src.split(';'):
         t = terms(chunk)
         if 'sel_edge' not in t:
             continue
         if 'sel_edge' in t and re.search(r'\bsel_edge\s*=', chunk):
             continue                      # the declaration itself, checked above
+        # The one named exception: the Still off decode, gated by still_off_ok.
+        if (re.search(r'\bwire\s+still_off_go\s*=', chunk)
+                and 'still_off_ok' in t and 'nav_act_p' not in t):
+            still_off_readers += 1
+            continue
         readers += 1
         if 'nav_act_p' not in t:
             fails.append('sel_edge has a second consumer: `%s`'
                          % ' '.join(chunk.split())[-160:])
     if readers == 0:
         fails.append('sel_edge: nothing reads it -- Select would do nothing at all')
+    if still_off_readers > 1:
+        fails.append('sel_edge: %d still_off_go decodes (expected at most one)'
+                     % still_off_readers)
+    if still_off_readers:
+        m = re.search(r'\bwire\s+still_off_ok\s*=\s*([^;]+);', src)
+        ok = '' if not m else ''.join(m.group(1).split())
+        if not m:
+            fails.append('still off: still_off_go reads still_off_ok, which is not declared')
+        else:
+            for need in ('still_active', '!hl_btns_armed', '!hl_btns_pend'):
+                if need not in ok.split('&&'):
+                    fails.append('still off: still_off_ok lacks `%s` -- Select would mean '
+                                 'something other than Activate where a button can exist '
+                                 '(`%s`)' % (need, ok))
 
     # ---- 3. no key_resume* net is driven anywhere ---------------------------
     stray = sorted(w for w in terms(src) if w.startswith('key_resume'))
@@ -205,8 +234,9 @@ def main():
         for f in fails:
             print('FAIL: %s' % f)
         return 1
-    print('OK: sel_edge -> nav_act_p only (%d reader(s)); no key_resume; '
-          'dvd_vm.key_menu and nav_pci.nav_act intact' % readers)
+    print('OK: sel_edge -> nav_act_p (%d reader(s)) + %d gated Still off decode; '
+          'no key_resume; dvd_vm.key_menu and nav_pci.nav_act intact'
+          % (readers, still_off_readers))
     return 0
 
 

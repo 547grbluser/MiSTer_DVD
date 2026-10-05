@@ -1877,6 +1877,7 @@ wire rt_edge    = joy_eff[0] & ~joy_prev[0];
 
 // nav_pci interface (Phase 3)
 wire        hl_btns_armed;
+wire        hl_btns_pend;           // an HLI with buttons parsed, not yet promoted
 // STC display-coherence latch for nav_pci's scheduled promotion path: 1 when the
 // most recent load/seek/jump FLUSHED the decoder (keep_vbuf=0 — STC anchor and
 // display reset together). A keep_vbuf menu->menu hop clears it (the re-anchored
@@ -1965,6 +1966,28 @@ wire step_ok = cell_ready && !menu_active && !hold_freeze;
 // pause was not asked for by B1. An inline copy in each would be free to drift.
 wire step_pause_go = step_edge && !pause_q && !stopped_w && step_ok;
 
+// USER STILL OFF (UOP18, the mandatory user operation; docs/dvd_nav.md "Still off").
+// Play/Pause or Select on a still that offers NO buttons ends it: the reader runs
+// what its timer would have run (next cell, cell command, or PGC end + POST).
+// Keys chosen by the user, 2026-10-05, after VLC 2026 (play and activate both skip a
+// button-less still) and Kodi (Select/Next skip a still with no buttons).
+//   * still_active: the reader is PARKED in S_STILL. A menu transition is a playing
+//     cell, never S_STILL, so this is not the window check_select_noop.py guards.
+//   * !hl_btns_armed && !hl_btns_pend: no button on screen AND none on the way. At a
+//     still's entry the menu's HLI is usually still pending until menu_settled
+//     promotes it; a press in that window must not skip the menu it belongs to.
+//   * menus_on: the reader's own gate (still_act) needs the VM anyway.
+//   * !stopped_w: while STOPPED, Pause means Play and belongs to stop_ctl.
+// The reader ignores the pulse on a hold with no continuation (still_act = 0).
+// ⚠ It PREEMPTS the pause toggle below (and clears a pause): the press is Play.
+// Left to toggle as well, a STILL_NEXT exit (which raises no jump_ack) would land the
+// next cell PAUSED -- the stuck-pause class the chain's own comments warn about.
+// Gated by tools/check_still_off_wiring.py.
+wire still_off_ok = menus_on && still_active && !hl_btns_armed && !hl_btns_pend &&
+                    !stopped_w;
+wire still_off_go = still_off_ok && (pause_edge || sel_edge);
+reg  still_off_p  = 1'b0;
+
 // ---- gamepad decode (Phase 4: keys go to the DVD-VM; only the title
 // transport and the Phase-3 button-nav pulses stay here) -------------------
 always @(posedge clk_sys or negedge reset_n) begin
@@ -1987,8 +2010,10 @@ always @(posedge clk_sys or negedge reset_n) begin
         key_menu_p   <= 1'b0;
         key_title_p  <= 1'b0;
         key_return_p <= 1'b0;
+        still_off_p  <= 1'b0;
     end else begin
         joy_prev     <= joy_eff;
+        still_off_p  <= still_off_go;     // one-cycle: the edges it reads are pulses
         seek_pulse   <= 1'b0;             // default: one-cycle pulses
         chap_pulse   <= 1'b0;
         angle_pulse  <= 1'b0;
@@ -2019,6 +2044,9 @@ always @(posedge clk_sys or negedge reset_n) begin
             step_tgl <= ~step_tgl;
 
         if (start_streaming)      pause_q <= 1'b0;   // fresh load clears pause
+        // USER STILL OFF owns this press (see still_off_go): end the still AND
+        // resume, never toggle -- the press means Play here.
+        else if (still_off_go)    pause_q <= 1'b0;
         // ⚠ gated on ~stopped_w: while STOPPED the Pause button means PLAY and
         // belongs to stop_ctl, which clears `stopped`. Toggling pause_q here as
         // well would leave the disc paused the instant the stop is released.
@@ -3615,6 +3643,7 @@ dvd_iso_reader dvd_iso_reader_inst (
     .chap_at_start  (chap_at_start),      // prev: restart current chapter unless <5 s in
     .chap_edge      (chap_edge_w),        // -> dvd_vm.key_chedge (title edge, audit item 7)
     .chap_edge_dir  (chap_edge_dir_w),
+    .still_off      (still_off_p),        // user Still off (UOP18): Play/Select, no buttons
     .angle_pulse    (angle_pulse),        // Phase 9: B6 = cycle camera angle
     .cur_angle      (cur_angle),
     .angle_count    (angle_count),
@@ -6296,6 +6325,7 @@ nav_pci nav_pci_inst (
     .btn_cmd    (hl_btn_cmd),
     .btn_cmd_valid (hl_btn_cmd_valid),
     .btns_armed (hl_btns_armed),
+    .btns_pend  (hl_btns_pend),
     .btn_sel    (hl_btn_sel),
     .dbg_btn_ns (hl_btn_ns),         // gate in-title multi-button menu nav (Scene It)
     .hli_seen   (hl_menu_seen)       // early menu-HLI detect -> open the subpicture gate in time

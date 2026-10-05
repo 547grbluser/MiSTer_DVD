@@ -198,6 +198,11 @@ module nav_pci #(
 
     // state read-backs
     output wire        btns_armed,    // an HLI with buttons is committed
+    // An HLI WITH BUTTONS is parsed and waiting to promote (either pending slot).
+    // emu's user Still off needs "no buttons" to mean none on screen AND none on
+    // the way: at a still's entry the menu's HLI is usually still pending until
+    // menu_settled promotes it, and a press in that window must not skip the menu.
+    output wire        btns_pend,
     output reg   [5:0] btn_sel,       // current button (1-based)
     output wire  [5:0] dbg_btn_ns,
     // EARLY "a multi-button in-title menu HLI has been parsed" — asserts as soon
@@ -353,6 +358,7 @@ reg [23:0] act_tmr;
 wire       act_hold = (act_tmr != 24'd0);
 
 assign btns_armed = armed && (h_btn_ns != 6'd0);
+assign btns_pend  = (nxt_v && (nxt_btn_ns != 6'd0)) || (nx2_v && (nx2_btn_ns != 6'd0));
 assign dbg_btn_ns = h_btn_ns;
 // early multi-button-menu detect: pending (parsed, pre-promote) OR committed.
 assign hli_seen   = (nxt_v && (nxt_btn_ns > 6'd1)) || (armed && (h_btn_ns > 6'd1));
