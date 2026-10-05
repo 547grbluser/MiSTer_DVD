@@ -156,6 +156,11 @@ the picture. That is for a 4:3 display fed the progressive signal: a VGA CRT, a 
 - The **Aspect** button still cycles `Aspect Ratio` on Progressive; set Letterbox or Crop
   in the OSD.
 - With `Deinterlace` set to Bob or Blend, the deinterlaced picture is what gets letterboxed.
+- **With an external scaler on the analog output** (a RetroTINK, an OSSC), the scaler
+  decides the shape of what it outputs, because an analog signal carries no aspect
+  information. Under Auto or Fit the core sends the unmodified anamorphic picture; set the
+  scaler's own aspect to 16:9 for a widescreen picture. `Aspect Ratio` doesn't reach this
+  path: it only affects the MiSTer's own HDMI output.
 
 ### Widescreen disc menus
 
