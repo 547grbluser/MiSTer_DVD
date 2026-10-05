@@ -22,8 +22,8 @@ predate later confirmations; the `CLAUDE.md` index carries the reconciled status
 
 ## Hardware status (THIS fork, verified 2026-06-21)
 
-- 🔧 **CLK_MEM TIMING: THE VICTIM INVALIDATE DEFERRED ONE CYCLE (2026-10-05; branch
-  `feature/clkmem-timing`, sim cycle-exact, ⏳ HW smoke).**
+- ✅ **CLK_MEM TIMING: THE VICTIM INVALIDATE DEFERRED ONE CYCLE (2026-10-05; branch
+  `feature/clkmem-timing`, sim cycle-exact, HW smoke matches `main`; not yet merged).**
   - **Found** while answering "do we have negative slack?". `clk_mem` (90 MHz, the DDR3
     bridge plus the decoder's memory side) closed at **82.2 MHz** on the main+bt601 fit.
     `fmax_check` printed it as "info, no gate … infra domain, never closes". That was never
@@ -80,11 +80,18 @@ predate later confirmations; the `CLAUDE.md` index carries the reconciled status
     `mem_req_rd_en` → request-FIFO read port). On the old fit it sat at **+0.08 ns**, so
     `clk_mem` still depends on placement. Real margin needs that path retimed, and the pop
     is behaviour-critical: a larger change than this one.
+  - **HW smoke (2026-10-05):** `releases/DVD_clkmem_20261005_1720.rbf` (SEED 9) vs the
+    `main`-RTL `progaspect` build, same script on each: THE_OFFICE, Disc Menus Off,
+    Progressive, 30 s settle, then `telem --watch 120`.
+    - Both builds: 1 late, 0 drops, 0 drain-gate closures, 0 of about 2,975 pictures over
+      a frame period, longest picture 20.9 ms.
+    - The picture is clean.
+    - The one late is pre-existing at that point in the disc; it is in the control too.
   - **Next:**
-    - HIL smoke: one disc, `telem` lates 0, no picture faults. A bit-exact sim of this
-      bridge has been wrong on silicon before.
-    - Then a PR.
-    - Then decide whether `clk_mem` becomes a FAIL in `fmax_check`.
+    - A PR.
+    - Decide whether `clk_mem` becomes a FAIL in `fmax_check` once more netlists have been
+      seen.
+    - Optionally, retime the speculative-pop cluster for margin.
 
 - ✅ **EXPLICIT ANALOG ASPECT LETTERBOX/CROP ON THE PROGRESSIVE RASTER
   (2026-10-04/05; HW-CONFIRMED on the rig, MERGED PR #155).** Full design:
