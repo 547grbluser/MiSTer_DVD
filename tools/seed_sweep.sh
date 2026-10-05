@@ -64,6 +64,9 @@ for s in $SEEDS; do
   fmax_rc=$?
   summary=$(echo "$fmax_out" | grep -m1 'clk_dec Restricted Fmax' || echo "no clk_dec row")
   echo "    SEED $s -> routed; $summary" | tee -a "$LOG"
+  # clk_mem is WARN-only in fmax_check (not a sweep criterion yet), but record it per seed
+  # so the best seed can be chosen with both domains in view (docs/status_log.md "clk_mem timing").
+  echo "$fmax_out" | grep -m1 'clk_mem Restricted Fmax' | sed "s/^/    SEED $s -> /" | tee -a "$LOG"
   if [ $fmax_rc -ne 0 ]; then
     echo "    SEED $s -> timing FAIL (< ${FMAX_MIN} MHz) — marginal fit, next seed" | tee -a "$LOG"
     continue
