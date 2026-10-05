@@ -4,6 +4,8 @@
 HW-confirmed 2026-09-11. Branch D (`feature/reader-slim`, the reader again, plus the
 retirement of the numeric debug overlay) is bit-identical in simulation and
 ✅ HW-confirmed by the maintainer on 2026-09-26, §8. The block-RAM packing pass (§6) is still planned.
+§10 (2026-10-05) surveys where else the audio engine's microcode pattern would reclaim
+logic, including the MPEG-2 decoder. It is analysis only; nothing is built.
 
 ## 0. Why
 
@@ -407,3 +409,149 @@ Those need a hand check.
 (minigame and maze), T2 (Mission Profiles and a slideshow), Harry Potter Interactive
 (Player Mode) and Scene It HP (a game started and a question answered) all behave as on
 `main`.
+
+## 10. Where else the engine pattern fits (2026-10-05 survey, nothing built)
+
+**Status:** analysis only. No branch, no fit, and every saving below is an estimate
+unless it says "measured". Source: the 2026-10-05 fit of `main` at PR #159
+(`output_files/DVD.fit.rpt` §20): 38,699 / 41,910 ALMs needed (92 %), 519 / 553 M10K
+(**34 free**), 87 / 112 DSP.
+
+**The question.** Moving DTS, the AC-3 parse and MP2 onto one microcoded engine
+(`ac3_engine.md`, `mp2_engine.md`, `dts_decoder.md` D2) reclaimed more logic than DTS cost.
+Where else does the same move pay off? It worked because the replaced logic met three
+conditions:
+1. **Rate.** The work happens at most a few hundred thousand operations per frame, so a
+   sequencer issuing about one operation a cycle keeps up.
+2. **Shape.** The area was control: many conditional fields and per-state datapath copies
+   that Quartus muxes across mutually exclusive FSM states (§2's diagnosis). Microcode
+   turns that into ROM words.
+3. **Exclusivity.** The jobs never run at the same time, so they can share one datapath.
+
+The M10K count binds any new ROM: the audio engine's shared 2K-word ROM cost 8 blocks.
+
+### 10a. The AC-3 IMDCT onto the audio engine (★ first candidate)
+
+`imdct_512` is the last hardwired AC-3 stage: **2,013 ALMs, 23 M10K, 9 DSP (measured)**,
+outside `audio_engine`. `ac3_engine.md` ("The contract") and `dts_decoder.md` P4 keep it
+hardwired because "a direct-form transform for 5.1 needs 61–74M multiply-accumulates a
+second, 2.3–2.7× one multiplier". ⚠ **That premise describes an algorithm we do not run.**
+`imdct_512` is liba52's FFT form (pre-twiddle, 128-point split-radix IFFT, post-twiddle and
+window, overlap-add), driven by a flat butterfly schedule in `dvd/ac3/ac3_imdct_tables.svh`.
+
+**Multiply count, from that schedule (long block, one channel):** 82 `OP_BFULL` × 8 + 11
+`OP_BHALF` × 4 = 700 for the IFFT (`OP_BZERO`/`OP_IFFT2`/`OP_IFFT4` multiply nothing),
+plus about 512 each for the pre-twiddle, the post-twiddle and the window: **about 2,240**.
+A 5.1 frame is 5 channels × 6 blocks, about 67K multiplies, **8 % of the 864K-cycle frame**
+at one a cycle. Adds and addressing about double that (DTS's half IMDCT is 597 terms for
+288 multiplies), so about 16 %. The worst AC-3 frame is 323K cycles (37.3 %) with
+`imdct_512`'s 81K in series, so the engine's parse is about 242K. **With the IMDCT on the
+engine: about 377K, 44 %, under the 60 % bar.** Short blocks (134 butterflies, two 64-point
+IFFTs) cost less.
+
+Why it fits the pattern: the engine already runs a transform as a ROM program
+(`tools/dts_vecrom.py`, the half IMDCT). It also runs MP2's synthesis. AC-3 and DTS are never
+decoded together, so the IMDCT's `bufmem`, `delay_mem` and `pcm_mem` could share DTS's rings.
+
+- **Estimate:** −1,200 … −1,600 ALMs, about −10 M10K, up to −9 DSP. The ROM cost depends on
+  the encoding. Executing `imdct_sched_pk`'s butterflies as one vector op (reading the
+  existing 291-entry table) is much smaller than flattening them into per-multiply terms.
+- **⏳ The maintainer's decision: exactness.** `imdct_512` multiplies Q8.23 samples by
+  Q1.17 twiddles and **truncates** (`>>> 17`). The engine's term executor rounds half-up
+  with 24–27-bit coefficients. Either:
+  - the executor gains a truncating Q1.17 mode, and `bench/ac3`'s byte-identical PCM gate
+    still holds; or
+  - the gate becomes LSB-bounded against liba52. `imdct_512` is itself only bounded, at
+    1,648 LSB (`run_imdct.sh`).
+- **Gates that exist:** `run_ac3_ab.sh` (block for block against the hardwired path),
+  `bench/ac3/run_imdct.sh`, `run_ac3.sh --red`, then a by-ear HIL round on 5.1 and
+  short-block material (`bbb_short_5p1`).
+
+### 10b. A navigation sequencer for the reader, the VM and `nav_pci` (biggest, riskiest)
+
+| entity | ALMs | M10K |
+|---|---|---|
+| `dvd_iso_reader` | 4,352 | 32 |
+| `dvd_vm` | 1,384 | 6 |
+| `nav_pci` | 498 | 4 |
+| **total** | **6,234** | 42 |
+
+All three run on `clk_sys`, the audio engine's clock. The reader is the textbook case for
+condition 2: §2 traced its area to next-state muxes and per-state adders, and §8 records its
+state space at 63 of 64 codes before Branch D freed six. Every navigation feature since
+v0.5.0 has grown it (§8: 6,421 → 7,869 ALUTs in two weeks). As microcode, a new parse
+would cost ROM words, not ALMs. The VM is already an interpreter: DVD VM commands are an
+instruction set that `dvd_vm` decodes with hardwired muxes.
+
+- **⛔ Not the audio engine's silicon.** The audio engine is 28–45 % busy during playback,
+  which is when cell changes and NV_PCKs arrive. Sharing it would tie audio glitches to
+  navigation. What carries over is the method: the ISA, `uasm` assembler, Python model,
+  trace-equal emulator and RED microcode arms (`tools/test_dts_isa.py` pattern).
+- **What stays hardwired:** the sector pump, the read-ahead ring, straddle refills and
+  seamless junctions. These are a real-time data path, not parsing.
+- **★ First step (measurement only):** classify every reader `S_*` state as either
+  "drives `sd_*` or the stream FIFO" or "only parses the sector buffer", and attribute
+  ALUTs to each side (`DVD.map.rpt` per entity, after splitting the module if needed).
+  The saving is unknown until that split exists. The audio engine's sequencer, without
+  its vector ops, is about 860 ALMs (A2a, `ac3_engine.md`). If parsing is most of the
+  reader, a guess is −2,000 … −3,000 ALMs.
+- **Gate change:** `run_reader_regress.sh` requires bit-identical traces, and a sequencer
+  shifts every operation by cycles. (Branch E's GPRM move changed the traces too.)
+  Acceptance would be bench verdicts plus `tools/nav_diff.py` against libdvdnav on HIL,
+  as Branch E was.
+
+### 10c. The transport cluster: share one arithmetic unit (resource sharing, not microcode)
+
+`seek_bar` 1,015 · `scrub_ctrl` 678 · `transport_hud` 409 · `lin_rate` 350 · `seek_time`
+312 · `dpad_seek` 248 · `cdda_toc` 208 · `secs_bcd` 101, about **3,300 ALMs**. All on
+`clk_sys`, all doing event-rate or refresh-rate position and time math, and several carry
+their own serial divider or multiplier (`seek_bar`'s header: "ONE serial restoring
+divider"; `lin_rate`'s ratio divide; `seek_time`'s divider FSM).
+
+- **Without 10b:** one shared divide/multiply unit behind an arbiter. That is lower risk
+  and needs no toolchain. `seek_bar` already shares its divider between fill, cursor and
+  tick conversion.
+- **With 10b:** these become routines on the navigation sequencer.
+- ⛔ `scrub_ctrl`'s note against dividing in the rate path still applies. It is about
+  correctness on seamless-branch discs, not area.
+- **Estimate:** not attempted; it depends on how much of each module is the arithmetic.
+
+### 10d. The MPEG-2 decoder (`mpeg2video`, 10,723 ALMs)
+
+Most of it fails condition 1. `motcomp` (3,109), `resample` (1,553), `idct` (812) and about
+20 FIFOs and readers move pixels or coefficients every cycle, and decode pacing (0 lates on
+the census since F1 + F2, `decode_pacing.md`) is the hardest-won property in the core.
+
+- **★ `mult22x16` (cheapest item in this section, not microcode).** The six instances in
+  `idct1d_col` (`rtl/mpeg2/idct.v:1380`) are a Virtex-II workaround: a 22×16 multiply split
+  into an 18×16 DSP product, a 4-bit shift-add partial product in LUTs and a 38-bit
+  adder. That is 41–51 ALMs each, **277 ALMs in all (measured)**, and **each already
+  occupies a whole DSP block** (measured), so Cyclone V's 27×27 mode would take the full
+  product with no extra DSP. The split is exact (`multiplier = msb·16 + lsb`, lsb
+  unsigned), so `product <= multiplier * multiplicand` with the same two-cycle latency is
+  bit-identical. Estimate −150 … −250 ALMs; the pipeline registers partly move into the
+  DSP. Gate: the IDCT bench, then the conformance streams (`docs/conformance.md`).
+- **`vld` header parsing (1,015 own ALMs, 71 states).** About 30 states parse the
+  sequence, GOP, picture and extension headers and load the quantiser matrices, once per
+  picture. That part fits microcode; the macroblock and coefficient path must stay
+  hardwired. The header fields must remain registers that feed the rest of the decoder.
+  `vld` is on `clk_dec`, so it would need its own sequencer. A guess is −200 … −400 ALMs.
+  Low priority.
+- **`memory_address` ×4 (872 ALMs, measured; one DSP each).** Deep per-request pipelines:
+  `bwd` 336, `disp` 250, `fwd` 171, `recon` 115. Sharing one between forward, backward
+  and reconstruction first needs a measurement of how often each issues requests, because
+  this is motion compensation's critical path.
+
+### 10e. Not candidates
+
+- **`ascal`, both `osd`s, `audio_out`:** `sys/`, edited only when unavoidable.
+- **`mem_shim_burst`:** a cache, already slimmed (§3, `history.md` §11).
+- **`spu_decode`, `disp_sched`, the display stages:** pixel-rate.
+- The block-RAM items stay in §6.
+
+### 10f. Suggested order
+
+1. **`mult22x16`** (10d): small, exact, an afternoon plus a fit.
+2. **The IMDCT on the engine** (10a), once the exactness question is decided.
+3. **The reader state split** (10b, measurement only), which decides whether 10b and 10c
+   are worth a branch.

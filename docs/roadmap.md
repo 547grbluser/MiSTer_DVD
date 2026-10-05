@@ -1292,6 +1292,15 @@ Levers, cheapest/lowest-risk first:
   and that's what to budget carefully. (CSS decryption stays a one-time PC-side rip step, not a
   running daemon — the FPGA only ever sees a decrypted `.iso`.)
 
+- **Next reclaim candidates (2026-10-05 survey, nothing built): `docs/logic_reclaim.md` §10.**
+  Where the audio engine's microcode pattern (or plain resource sharing) would reclaim
+  logic, the MPEG-2 decoder included. In suggested order: `idct1d_col`'s `mult22x16`
+  Virtex-II workaround (277 ALMs measured, exact, no extra DSP); the AC-3 IMDCT onto the
+  audio engine (−1,200 … −1,600 ALMs estimated; ⏳ the maintainer decides truncation vs
+  an LSB-bounded gate); then a measurement-only split of `dvd_iso_reader`'s states, which
+  decides whether a navigation sequencer for the reader, VM and `nav_pci` (6,234 ALMs) and
+  a shared transport arithmetic unit (~3,300 ALMs) are worth a branch.
+
 Validate empirically (does it route? does the fringe stay gone on HW?), not by chasing the
 fit/STA reports to zero — consistent with the project's "validate on hardware" discipline.
 
