@@ -191,7 +191,7 @@ A faithful port of **libdvdnav `src/vm/decoder.c` `eval_command`**:
 - Reset domain: **`reset_n`, NOT `pipe_rst_n`** — GPRM/RSM state must survive seeks
   and jumps (the pgc-palette seek-reset lesson). A mount (`start`) runs `vm_reset`.
 
-## Player parameters SPRM14/15/20 (feature/player-regs) — 🔧 sim + offline proven, ⏳ HW
+## Player parameters SPRM14/15/20 (feature/player-regs) — ✅ HW-CONFIRMED (2026-10-05), not yet merged
 
 **What.** A disc's commands can *read* three player parameters: SPRM14 (the TV the
 player drives), SPRM15 (the audio it can play) and SPRM20 (its region). They used to be
@@ -277,6 +277,11 @@ paths now fetch @32 first.
 - `tools/dvd_vm_ref.py --player hdmi|analog-auto|analog-fit|analog-lb|analog-crop
   [--rmask HEX]` mirrors `player_regs` for offline boots.
 - **Offline (library boot diff):** see the status log entry.
+- **HW (2026-10-05, `DVD_playerregs_20261004_2358`, control arm `DVD_subp32_20261004_1603`,
+  Debug Overlay `{PGCN, VTS}`):** HARTSWAR_169 on Progressive boots VTS 3 (16:9 MGM intro)
+  where `main` boots VTS 4; under Interlaced + Letterbox both boot VTS 4; 13_CONVERSATION
+  (mask 0x00, reads SPRM20 -- a broken region loop would land on its VTS 6 dead end) parks
+  at the same `5/0` on both. Build: `clk_dec` 90.87 / 86.9 MHz, +142 ALM vs the control.
 
 ## DVD-game entropy (Scene It et al.) — ✅ HW-CONFIRMED (PR fj#119)
 

@@ -22,8 +22,8 @@ predate later confirmations; the `CLAUDE.md` index carries the reconciled status
 
 ## Hardware status (THIS fork, verified 2026-06-21)
 
-- 🔧 **PLAYER PARAMETERS SPRM14/15/20 FROM THE SETUP, NOT CONSTANTS (feature/player-regs,
-  2026-10-04; sim + offline proven, ⏳ build + HIL).** Design: `docs/dvd_vm.md` "Player
+- ✅ **PLAYER PARAMETERS SPRM14/15/20 FROM THE SETUP, NOT CONSTANTS (feature/player-regs,
+  2026-10-04; HW-CONFIRMED against a `main` control arm, not yet merged).** Design: `docs/dvd_vm.md` "Player
   parameters SPRM14/15/20". These are the *DVD Demystified* 3rd-edition audit's items 2 and 3.
   - **Was:** `sprm_read` returned libdvdnav's constants: 14 = `0x0100` ("4:3 TV,
     pan&scan" on every setup), 15 = `0x7CFC` (claims SDDS and karaoke), and 20 = `0x0001`.
@@ -57,9 +57,12 @@ predate later confirmations; the `CLAUDE.md` index carries the reconciled status
     is the new T10 line in `iso_reader_vm`. 17 traces are timing-only (the extra 45-cycle
     fetch); `iso_reader_vm`'s fixture changed, and `zerocell` gains one counter transition
     before `$finish`. Verilator: no new warnings. `lint_undriven` and `main/tests` pass.
-  - **Next:** the build, then HIL against a `main` control arm: HARTSWAR_169 on HDMI shows
-    the 16:9 intro, under Interlaced + Letterbox shows the 4:3 one, and a region-checking
-    region-1 disc boots as before.
+  - **HW (2026-10-05, `DVD_playerregs_20261004_2358`, control arm `DVD_subp32_20261004_1603`,
+    Debug Overlay `{PGCN, VTS}`):** HARTSWAR_169 on Progressive boots VTS 3 (16:9 MGM intro)
+    where `main` boots VTS 4; under Interlaced + Letterbox both boot VTS 4; 13_CONVERSATION
+    (mask 0x00, reads SPRM20 -- a broken region loop would land on its VTS 6 dead end) parks
+    at the same `5/0` on both. Build: `clk_dec` 90.87 / 86.9 MHz, +142 ALM vs the control.
+  - **Next:** PR and merge when asked; the region-2 path stays offline-only.
   - **Follow-up queued:** Analog Aspect on 4:3 progressive displays (`docs/roadmap.md`).
 
 - ✅ **CSS ENCRYPTED ON A DISC THAT DECRYPTS FINE: A RAW READ RAN INTO A VOB (issue #147,
