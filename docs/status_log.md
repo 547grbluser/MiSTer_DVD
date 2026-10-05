@@ -22,8 +22,8 @@ predate later confirmations; the `CLAUDE.md` index carries the reconciled status
 
 ## Hardware status (THIS fork, verified 2026-06-21)
 
-- ✅ **CLK_MEM TIMING: THE VICTIM INVALIDATE DEFERRED ONE CYCLE (2026-10-05; branch
-  `feature/clkmem-timing`, sim cycle-exact, HW smoke matches `main`; not yet merged).**
+- ✅ **CLK_MEM TIMING: THE VICTIM INVALIDATE DEFERRED ONE CYCLE (2026-10-05; sim
+  cycle-exact, HW smoke matches `main`; ✅ MERGED PR #157).**
   - **Found** while answering "do we have negative slack?". `clk_mem` (90 MHz, the DDR3
     bridge plus the decoder's memory side) closed at **82.2 MHz** on the main+bt601 fit.
     `fmax_check` printed it as "info, no gate … infra domain, never closes". That was never
@@ -90,7 +90,8 @@ predate later confirmations; the `CLAUDE.md` index carries the reconciled status
     - The picture is clean.
     - The one late is pre-existing at that point in the disc; it is in the control too.
   - **Next:**
-    - A PR.
+    - Re-check SEED 9 on the combined netlist (this branch plus #156) before the next
+      release build.
     - Decide whether `clk_mem` becomes a FAIL in `fmax_check` once more netlists have been
       seen.
     - Optionally, retime the speculative-pop cluster for margin.
