@@ -156,6 +156,14 @@ module dvd_iso_reader #(
     input             chap_at_start, // 1 = near the current chapter's start (from DSI
                                      // cell-elapsed time) -> prev goes to the PREVIOUS
                                      // chapter; else prev restarts the current one
+    // TITLE-EDGE chapter skip (audit item 7, docs/dvd_nav.md "Chapter skip at the
+    // title's edges"). A burst with no further chapter to move to is handed to the
+    // VM instead of clamping: Next that STARTS on the last program -> run the PGC's
+    // POST (libdvdnav vm_jump_next_pg); Prev at the start of chapter 1 with an
+    // authored prev_pgcn that is not this PGC -> that PGC's last program
+    // (vm_jump_prev_pg). Only with Disc Menus on (vm_mode): Auto has no VM.
+    output reg        chap_edge,     // pulse: the burst hit the title's edge
+    output reg        chap_edge_dir, // 1 = Next (run POST), 0 = Prev (prev_pgcn)
     output reg        seek_ack,      // pulse: a seek was accepted (drives load_flush)
     output     [7:0]  cur_cell,      // currently-playing cell index (for UI)
     output            cell_ready,    // 1 = cell-mode active (seek available)
@@ -1129,9 +1137,33 @@ wire       menu_dom = (dom == DOM_VMGM) || (dom == DOM_VTSM);
 // Real chapter-skip walk arm (may pre-empt an in-flight cur_pgm query walk).
 // Cross-PGC: nr_ptt > 1 also arms it — a 1-program PGC inside a multi-chapter
 // title (the Scene_It shape) can now skip OUT of its PGC via the PTT table.
+// Title edge (audit item 7): with Disc Menus on (vm_mode) a SINGLE-chapter title
+// arms it too, because its one chapter is the last one - Next runs its POST
+// (libdvdnav vm_jump_next_pg has no program-count guard; the extras/trailer
+// shape, where Next skips the clip). Prev there restarts it like any chapter.
+// A PGC with no program map (nr_pgms 0, never authored with cells) stays
+// unarmed: the walk would read a stale pmap[0]. Disc Menus off keeps the old
+// guard, bit-identical.
 wire chap_go = chap_pulse && cell_mode && !menu_dom &&
-               (cmd_nr_pgm > 8'd1 || nr_ptt > 11'd1) &&
+               (cmd_nr_pgm > 8'd1 || nr_ptt > 11'd1 || (vm_mode && cmd_nr_pgm != 8'd0)) &&
                (chap_st == CH_IDLE || chap_query) && !seek_pending;
+// Title-edge predicates, consulted ONLY in the legacy within-PGC resolve arms
+// (CH_R without a PTT table, CH_GR's legacy branch). Reaching those arms already
+// means the move cannot leave this PGC through the PTT table (no table, a reverse
+// map miss, or this PGC holds the title's last/first chapter), so:
+//  Next: the burst STARTED on the last program - exactly today's chap_do==0 case.
+//   An overshooting burst from an earlier chapter still clamps to the last one
+//   (clamp-then-edge, user decision 2026-10-05): mashing Next lands on the last
+//   chapter and only a press FROM it leaves the title.
+//  Prev: chapter 1 and the burst steps below it (chap_dec != 0, so one Prev
+//   mid-chapter still restarts it), with an authored prev_pgcn. A prev_pgcn that
+//   names THIS PGC (408 of 802 library titles that author one, 124 of them
+//   multi-program) restarts instead of wrapping to the last chapter - a
+//   deliberate libdvdnav deviation (user decision 2026-10-05).
+wire       chap_nx_edge  = chap_dir_l && !(chap_best + 7'd1 < cmd_nr_pgm[6:0]);
+wire       chap_pv_edge  = !chap_dir_l && (chap_best == 7'd0) && (chap_dec != 5'd0) &&
+                           (prev_pgcn != 16'd0) && (prev_pgcn != cur_pgcn);
+wire       chap_edge_go  = vm_mode && (chap_nx_edge || chap_pv_edge);
 reg        jump_pending;              // a jump is latched awaiting a block boundary
 reg [1:0]  jdom_l;                    // latched jump request
 reg [7:0]  jvts_l, jcell_l;
@@ -2520,6 +2552,8 @@ always @(posedge clk or negedge rst_n) begin
         jptt_l       <= 11'd0;
         vm_cell_cmd  <= 1'b0;
         vm_pgc_end   <= 1'b0;
+        chap_edge    <= 1'b0;
+        chap_edge_dir <= 1'b0;
         vmw_pgc      <= 1'b0;
         vmw_last     <= 1'b0;
         vmw_pgc_pend <= 1'b0;
@@ -2583,6 +2617,7 @@ always @(posedge clk or negedge rst_n) begin
         pgc_error  <= 1'b0;
         vm_cell_cmd    <= 1'b0;
         vm_pgc_end     <= 1'b0;
+        chap_edge      <= 1'b0;
 
         // ---- Multi-angle (Phase 9) ------------------------------------------
         // Angle cycle: emu delivers a 1-cycle pulse. Cycle 1..angle_count; the
@@ -2751,6 +2786,11 @@ always @(posedge clk or negedge rst_n) begin
                     cur_pgm    <= {1'b0, chap_best} + 8'd1;
                     chap_query <= 1'b0;
                     chap_st    <= CH_IDLE;
+                end else if (chap_edge_go) begin
+                    // Title edge: the VM runs POST / follows prev_pgcn (no seek).
+                    chap_edge     <= 1'b1;
+                    chap_edge_dir <= chap_dir_l;
+                    chap_st       <= CH_IDLE;
                 end else begin
                 // chap_best/chap_best_cell now settled -> resolve the target.
                 // A rapid multi-press was debounced by emu into ONE pulse carrying
@@ -2821,11 +2861,19 @@ always @(posedge clk or negedge rst_n) begin
                     // when the move resolves inside the loaded PGC, or when it
                     // clamps at a title end that lives in this PGC. Single-PGC
                     // movie titles always land here (g_pgc_first==0 &&
-                    // g_pgc_last==nr_ptt-1).
-                    pm_raddr <= chap_dir_l ? chap_next_tp : chap_prev_tp;
-                    chap_do  <= chap_dir_l ? (chap_best + 7'd1 < cmd_nr_pgm[6:0])
-                                           : 1'b1;
-                    chap_st  <= CH_C;
+                    // g_pgc_last==nr_ptt-1). The title edge lives here too:
+                    // this branch is the one a move with nowhere left to go
+                    // in the title takes.
+                    if (chap_edge_go) begin
+                        chap_edge     <= 1'b1;
+                        chap_edge_dir <= chap_dir_l;
+                        chap_st       <= CH_IDLE;
+                    end else begin
+                        pm_raddr <= chap_dir_l ? chap_next_tp : chap_prev_tp;
+                        chap_do  <= chap_dir_l ? (chap_best + 7'd1 < cmd_nr_pgm[6:0])
+                                               : 1'b1;
+                        chap_st  <= CH_C;
+                    end
                 end else begin
                     // The move leaves the loaded PGC's entry run -> resolve the
                     // GLOBAL target chapter and read its {pgcn, pgn}.
@@ -4412,8 +4460,13 @@ always @(posedge clk or negedge rst_n) begin
                     pm_we    <= 1'b1;
                     pm_waddr <= walk_idx[6:0];
                     pm_wdata <= pb_rdata;
+                    // jpgn_l == 8'hFF = "the LAST program" (the Prev title-edge
+                    // jump, libdvdnav vm_jump_prev_pg; 0xFF is never a real pgn,
+                    // the spec maximum is 99): take the final entry walked.
                     if (use_jcell && jpgn_l != 8'd0 &&
-                        walk_idx + 13'd1 == {5'd0, jpgn_l} && pb_rdata != 8'd0) begin
+                        (walk_idx + 13'd1 == {5'd0, jpgn_l} ||
+                         (jpgn_l == 8'hFF && walk_left == 13'd1)) &&
+                        pb_rdata != 8'd0) begin
                         jcell_l <= pb_rdata - 8'd1;    // program n -> its entry cell
                     end
                     if (walk_left == 13'd1)
