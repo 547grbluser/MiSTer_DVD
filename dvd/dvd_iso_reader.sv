@@ -1140,7 +1140,8 @@ wire       menu_dom = (dom == DOM_VMGM) || (dom == DOM_VTSM);
 // Title edge (audit item 7): with Disc Menus on (vm_mode) a SINGLE-chapter title
 // arms it too, because its one chapter is the last one - Next runs its POST
 // (libdvdnav vm_jump_next_pg has no program-count guard; the extras/trailer
-// shape, where Next skips the clip). Prev there restarts it like any chapter.
+// shape, where Next skips the clip). Prev there restarts it like any chapter
+// (it used to be ignored; kept as a restart by user decision, 2026-10-05).
 // A PGC with no program map (nr_pgms 0, never authored with cells) stays
 // unarmed: the walk would read a stale pmap[0]. Disc Menus off keeps the old
 // guard, bit-identical.

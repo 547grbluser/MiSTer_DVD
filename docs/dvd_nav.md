@@ -2114,7 +2114,8 @@ mini-FSM (`chap_st`: `CH_A/B/R/C/D`, parallel to the main FSM) walks it on `chap
   (non-blocking hazard — caught by `iso_reader_chapter_tb` T4).
 
 Full 99-chapter support, control-path only. Requires `nr_pgm > 1` **or `nr_ptt > 1`**
-(single-chapter titles → ignored; the `nr_ptt` arm is the cross-PGC relaxation). Chosen
+(single-chapter titles → ignored with Disc Menus off; with Disc Menus on they arm too, see
+"Chapter skip at the title's edges"; the `nr_ptt` arm is the cross-PGC relaxation). Chosen
 over an earlier emu-side `chap_cell[32]` async map (32-chapter cap + a self-correcting
 `cur_chap` lag) — the reader BRAM is fit-disciplined and accurate.
 
@@ -2192,8 +2193,9 @@ libdvdnav run the post commands"; that is half right.
     `CH_G*`/`CH_T*` path is untouched.
   - Predicates `chap_nx_edge` / `chap_pv_edge` / `chap_edge_go`, gated by `vm_mode`.
   - A single-chapter title now arms the walk with Disc Menus on, because its one chapter
-    is the last. That is the extras/trailer shape, where Next skips the clip.
-    Program-less PGCs stay unarmed.
+    is the last. That is the extras/trailer shape, where Next skips the clip. Prev there
+    now restarts the title, where it used to be ignored: kept deliberately (user
+    decision, 2026-10-05), the same rule as any chapter. Program-less PGCs stay unarmed.
   - `jump_pgn == 8'hFF` means "start at the last program" (`P_PMAP` takes the final entry);
     0xFF is never a real pgn.
 - **VM** (`dvd/dvd_vm.sv`):

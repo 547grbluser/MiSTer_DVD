@@ -57,7 +57,8 @@ predate later confirmations; the `CLAUDE.md` index carries the reconciled status
   - **Built.**
     - **Reader:** `chap_edge` / `_dir` pulse from the two legacy within-PGC resolve arms
       only (the cross-PGC `CH_G*`/`CH_T*` path is untouched). A single-chapter title now
-      arms the walk with Disc Menus on, so Next skips a trailer or extra. `jump_pgn` 0xFF
+      arms the walk with Disc Menus on, so Next skips a trailer or extra, and Prev there
+      restarts it, where it was ignored before (kept by user decision, 2026-10-05). `jump_pgn` 0xFF
       means "last program".
     - **VM:** `key_chedge` → `ev_chedge` → POST (with a fall-through to `next_pgcn`) or the
       `prev_pgcn` jump. `usr_edge` masks `vm_adv` for the chain, because its no-op arms would

@@ -406,7 +406,7 @@ up, as a set-top player does:
 - **Next on the last chapter** leaves the title the way the disc does when the title ends by
   itself. That is usually back to the menu, and sometimes on to the next title, such as the
   next episode or trailer. On a title with only one chapter, such as a trailer or an extra,
-  Next skips it.
+  Next skips it, and Prev restarts it.
 - **Prev at the start of the first chapter** goes wherever the disc points "back" to. On some
   discs that is the end of the previous part, and on some extras it is the menu. Most discs
   set nothing here, and Prev restarts the first chapter.
