@@ -456,13 +456,30 @@ decoded together, so the IMDCT's `bufmem`, `delay_mem` and `pcm_mem` could share
 - **Estimate:** −1,200 … −1,600 ALMs, about −10 M10K, up to −9 DSP. The ROM cost depends on
   the encoding. Executing `imdct_sched_pk`'s butterflies as one vector op (reading the
   existing 291-entry table) is much smaller than flattening them into per-multiply terms.
-- **⏳ The maintainer's decision: exactness.** `imdct_512` multiplies Q8.23 samples by
-  Q1.17 twiddles and **truncates** (`>>> 17`). The engine's term executor rounds half-up
-  with 24–27-bit coefficients. Either:
-  - the executor gains a truncating Q1.17 mode, and `bench/ac3`'s byte-identical PCM gate
-    still holds; or
-  - the gate becomes LSB-bounded against liba52. `imdct_512` is itself only bounded, at
-    1,648 LSB (`run_imdct.sh`).
+- **✅ Decided (maintainer, 2026-10-05): bit-identical to `imdct_512`.** The engine
+  reproduces `imdct_512`'s arithmetic exactly: Q8.23 samples, the existing Q1.17 twiddles
+  and window, a **truncating** `>>> 17` after each product, and the same operation order.
+  `run_ac3_ab.sh` keeps requiring identical PCM for every block.
+  - **Why:** the identical A/B is what made the AC-3 parse and MP2 moves safe, and it
+    names the first wrong block. The alternative was a new IMDCT with half-up rounding and
+    wider coefficients, gated LSB-bounded against liba52 and within about 1 s16 LSB of
+    `ac3_front`. It would have bought cycle margin and an inaudible accuracy gain, at the
+    cost of that gate and a tolerance bench of the kind that has passed vacuously before.
+    MP2 made the same choice (`mp2_engine.md`: "bit identity is the VCD safety net").
+  - **What is already there:** `dts_vec.sv` has a floor mode (`trunc`). MP2's window
+    (`V_MWIN`, `vlo27`/`vhi27`) already multiplies a 32-bit operand as two 16-bit halves
+    into the 56-bit accumulator and stays bit-identical to `mp2_decode`.
+  - **The open part: operand width.** Mid-transform samples reach about ±17 in Q8.23,
+    about 29 bits, which is wider than the 27×27 multiplier. Two ways:
+    1. two-pass multiplies, as MP2 does: no new DSP; the worst frame rises from about
+       44 % to roughly 50–56 % of real time (soft estimate), near the 60 % bar;
+    2. widen the engine's multiplier using one of the ~9 DSPs the move frees: one pass,
+       about 44 %.
+  - **★ Next step:** an exact cycle count. Run `imdct_sched_pk`'s schedule (plus the pre,
+    post and window loops) through a Python executor that charges two passes for every
+    operand that can exceed 27 bits. Under about 50 %: two passes. Near 60 %: widen the
+    multiplier. `imdct_512` measures about 1,666 Q8.23 LSB from liba52 (`run_imdct.sh`,
+    tolerance 3,000); that bound is unchanged because the arithmetic is unchanged.
 - **Gates that exist:** `run_ac3_ab.sh` (block for block against the hardwired path),
   `bench/ac3/run_imdct.sh`, `run_ac3.sh --red`, then a by-ear HIL round on 5.1 and
   short-block material (`bbb_short_5p1`).
