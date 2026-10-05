@@ -817,5 +817,20 @@ that exists; pre-existing on the interlaced raster).
 - **Interlaced:** unchanged.
 - **HARTSWAR_169:** VTS 4 under Progressive Letterbox/Crop, VTS 3 under Auto/Fit.
 
-⏳ Still to do: Film 24p, Bob/Blend → Letterbox, subtitles/highlights, a VCD, and
-decode-pacing lates.
+**HW round 2 (2026-10-05):**
+- **Film 24p On + Letterbox:** exactly ¾, centred, no hole.
+- **Bob or Blend + Letterbox:** 360 lines, no hole.
+- **A VCD:** uncorrected (frames identical to Fit).
+- **Menus:** the permitted_df swap works on Progressive in both directions, and the
+  highlights sit on their buttons. Under Crop they measure **+1.3 px** right of the crop
+  mapping: the predicted `CE_PIXEL = 1` lag, invisible on a 41-px icon, and accepted.
+  Fixing it would mean a progressive-only `SP_QX_ADJ`-style trim for the mapped context.
+- **Subtitles under Letterbox:** drawn crisp at their authored position.
+
+- **PAL 576 Letterbox:** 430 lines under the 72-line bar.
+- **Decode pacing:** 0 lates and 0 drops in every Letterbox and Crop cell on ROGER,
+  THE_OFFICE_UK and Thayer's Quest (`pacing_matrix.py --aspect`), so the ~4/3 display
+  read rate costs nothing measurable.
+
+Numbers are in `docs/status_log.md`. Not checked here: a real 31 kHz or 4:3 HDMI display
+by eye.

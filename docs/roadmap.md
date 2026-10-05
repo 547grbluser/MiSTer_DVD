@@ -634,7 +634,7 @@ HW against a `main` control arm: HARTSWAR_169 on HDMI boots VTS 3 (16:9) instead
 VTS 4, stays on VTS 4 under Interlaced + Letterbox, and 13_CONVERSATION boots unchanged.
 The region-2 path stays offline-only (no physical vehicle). **Next:** the 4:3-progressive follow-up below.
 
-### 🔧 Explicit Analog Aspect Letterbox/Crop on Progressive (`feature/progressive-aspect`, ⏳ HW — see `docs/crt_anamorphic.md` §13)
+### ✅ Explicit Analog Aspect Letterbox/Crop on Progressive (`feature/progressive-aspect`, HW-CONFIRMED 2026-10-05, unmerged — see `docs/crt_anamorphic.md` §13)
 
 The 2026-10-04 follow-up, built with these decisions (user, 2026-10-04/05):
 - **Only an explicit Letterbox or Crop acts on Progressive.** Auto and Fit are unchanged:
@@ -650,10 +650,15 @@ true because `aa_live` became that named, evaluated net. A raster-level `aa_live
 made Auto report a 4:3 TV while it was not letterboxing. The `disp_vscale` frame-path defect
 (§11) that this made reachable is fixed.
 
+HW (two rounds, against the playerregs control):
+- Auto and Fit are unchanged, and so is Interlaced.
+- Letterbox and Crop work on NTSC and PAL, with Film 24p, and with Bob/Blend.
+- Menus and subtitles are correct.
+- HARTSWAR_169 boots VTS 4.
+- 0 lates on ROGER, Office and Thayer.
+
 **Next:**
-- HIL against the playerregs control: Auto/Fit unchanged; Letterbox/Crop; subtitles and
-  highlights; Film 24p; Bob/Blend → Letterbox; HARTSWAR_169 VTS 4; Interlaced unchanged;
-  decode-pacing lates.
+- The maintainer's eye check on a 31 kHz / 4:3 HDMI display, then a PR.
 - Possible follow-up: `vsz_eff`-derived overlay bars. That would lift the SIF guard and fix
   forced-PAL over 480-line content.
 
