@@ -20,6 +20,13 @@
 // NSETS*LINEW), write-hit LRU touches, random aliasing mixes, ADDR_ERR
 // sprinkles, and dual-pairable / non-pairable miss runs.
 // Combos: rerun with -DMSAB_CWF=0/1 x -DMSAB_DUAL=0/1 (see run_mem_shim.sh).
+//
+// LOCKSTEP mode (-DMSAB_LOCKSTEP, added 2026-10-05 for the clk_mem retime): for a change
+// that must be CYCLE-exact, not just decision-exact. Both rigs get the SAME seeds, the
+// reference is whatever module -DMSAB_REF_MOD names (run_mem_shim.sh builds it from the
+// pre-change commit with git), and every DUT output is compared with !== on every cycle
+// from reset release. Identical inputs + identical outputs on every cycle = the change
+// is unobservable at the ports.
 // =============================================================================
 `timescale 1ns/1ps
 module mem_shim_ab_tb;
@@ -35,6 +42,14 @@ module mem_shim_ab_tb;
 `endif
 `ifndef MSAB_DUAL
  `define MSAB_DUAL 1
+`endif
+`ifndef MSAB_REF_MOD
+ `define MSAB_REF_MOD mem_shim_burst_ref
+`endif
+`ifdef MSAB_LOCKSTEP
+    localparam LOCKSTEP = 1;
+`else
+    localparam LOCKSTEP = 0;
 `endif
 
     reg clk = 0, rst_n = 0;
@@ -92,7 +107,7 @@ module mem_shim_ab_tb;
         // the dual S_PEEK (FIFO-pop) candidate path, and widens the invariance
         // proof: supply timing must not change decisions either.
         integer     q_head = 0;
-        integer     gseed = (g == 0) ? 32'h6A9_0001 : 32'h6A9_0002;
+        integer     gseed = (g == 0 || LOCKSTEP) ? 32'h6A9_0001 : 32'h6A9_0002;
         reg  [1:0]  req_cmd;
         reg  [21:0] req_addr;
         reg  [63:0] req_dta;
@@ -145,7 +160,7 @@ module mem_shim_ab_tb;
         integer    bq_wr = 0, bq_rd = 0, bq_n = 0;
         integer    rd_lat = 0, rd_beats = 0;
         reg [21:0] rd_ptr = 0;
-        integer    seed = (g == 0) ? 32'h0AB0_5EED : 32'h1CEB_00DA;  // per-rig seeds
+        integer    seed = (g == 0 || LOCKSTEP) ? 32'h0AB0_5EED : 32'h1CEB_00DA;  // per-rig seeds (shared in LOCKSTEP)
         reg        stall_en = 1'b0;
         reg        pop;
 
@@ -220,7 +235,7 @@ module mem_shim_ab_tb;
     endgenerate
 
     // ---- the two DUTs (shipping geometry) ----
-    mem_shim_burst_ref #(.NSETS(NSETS), .ASSOC(4), .LINEW(LINEW)) dut_ref (
+    `MSAB_REF_MOD #(.NSETS(NSETS), .ASSOC(4), .LINEW(LINEW)) dut_ref (
         .clk(clk), .rst_n(rst_n), .hard_rst_n(rst_n),
         .cwf_en(1'b`MSAB_CWF), .dual_en(1'b`MSAB_DUAL),
         .mem_req_rd_cmd(rig[0].req_cmd), .mem_req_rd_addr(rig[0].req_addr),
@@ -258,6 +273,26 @@ module mem_shim_ab_tb;
         .debug_rsp_count(rig[1].dbg_rsp), .debug_read_pend_cycles(rig[1].dbg_pend),
         .debug_cache_missrate(rig[1].dbg_mr)
     );
+
+    // ---- LOCKSTEP: every DUT output, every cycle ----
+    integer ls_cycles = 0, ls_errs = 0;
+    wire [255:0] ls_out0 = {rig[0].req_en, rig[0].res_en, rig[0].res_dta, rig[0].ddr_addr,
+                            rig[0].ddr_burstcnt, rig[0].ddr_read, rig[0].ddr_write,
+                            rig[0].ddr_writedata, rig[0].ddr_byteenable, rig[0].dbg_state};
+    wire [255:0] ls_out1 = {rig[1].req_en, rig[1].res_en, rig[1].res_dta, rig[1].ddr_addr,
+                            rig[1].ddr_burstcnt, rig[1].ddr_read, rig[1].ddr_write,
+                            rig[1].ddr_writedata, rig[1].ddr_byteenable, rig[1].dbg_state};
+    always @(posedge clk) if (LOCKSTEP && rst_n) begin
+        ls_cycles = ls_cycles + 1;
+        if (ls_out0 !== ls_out1) begin
+            if (ls_errs < 6)
+                $display("  LOCKSTEP MISMATCH cycle %0d: state REF %0d NEW %0d | rd_en %b/%b res_en %b/%b ddr_rd %b/%b ddr_wr %b/%b addr %h/%h",
+                         ls_cycles, rig[0].dbg_state, rig[1].dbg_state, rig[0].req_en, rig[1].req_en,
+                         rig[0].res_en, rig[1].res_en, rig[0].ddr_read, rig[1].ddr_read,
+                         rig[0].ddr_write, rig[1].ddr_write, rig[0].ddr_addr, rig[1].ddr_addr);
+            ls_errs = ls_errs + 1;
+        end
+    end
 
     // ---- pairing-alive tripwire (hierarchical, sim-only) ----
     // The A/B burst-sequence compare is blind to PAIRING (it changes only
@@ -398,6 +433,14 @@ module mem_shim_ab_tb;
             end
         end
 
+        if (LOCKSTEP) begin
+            $display("  LOCKSTEP vs the -DMSAB_REF_MOD reference: %0d cycles compared, %0d mismatching", ls_cycles, ls_errs);
+            if (ls_cycles < 1000) begin
+                $display("  ERROR: LOCKSTEP compared only %0d cycles (vacuous)", ls_cycles);
+                errors = errors + 1;
+            end
+            errors = errors + ls_errs;
+        end
         if (errors == 0)
             $display("  RESULT: PASS — burst sequences identical (%0d misses), all responses correct", cap_bn[0]);
         else

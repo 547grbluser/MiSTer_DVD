@@ -421,6 +421,10 @@ module mem_shim_burst #(
     reg [ASW-1:0]   wr_way;      // way to update on a write hit
     reg             wr_is_hit;   // the in-flight write hit a cached line
     reg [SET_W-1:0] init_idx;    // S_INIT walk index
+    // DEFERRED VICTIM INVALIDATE (clk_mem timing, 2026-10-05): see the apply block at
+    // the top of the FSM's non-reset branch.
+    reg             inv_a_pend;  // clear cache_valid[cur_set][sel_way] next cycle (fast miss)
+    reg             inv_b_pend;  // clear cache_valid[ifb_set][ifb_way] next cycle (pair B)
 
     // ---- cache_data read port (combinational address, registered output) ----
     // Serve states read the HEAD of the fallback serve queue (sv_rd); a streaming
@@ -545,6 +549,8 @@ module mem_shim_burst #(
         if (!rst_n) begin
             state          <= S_INIT;
             init_idx       <= 0;
+            inv_a_pend     <= 1'b0;
+            inv_b_pend     <= 1'b0;
             mem_res_wr_en  <= 1'b0;
             mem_res_wr_dta <= 64'd0;
             ddr3_read      <= 1'b0;
@@ -610,6 +616,32 @@ module mem_shim_burst #(
             mem_res_wr_en <= 1'b0;        // default single-cycle strobe
             cwf_en_q      <= cwf_en;      // register the enable pins
             dual_en_q     <= dual_en;
+
+            // =================================================================
+            // DEFERRED VICTIM INVALIDATE (clk_mem timing, 2026-10-05; docs/status_log.md
+            // "clk_mem timing"). The two miss sites below used to clear
+            // cache_valid[set][victim_c] on the same edge that chose victim_c, so one
+            // clk_mem cycle held: candidate mux -> 128:1 cache_valid read -> victim
+            // priority -> a 512-flop write decode. That was the whole failing cluster
+            // (82.2 MHz vs 90; all 400 worst paths ended at cache_valid). The sites now
+            // latch the way into registers they ALREADY write on that edge (sel_way /
+            // ifb_way, with cur_set / ifb_set) and this block clears the bit ONE CYCLE
+            // LATER, from registers.
+            //
+            // Why one cycle later is observably identical (re-verify if the FSM changes):
+            // the lookup outputs hit_c / hit_way_c / victim_c (cmp_valid) are consumed
+            // ONLY in S_STREAM (the stage-A verdict, the snapshots, the fast write, the
+            // pB_* advance, cm_miss) and in S_PEEK2 (the pair decision). The cycle after
+            // site A is S_FILL_CMD; the cycle after site B is S_ISSUE2 or S_FILL_DAT.
+            // Neither consumes them. The one other reader, raddr_comb, feeds cache_rdata,
+            // which is consumed only in S_STREAM behind a stage-A hit (pB_valid) and in
+            // S_SERVE via the serve-queue arm. The fill's re-validate of the same line
+            // is >= LINEW beats away. bench/dvd/run_mem_shim.sh's LOCKSTEP arm compares
+            // every output, every cycle, against the pre-retime module.
+            if (inv_a_pend) cache_valid[cur_set][sel_way] <= 1'b0;
+            if (inv_b_pend) cache_valid[ifb_set][ifb_way] <= 1'b0;
+            inv_a_pend <= 1'b0;
+            inv_b_pend <= 1'b0;
 
             // =================================================================
             // CENTRALIZED COLLECT (runs in ALL fill-region states so a returning
@@ -753,10 +785,12 @@ module mem_shim_burst #(
                         if (pA_rd_miss) begin
                             // FAST miss entry (timing parity with the flop-tag
                             // version: verdict -> S_FILL_CMD in one cycle).
-                            // Invalidate the victim now (so a fill timeout can't
-                            // leave a stale valid line), issue one burst line-fill.
+                            // Invalidate the victim (so a fill timeout can't leave a
+                            // stale valid line) -- next cycle, from cur_set/sel_way,
+                            // see DEFERRED VICTIM INVALIDATE -- and issue one burst
+                            // line-fill.
                             sel_way                        <= victim_c;
-                            cache_valid[pA_set][victim_c]  <= 1'b0;
+                            inv_a_pend                     <= 1'b1;
                             ddr3_addr                      <= {7'b0011000, pA_line_base};
                             ddr3_burstcnt                  <= LINEW[7:0];
                             ddr3_read                      <= 1'b1;
@@ -904,7 +938,7 @@ module mem_shim_burst #(
                     ifb_way    <= victim_c;
                     ifb_off    <= cand_off;
                     ifb_tag    <= cand_tag;
-                    cache_valid[cand_set][victim_c] <= 1'b0;   // invalidate B's victim
+                    inv_b_pend <= 1'b1;   // invalidate B's victim next cycle (DEFERRED VICTIM INVALIDATE)
                     fillB_tags <= tag_rd;                      // B's validate RMW base
                     fillB_lru  <= lru_rd;
                     served_b   <= 1'b0;
@@ -1128,5 +1162,21 @@ module mem_shim_burst #(
     assign debug_rsp_count        = rsp_count;
     assign debug_read_pend_cycles = {idle_pct, fill_pct};  // {idle%, fill%} per window
     assign debug_cache_missrate   = {miss_pct, reads_hi};  // {miss%, read-intensity}
+
+    // ---- sim-only guard for the DEFERRED VICTIM INVALIDATE (clk_mem timing) ----
+    // The deferral is observably identical only while (a) no lookup state runs in the
+    // cycle a clear is pending and (b) the fill's validate never targets a pending
+    // element. Today's FSM guarantees both; a future FSM edit that breaks either fails
+    // every bench that instantiates this module instead of silently shipping.
+    // synthesis translate_off
+    always @(posedge clk) if (rst_n) begin
+        if ((inv_a_pend || inv_b_pend) && ((state == S_STREAM) || (state == S_PEEK2)))
+            $fatal(1, "mem_shim_burst: deferred invalidate pending in lookup state %0d", state);
+        if (fill_beat && (beat == LINEW-1) &&
+            ((inv_a_pend && (c_set == cur_set) && (c_way == sel_way)) ||
+             (inv_b_pend && (c_set == ifb_set) && (c_way == ifb_way))))
+            $fatal(1, "mem_shim_burst: fill validate collides with a pending invalidate");
+    end
+    // synthesis translate_on
 
 endmodule

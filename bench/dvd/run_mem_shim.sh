@@ -51,6 +51,55 @@ for d in "-DMSAB_CWF=1 -DMSAB_DUAL=1" "-DMSAB_CWF=1 -DMSAB_DUAL=0" \
     run mem_shim_ab_tb "$d" dvd/mem_shim_burst.sv bench/dvd/mem_shim_burst_ref.sv
 done
 
+# 2b. LOCKSTEP retime gate (clk_mem timing, 2026-10-05): the live module must be
+# CYCLE-exact -- every output, every cycle, identical inputs -- against the module as
+# it was before the deferred-victim-invalidate retime. The reference is built from git
+# at RETIME_BASE (a commit on main), renamed, so no 1,100-line frozen copy is checked in.
+# ⚠ This arm pins one intended-no-op change. A later change to mem_shim_burst that is
+# MEANT to alter timing will fail it: move RETIME_BASE to that change's parent, or drop
+# the arm, and say which in the commit.
+RETIME_BASE="${RETIME_BASE:-1ee4f2b}"
+LS_TMP="$(mktemp -d)"
+trap 'rm -rf "$LS_TMP"' EXIT
+if git cat-file -e "$RETIME_BASE:dvd/mem_shim_burst.sv" 2>/dev/null; then
+    git show "$RETIME_BASE:dvd/mem_shim_burst.sv" \
+        | sed 's/^module mem_shim_burst\b/module mem_shim_burst_pre/' > "$LS_TMP/mem_shim_burst_pre.sv"
+    for d in "-DMSAB_CWF=1 -DMSAB_DUAL=1" "-DMSAB_CWF=1 -DMSAB_DUAL=0" \
+             "-DMSAB_CWF=0 -DMSAB_DUAL=1" "-DMSAB_CWF=0 -DMSAB_DUAL=0"; do
+        run mem_shim_ab_tb "$d -DMSAB_LOCKSTEP -DMSAB_REF_MOD=mem_shim_burst_pre" \
+            dvd/mem_shim_burst.sv "$LS_TMP/mem_shim_burst_pre.sv"
+    done
+
+    # --red: each mutation must FAIL the lockstep arm (dual on, so both sites run).
+    if [ "${1:-}" = "--red" ]; then
+        red() {  # red <label> <sed expression> <must-match grep> [<required failure text>]
+            local label=$1 expr=$2 must=$3 want=${4:-}
+            sed "$expr" dvd/mem_shim_burst.sv > "$LS_TMP/mut.sv"
+            if ! grep -q "$must" "$LS_TMP/mut.sv"; then
+                echo "== RED $label: FAIL -- the mutation did not apply"; rc=1; return
+            fi
+            iverilog -g2012 -DMSAB_CWF=1 -DMSAB_DUAL=1 -DMSAB_LOCKSTEP -DMSAB_REF_MOD=mem_shim_burst_pre \
+                -o "$LS_TMP/red_sim" "$LS_TMP/mut.sv" "$LS_TMP/mem_shim_burst_pre.sv" bench/dvd/mem_shim_ab_tb.sv
+            local out
+            out="$(vvp "$LS_TMP/red_sim" 2>&1 || true)"
+            if echo "$out" | grep -q "RESULT: PASS"; then
+                echo "== RED $label: FAIL -- the lockstep arm cannot see this mutation"; rc=1
+            elif [ -n "$want" ] && ! echo "$out" | grep -q "$want"; then
+                echo "== RED $label: FAIL -- it failed, but not with \"$want\""; rc=1
+            else
+                echo "== RED $label: caught, as it must be"
+                echo "$out" | grep -E "LOCKSTEP MISMATCH|FATAL|fatal|RESULT" | head -2
+            fi
+        }
+        red "site-A wrong way" 's/if (inv_a_pend) cache_valid\[cur_set\]\[sel_way\]/if (inv_a_pend) cache_valid[cur_set][sel_way+1'"'"'b1]/' 'sel_way+1'
+        red "site-B wrong way" 's/if (inv_b_pend) cache_valid\[ifb_set\]\[ifb_way\]/if (inv_b_pend) cache_valid[ifb_set][ifb_way+1'"'"'b1]/' 'ifb_way+1'
+        red "guard alive"      's/^            inv_a_pend <= 1.b0;$/            inv_a_pend <= inv_a_pend; \/\/ MUT/' 'MUT' \
+            "deferred invalidate pending"
+    fi
+else
+    echo "== LOCKSTEP: SKIPPED -- RETIME_BASE $RETIME_BASE not in this clone's history"
+fi
+
 # 3. telemetry
 run cache_missrate_tb "" dvd/mem_shim_burst.sv
 
