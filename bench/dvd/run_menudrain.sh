@@ -42,7 +42,7 @@ echo "$out" | grep -q '^RESULT: PASS' || { echo "  FAIL: the suite is not green"
 
 # The Phase-B title-domain contract must be untouched: same gate, same bench.
 echo "== menudrain: iso_reader_vm_tb (title-domain Phase B) must be unchanged =="
-$IV -o bench/dvd/menudrain_vm_sim dvd/dvd_iso_reader.sv dvd/dvd_vm.sv \
+$IV -o bench/dvd/menudrain_vm_sim dvd/dvd_iso_reader.sv dvd/dvd_vm.sv dvd/player_regs.sv \
     dvd/bcd_time_add.sv bench/dvd/iso_reader_vm_tb.sv 2>/dev/null
 vout=$(vvp bench/dvd/menudrain_vm_sim 2>&1) || true
 echo "$vout" | grep -E '^T[0-9]' || true

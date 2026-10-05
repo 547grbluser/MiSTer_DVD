@@ -108,6 +108,17 @@ keeps the centre 528 pixels rather than an exact 540, and the picture comes out 
 wider than true.) This is the pan-and-scan trade-off, and which
 you prefer is a matter of taste.
 
+`Analog Aspect` also tells the disc what kind of TV it is playing on. Some discs carry two
+copies of an intro or a menu page, one 4:3 and one 16:9, and pick between them from that
+answer:
+
+- **Auto, Letterbox:** a 4:3 TV that letterboxes.
+- **Crop:** a 4:3 TV that shows pan-and-scan.
+- **Fit:** a widescreen TV.
+
+The disc reads it as it reaches each choice, so changing the setting mid-disc affects only
+the choices that come after.
+
 Letterbox uses a true two-tap vertical blend rather than dropping lines, so the scaled
 image is smooth rather than aliased.
 

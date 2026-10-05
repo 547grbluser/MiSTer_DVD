@@ -122,7 +122,12 @@ module dvd_vm_tb;
     reg        ent_stir  = 1'b0;
     reg [15:0] ent_val   = 16'd0;
 
+    // Player parameters (feature/player-regs). The old constants by default, which the
+    // golden fixture cases of part 1 were captured with; [S26] drives other values.
+    reg [15:0] cfg14 = 16'h0100, cfg15 = 16'h7CFC, cfg20 = 16'h0001;
+
     dvd_vm dut (
+        .cfg_sprm14(cfg14), .cfg_sprm15(cfg15), .cfg_sprm20(cfg20),
         // new VM ports tied off (a floating input is X).
         .agl_set(agl_set), .agl_set_val(agl_set_val),
         .sprm_agln(sprm_agln), .pre_done(pre_done),
@@ -1770,6 +1775,45 @@ module dvd_vm_tb;
     end
     endtask
 
+    // ---------------- [S26] player parameters SPRM14/15/20 ------------------
+    // feature/player-regs: the three SPRMs read the cfg ports (emu: player_regs),
+    // not constants. The block is the region-check shape real discs use
+    // (if (SPRM20 & mask) Goto ...), plus plain reads of all three. Round 2 changes
+    // the config and re-runs it: the reads must follow, so the value is read live
+    // and not latched at mount.
+    task run_s26;
+        integer i;
+    begin
+        nav_ready = 1; vm_restart; wait_idle;
+        wr_cmd(0, 64'h61000001008E0000);   // g1 = SPRM14
+        wr_cmd(1, 64'h61000002008F0000);   // g2 = SPRM15
+        wr_cmd(2, 64'h6100000300940000);   // g3 = SPRM20
+        wr_cmd(3, 64'h0091009400040006);   // if (SPRM20 & 4) Goto 6   (region 3 allowed)
+        wr_cmd(4, 64'h71000004DEAD0000);   // g4 = 0xDEAD              (the "wrong region" arm)
+        wr_cmd(5, 64'h7100000500010000);   // g5 = 1
+        // round 1: a region-3 player on HDMI with DTS
+        cfg14 = 16'h0C00; cfg15 = 16'h5800; cfg20 = 16'h0004;
+        for (i = 0; i < 16; i = i + 1) dut.gprm[i] = 16'd0;
+        nr_pre = 6; nr_post = 0; nr_cell = 0; cell_count = 8'd3;
+        clear_actions; pulse_loaded; wait_idle;
+        if (dut.gprm[1] !== 16'h0C00) begin fail("S26: SPRM14 read != cfg (0C00)"); $display("  g1=%04x", dut.gprm[1]); end
+        if (dut.gprm[2] !== 16'h5800) begin fail("S26: SPRM15 read != cfg (5800)"); $display("  g2=%04x", dut.gprm[2]); end
+        if (dut.gprm[3] !== 16'h0004) begin fail("S26: SPRM20 read != cfg (0004)"); $display("  g3=%04x", dut.gprm[3]); end
+        if (dut.gprm[4] !== 16'h0000) fail("S26: region-3 player took the wrong-region arm");
+        if (dut.gprm[5] !== 16'h0001) fail("S26: block did not run to its end (round 1)");
+        // round 2: region 1, analog letterbox, no DTS -> the reads follow
+        cfg14 = 16'h0200; cfg15 = 16'h5000; cfg20 = 16'h0001;
+        for (i = 0; i < 16; i = i + 1) dut.gprm[i] = 16'd0;
+        clear_actions; pulse_loaded; wait_idle;
+        if (dut.gprm[1] !== 16'h0200 || dut.gprm[2] !== 16'h5000 || dut.gprm[3] !== 16'h0001)
+            begin fail("S26: round 2 reads did not follow the cfg"); $display("  g1=%04x g2=%04x g3=%04x", dut.gprm[1], dut.gprm[2], dut.gprm[3]); end
+        if (dut.gprm[4] !== 16'hDEAD) fail("S26: region-1 player missed the wrong-region arm");
+        if (dut.gprm[5] !== 16'h0001) fail("S26: block did not run to its end (round 2)");
+        cfg14 = 16'h0100; cfg15 = 16'h7CFC; cfg20 = 16'h0001;   // back to the defaults
+        $display("S26 player parameters SPRM14/15/20 read live from cfg PASS");
+    end
+    endtask
+
     // ========================================================================
     initial begin
         repeat (4) @(negedge clk);
@@ -1780,6 +1824,7 @@ module dvd_vm_tb;
         $display("PART 1: %0d fixture cases run", n_cases);
         part2;
         run_s25;
+        run_s26;
         part3;
 
         if (errors == 0) $display("ALL TESTS PASS (dvd_vm_tb)");

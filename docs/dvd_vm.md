@@ -180,13 +180,108 @@ A faithful port of **libdvdnav `src/vm/decoder.c` `eval_command`**:
   a 16-cycle walk. Touch `gprm[]` only in its port block (`tools/check_gprm_ram.py`).
 - **SPRMs implemented**: 1 ASTN (init 15 = none), 2 SPSTN (init 62), 3 AGLN, 4 TTN,
   5 VTS_TTN, 6 TT_PGCN, 7 PTTN, 8 HL_BTNN (init 0x400), 9/10 NVTMR (stored, never
-  fires), 13 PML. Constants per libdvdnav `vm_reset`: SPRM0/16/18 = 'en', 12 = 'US',
-  14 = 0x100, 15 = 0x7CFC, 20 = 1 (region free).
+  fires), 13 PML. Constants per libdvdnav `vm_reset`: SPRM0/16/18 = 'en' (the OSD
+  Player Language), 12 = 'US'. **SPRM14 / 15 / 20 are NOT constants** since
+  PR #154: they come from `dvd/player_regs.sv` (see "Player parameters
+  SPRM14/15/20" below). The old values were 0x100 / 0x7CFC / 1, and 1 is region 1,
+  not "region free" as this line used to say.
 - **SPRM8 shadows nav_pci's live selection** while buttons are armed (D-pad moves
   change it outside the VM); `SetHL_BTNN` / link button fields write both `sprm8`
   and nav_pci (via the new `sel_force` port).
 - Reset domain: **`reset_n`, NOT `pipe_rst_n`** — GPRM/RSM state must survive seeks
   and jumps (the pgc-palette seek-reset lesson). A mount (`start`) runs `vm_reset`.
+
+## Player parameters SPRM14/15/20 — ✅ HW-CONFIRMED (2026-10-05), MERGED (PR #154)
+
+**What.** A disc's commands can *read* three player parameters: SPRM14 (the TV the
+player drives), SPRM15 (the audio it can play) and SPRM20 (its region). They used to be
+libdvdnav's constants (`0x0100` / `0x7CFC` / `0x0001`). `dvd/player_regs.sv` now computes
+them, and `dvd_vm`'s `sprm_read` returns its `cfg_sprm14/15/20` ports. The block is
+combinational, with no functions and no casts (the Quartus 17 lessons).
+
+**Why (measured in the 2026-10-01 *DVD Demystified* 3rd-edition audit):**
+- **SPRM20:** 507 of 1,430 library discs read it.
+  - `0x0001` is **region 1**, not "region free". The bit is one-hot, so no value means
+    "every region".
+  - In `dvd_vm_ref` boot, 65 of 120 region-reading discs take another path when the region
+    changes. That path is usually a single-cell PGC with an indefinite still and no
+    commands: the "wrong region" screen.
+  - So a region-2 or region-4 disc would show its dead end on this core.
+- **SPRM14:** 30 discs read it. MGM-style discs pick a 4:3 or a 16:9 copy of their intro
+  from it, and the constant said "4:3 TV, pan&scan" on every setup.
+- **SPRM15:** read by 6 discs. The constant claimed SDDS and every karaoke mode.
+
+**The mapping:**
+
+| Register | Value | Source |
+|---|---|---|
+| SPRM20 | one-hot of the **lowest region the disc allows** | VMGI `vmg_category` byte 0x23. Bit n set = region n+1 **prohibited**. A mask of 0 reads region 1 (the old value). |
+| SPRM20, all prohibited | `0x0001`, plus `rmask_all_prohibited` | The anti-autoswitch trap. It is visible on telemetry word 14 bit 9 and Main's `flags.rgn_allp`, never silent. |
+| SPRM14 | HDMI/progressive `0x0C00` (16:9, wide) | `aa_live` low |
+| | Analog, Auto or Letterbox: `0x0200` (4:3, letterbox) | `aa_live` high, `aa_sel` 0/2 |
+| | Analog, Crop: `0x0100` (4:3, pan&scan) | `aa_sel` 3 |
+| | Analog, Fit: `0x0C00` (16:9) | `aa_sel` 1. Fit applies no correction, which is only right on a widescreen set. |
+| SPRM15 | `0x5800`: AC-3 + MPEG + DTS | b11 DTS = `pass_mode \| cb_tables_ok`. Without Passthru and without the DTS codebooks: `0x5000`. SDDS and karaoke stay clear. |
+
+**Decisions:**
+- **SPRM20 = the first region the disc allows** (user, 2026-10-01). This is the 3rd
+  edition's "autoswitching player" (p. 5-21), and there is no OSD option.
+  - **Rejected: an OSD region setting.** It just moves the dead end to a menu.
+  - **Rejected: refusing discs.** The core never refuses a disc for its region
+    (`conformance.md` "Region enforcement" ⛔).
+- **SPRM14 follows Analog Aspect** (user, 2026-10-04, "Analog Aspect decides").
+  - `aa_sel` is `aa_osd_sel`, so the B15 Aspect button counts.
+  - `aa_live` must be the SAME gate as `analog_letterbox`/`analog_crop` (`interlaced_eff`
+    today). `tools/check_player_regs_wiring.py` enforces both. If Analog Aspect is ever
+    extended to 4:3 progressive displays (user question, 2026-10-04), SPRM14 follows
+    without new wiring.
+- **SPRM15 claims DTS whenever the core can play it.** Passthru always carries it, and
+  Decode needs the codebook copy to have passed. A disc that picks its DTS track for a
+  DTS-capable player then gets sound.
+
+**When the mask is read (reader).** The VMGI is first read on the First Play or VMGM
+jump. Its 45-byte `S_FETCH` window at @132 or @200 does not reach byte 0x23, so both jump
+paths now fetch @32 first.
+- New state `S_VMG_CAT` (code 14, which was free) latches `vmg_rmask <= rbuf[3]`, then
+  re-arms the original fetch from the same resident sector. No new sector is read.
+- So the disc's mask is in place when First Play's `pgc_loaded` pulses, before its PRE
+  commands run.
+- `vmg_rmask` resets to 0 on `rst_n` **and on every mount** (`start`), so a previous
+  disc's mask cannot leak into the next disc's region check.
+
+**Known limitations:**
+- **No physical region-2 or region-4 disc exists in the library.** The region path is
+  proven offline (synthetic masks in `dvd_vm_ref`) and in benches only.
+- **On HDMI, SPRM14 always says 16:9**, even on a 4:3 HDMI display. ascal letterboxes
+  16:9 content there anyway, so a disc's 16:9 choice still looks right. `disp_wide_q`
+  (emu) already knows the HDMI display shape, if that is ever wanted.
+- **libdvdnav is no longer an oracle for the discs that read SPRM14.** It still answers
+  `0x0100`/`0x7CFC`/`1`, so `tools/nav_diff.py` reports a boot divergence on HARTSWAR_169,
+  SPECIES2 and the 21 others in the status log entry on an HDMI setup. That divergence is
+  by design, not a regression. Compare under the analog Crop profile, whose SPRM14 matches
+  libdvdnav's, or use `dvd_vm_ref.py --player`.
+- **The SPRMs are read live.** A disc that reads one, and then sees the user change
+  Analog Aspect mid-session, keeps whatever branch it already took. That is the same
+  as a set-top player whose TV setting is changed mid-disc.
+
+**Verification:**
+- `bench/dvd/run_player_regs.sh --red`:
+  - `player_regs_tb` [P1–P4]: all 256 masks, every output path × aspect, the
+    DTS/Passthru combinations, and the decided spot values.
+  - `dvd_vm_tb` [S26]: a region-check block (`if (SPRM20 & 4) Goto`) and live reads.
+  - `iso_reader_vm_tb` T1/T10: the mask held at First Play's `pgc_loaded`, the FP PRE
+    reading SPRM20 through `player_regs`, and the remount clear.
+  - Six mutations, each caught by its own arm.
+- `tools/check_player_regs_wiring.py --red`: the emu seam, with eight mutations. It is
+  RED on `main`.
+- `tools/dvd_vm_ref.py --player hdmi|analog-auto|analog-fit|analog-lb|analog-crop
+  [--rmask HEX]` mirrors `player_regs` for offline boots.
+- **Offline (library boot diff):** see the status log entry.
+- **HW (2026-10-05, `DVD_playerregs_20261004_2358`, control arm `DVD_subp32_20261004_1603`,
+  Debug Overlay `{PGCN, VTS}`):** HARTSWAR_169 on Progressive boots VTS 3 (16:9 MGM intro)
+  where `main` boots VTS 4; under Interlaced + Letterbox both boot VTS 4; 13_CONVERSATION
+  (mask 0x00, reads SPRM20 -- a broken region loop would land on its VTS 6 dead end) parks
+  at the same `5/0` on both. Build: `clk_dec` 90.87 / 86.9 MHz, +142 ALM vs the control.
 
 ## DVD-game entropy (Scene It et al.) — ✅ HW-CONFIRMED (PR fj#119)
 

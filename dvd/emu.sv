@@ -687,7 +687,7 @@ assign CE_PIXEL = interlaced_eff ? ce_pix_q : 1'b1;
 // the branch changes the netlist anyway - and NEVER PER COMMIT. Do not derive
 // either from a git SHA or a timestamp: every compile would become a new
 // netlist. Same-day rebuilds on one branch append a digit ("dev-seekrealign2").
-`define CORE_VERSION "dev-cssedge"
+`define CORE_VERSION "dev-playerregs"
 
 parameter CONF_STR = {
     "DVD;;",
@@ -739,10 +739,10 @@ parameter CONF_STR = {
     // See docs/dvd_nav.md 2b.
     "O[45],D-Pad Seek,Off,On;",
     "O5,Audio,On,Off;",
-    // Audio Out: Decode = AC-3/LPCM decoded in fabric to HDMI PCM (default).
-    // Passthru = the UNDECODED AC-3/DTS frames are wrapped in IEC 61937 and
-    // sent as a bitstream for an AV receiver to decode (Path B; enables DTS,
-    // which has no in-fabric decoder). Always out optical S/PDIF, and ALSO over
+    // Audio Out: Decode = AC-3/DTS/LPCM/MP2 decoded in fabric to HDMI PCM (default;
+    // DTS core decode since PRs #148/#149). Passthru = the UNDECODED AC-3/DTS frames
+    // are wrapped in IEC 61937 and sent as a bitstream for an AV receiver to decode
+    // (Path B; full multichannel DTS). Always out optical S/PDIF, and ALSO over
     // HDMI when MiSTer_DVDcss has put the ADV7513 in IEC958-direct mode and the
     // sink advertises AC-3/DTS; otherwise HDMI stays muted as before.
     // status[6]. See docs/iec61937.md and docs/hdmi_bitstream.md.
@@ -1182,6 +1182,10 @@ wire [15:0] eng_frames_w, eng_refused_w;
 wire  [4:0] eng_last_err_w;
 wire        dts_active_w;
 
+// player_regs' "the disc prohibits EVERY region" flag (SPRM20 then falls back to region
+// 1): telemetry word 14 bit 9, so the fallback is never silent. Declared ahead of the
+// telem instance; driven by player_regs_inst beside dvd_vm.
+wire        pr_rmask_allp;
 dvd_telem dvd_telem_inst (
     .clk        (clk_sys),
     .io_enable  (ext_bus[34]),
@@ -1205,7 +1209,7 @@ dvd_telem dvd_telem_inst (
     .disp_lag   (av_disp_lag[19:4]),     // clk_sys: displayed PTS - STC (word 11)
     .play_err   (dbg_aud_play_err),      // clk_sys: audio position vs anchor (word 12)
     .av_drift   (av_drift[19:4]),        // clk_sys: dispatched audio PTS - STC (word 13)
-    .sched_flags({7'd0, core_bob_act, core_sched_flags}),   // [8] = progressive bob active   // clk_dec: what the scheduler saw (word 14)
+    .sched_flags({6'd0, pr_rmask_allp, core_bob_act, core_sched_flags}),   // [9] = disc prohibits every region (SPRM20 fell back), [8] = progressive bob active   // clk_dec: what the scheduler saw (word 14)
     .sched_dur  (core_sched_dur),             // clk_dec: the duration it applied (word 15)
     // words 16..19, clk_dec: dec_duty's cycle counts /4096 (docs/decode_pacing.md)
     .dec_disp   (core_duty_disp),
@@ -1590,6 +1594,7 @@ wire [7:0]  cur_cell_cmdnr_w;
 wire        menu_ar_wide_w;      // 1 = loaded menu is 16:9 (IFO V_ATR, not seq hdr)
 wire [1:0]  menu_ar_df_w;        // loaded menu's permitted_df: bit0 no-letterbox, bit1 no-pan&scan
 wire        title_ar_wide_w;     // 1 = loaded TITLE's VTS is 16:9 (IFO VTS_V_ATTR@0x200)
+wire [7:0]  vmg_rmask_w;         // disc's PROHIBITED-region mask (VMGI byte 0x23) -> player_regs SPRM20
 wire        vm_cmd_we;
 wire [11:0] vm_cmd_waddr;
 wire [7:0]  vm_cmd_wdata;
@@ -2648,6 +2653,27 @@ wire vm_entropy_stir = |(joy_eff ^ joy_prev);      // any gamepad/key edge = use
 wire [15:0] vm_rnd_seed = entropy_ctr[15:0] ^
                           hps_timestamp[15:0] ^ hps_timestamp[31:16];
 
+// Player parameters a disc can READ (feature/player-regs, docs/dvd_vm.md "Player
+// parameters"): SPRM20 = the first region the disc allows (the old constant 0x0001 was
+// region 1, and on a region-2-only disc the region check took its dead-end path);
+// SPRM14 = the TV shape the output settings describe (HDMI/progressive 16:9, the
+// analog raster's Analog Aspect choice); SPRM15 = AC-3 + MPEG, plus DTS whenever it
+// can be played (Passthru, or the DTS codebooks loaded). ⚠ aa_sel reads aa_osd_sel,
+// NOT status[4:3]: the B15 Aspect button overrides the OSD value. aa_live must be the
+// SAME gate as analog_letterbox/analog_crop's (interlaced_eff today).
+wire [15:0] pr_sprm14, pr_sprm15, pr_sprm20;
+player_regs player_regs_inst (
+    .rmask                (vmg_rmask_w),
+    .aa_live              (interlaced_eff),
+    .aa_sel               (aa_osd_sel),
+    .pass_mode            (pass_mode),
+    .dts_ok               (cb_tables_ok),
+    .sprm14               (pr_sprm14),
+    .sprm15               (pr_sprm15),
+    .sprm20               (pr_sprm20),
+    .rmask_all_prohibited (pr_rmask_allp)
+);
+
 dvd_vm dvd_vm_inst (
     .clk           (clk_sys),
     .rst_n         (reset_n),
@@ -2658,6 +2684,9 @@ dvd_vm dvd_vm_inst (
     .enable        (menus_on),
     .start         (start_streaming | stop_restart),
     .cfg_lang      (player_lang),        // OSD Player Language -> SPRM0/16/18
+    .cfg_sprm14    (pr_sprm14),          // player_regs: video preference
+    .cfg_sprm15    (pr_sprm15),          // player_regs: audio capabilities
+    .cfg_sprm20    (pr_sprm20),          // player_regs: region the disc allows
     .nav_ready     (nav_ready_w),
     .auto_vts      (auto_vts_w),
     .best_menu_vts (best_menu_vts),
@@ -3638,6 +3667,7 @@ dvd_iso_reader dvd_iso_reader_inst (
     .menu_ar_wide   (menu_ar_wide_w),
     .menu_ar_df     (menu_ar_df_w),
     .title_ar_wide  (title_ar_wide_w),
+    .vmg_rmask      (vmg_rmask_w),       // VMGI region mask -> player_regs (SPRM20)
 
     .sd_lba         (sd_lba),
     .sd_rd          (sd_rd),

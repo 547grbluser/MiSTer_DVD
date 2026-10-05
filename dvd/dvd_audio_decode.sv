@@ -12,8 +12,9 @@
 //      LPCM   -> lpcm_unpack (BE->LE 16-bit, L/R interleave)
 //      MP2    -> audio_engine (the engine's MP2 program; docs/mp2_engine.md M3), its
 //                pairs serialised into lpcm_unpack's FIFO, as DTS's
-//      DTS    -> discarded (no fabric DTS decoder yet; future: IEC 61937 to the
-//                Digital I/O board). unknown -> discarded.
+//      DTS    -> audio_engine (the engine's DTS core program, stereo; docs/dts_decoder.md,
+//                PRs #148/#149) once the codebooks have copied (cb_tables_ok);
+//                discarded if that copy failed. unknown -> discarded.
 //
 //  Everything runs in clk_sys (~27 MHz) — the same domain as ps_demux/audio_ring.
 //  The AC-3 core has ~3000x real-time headroom at this clock, and pcm_out's async

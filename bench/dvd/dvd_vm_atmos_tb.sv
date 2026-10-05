@@ -44,6 +44,8 @@ module dvd_vm_atmos_tb;
     wire [7:0]  cur_vts_o, cur_pgcn_o, cur_cell_o, next_pgcn_o, prev_pgcn_o, goup_pgcn_o;
 
     dvd_vm dut (
+        // player parameters: the pre-player_regs constants (feature/player-regs)
+        .cfg_lang(16'h656E), .cfg_sprm14(16'h0100), .cfg_sprm15(16'h7CFC), .cfg_sprm20(16'h0001),
         // new VM ports tied off (a floating input is X).
         .agl_set(1'b0), .agl_set_val(4'd1),
         .clk(clk), .rst_n(rst_n), .enable(enable), .start(start),

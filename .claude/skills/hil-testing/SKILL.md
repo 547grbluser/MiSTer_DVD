@@ -147,6 +147,9 @@ tools/nav_diff.py <disc> --no-board                # oracle only, no hardware
 - **A step that never parked was not measured.** Excluded, not diffed.
 - **After the first divergence, nothing downstream is an independent finding** — the next
   button is pressed at two different menus, so a difference is guaranteed and meaningless.
+- **libdvdnav answers SPRM14/15/20 with its constants; the core does not** (PR #154,
+  `docs/dvd_vm.md` "Player parameters"). On HDMI, ~23 library discs (HARTSWAR_169, SPECIES2,
+  ...) boot a 16:9 VTS libdvdnav does not, by design. Diff them on the analog Crop profile.
 - **A disc whose navigation uses `rnd` cannot be diffed** (the core's LFSR and libdvdnav's
   RNG disagree by design). Detected by running the oracle twice under different seeds.
 - **Do not compare VTS.** libdvdnav's is domain-relative (-1 in VMGM), the board's is the
