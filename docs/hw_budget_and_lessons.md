@@ -342,6 +342,18 @@ build can be far below the gate on the next: **SEED 5 passed at 88.61/87.63 and 
 returned 74.76/79.39** after the RTL changed. Expect to re-sweep after any real change,
 and treat a first-fit pass as luck rather than entitlement.
 
+### An ungated clock drifts, whatever the label says
+
+For the fork's whole history `fmax_check` gated `clk_dec` and printed `clk_mem` as "info,
+never closes". That label was a premise nobody re-measured. On 2026-10-05 the latest fit
+had `clk_mem` at 82.2 MHz against 90, and earlier fits ranged from 55.7 to 93.9, including
+HW-confirmed ones. The failing cluster was ordinary single-cycle logic in
+`mem_shim_burst`, and deferring one write fixed it. **Read every clock's same-clock Fmax,
+not only the gated one.** Negative slack on crossings between `sys_pll` outputs is
+expected; negative slack between two registers on the same clock is not
+(`docs/status_log.md` "clk_mem timing"). A sweep that ranks on one clock can still pick a
+seed that fails the other.
+
 ---
 
 ## 6. Hardware-in-the-loop measurement discipline

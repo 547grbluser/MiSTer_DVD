@@ -29,7 +29,13 @@ set -u
 RPT="${1:-output_files/DVD.sta.rpt}"
 FMAX_MIN="${FMAX_MIN:-86.0}"
 CLK_DEC='emu|sys_pll|altera_pll_i|general[3].gpll~PLL_OUTPUT_COUNTER|divclk'   # outclk_3 = clk_dec
-CLK_MEM='emu|sys_pll|altera_pll_i|general[1].gpll~PLL_OUTPUT_COUNTER|divclk'   # outclk_1 = clk_mem (info only)
+CLK_MEM='emu|sys_pll|altera_pll_i|general[1].gpll~PLL_OUTPUT_COUNTER|divclk'   # outclk_1 = clk_mem (WARN only)
+# clk_mem runs at 90 MHz. It used to be printed as "infra domain, never closes", which was
+# never true: its intra-domain worst path was mem_shim_burst's victim invalidate (fixed
+# 2026-10-05, docs/status_log.md "clk_mem timing"), and fits ranged 55.7-93.9 MHz with
+# nobody watching. WARN below CLK_MEM_MIN; not a FAIL until the post-fix distribution is
+# known (the next cluster, the speculative-pop rd_en path, sat at only +0.08 ns).
+CLK_MEM_MIN="${CLK_MEM_MIN:-90.0}"
 
 if [[ ! -f "$RPT" ]]; then
     echo "fmax_check: ERROR: STA report not found: $RPT" >&2
@@ -80,8 +86,12 @@ if [[ -z "${dec[100C]:-}" || -z "${dec[-40C]:-}" ]]; then
 fi
 
 echo "clk_dec Restricted Fmax: ${dec[100C]} MHz @100C, ${dec[-40C]} MHz @-40C (target ${FMAX_MIN})"
-[[ -n "${mem[100C]:-}" ]] && \
-    echo "clk_mem (info, no gate):  ${mem[100C]} MHz @100C, ${mem[-40C]:-?} MHz @-40C (infra domain, never closes; validated empirically)"
+if [[ -n "${mem[100C]:-}" ]]; then
+    echo "clk_mem Restricted Fmax: ${mem[100C]} MHz @100C, ${mem[-40C]:-?} MHz @-40C (runs at 90.0; WARN below ${CLK_MEM_MIN})"
+    if ! awk -v a="${mem[100C]}" -v b="${mem[-40C]:-0}" -v m="$CLK_MEM_MIN" 'BEGIN{ exit !(a >= m && b >= m) }'; then
+        echo "fmax_check: WARN — clk_mem below ${CLK_MEM_MIN} MHz at a slow corner; find the cluster with an intra-clk_mem report_timing (docs/status_log.md \"clk_mem timing\")"
+    fi
+fi
 
 if awk -v a="${dec[100C]}" -v b="${dec[-40C]}" -v m="$FMAX_MIN" 'BEGIN{ exit !(a >= m && b >= m) }'; then
     echo "fmax_check: PASS — clk_dec closes ${FMAX_MIN} MHz at both slow corners"
