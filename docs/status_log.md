@@ -23,9 +23,9 @@ predate later confirmations; the `CLAUDE.md` index carries the reconciled status
 ## Hardware status (THIS fork, verified 2026-06-21)
 
 - ✅ **USER STILL OFF: PLAY/PAUSE OR SELECT ENDS A STILL WITH NO BUTTONS (audit item 5,
-  2026-10-05, `dev-stilloff`, branch `feature/still-off`; sim-verified, ✅ HW-CONFIRMED on
-  timed stills, Play and Select, A/B against `main`, on the pinned SEED 7 build; ⏳ an
-  indefinite still on HW).**
+  2026-10-05, `dev-stilloff`; sim-verified, ✅ HW-CONFIRMED on
+  timed stills, Play and Select, A/B against `main`, on the pinned SEED 7 build; ✅ MERGED
+  (PR #159); ⏳ an indefinite still on HW).**
   - **Gap.** Still off (UOP18) is a mandatory user operation (3rd ed. Table 9.15). `S_STILL`
     exited only on its timer, a VM jump or a seek. A timed still or a button-less indefinite
     still could be escaped only with a chapter skip, and a menu-domain one not at all.

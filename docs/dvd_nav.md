@@ -961,7 +961,7 @@ slot alias (the decoder writing into the slot being scanned out). Fixed in
 `rtl/mpeg2/motcomp_picbuf.v`; see `docs/dvd_menu_refinements.md` §5. The `menu_dom`-only gate on
 the cold re-decode remains a separate, deliberate open item.
 
-### Still off — Play/Pause or Select ends a still with no buttons (audit item 5, 2026-10-05) — ✅ HW-CONFIRMED on timed stills (Play and Select, A/B vs `main`; `docs/status_log.md`), ⏳ an indefinite still on HW
+### Still off — Play/Pause or Select ends a still with no buttons (audit item 5, 2026-10-05) — ✅ HW-CONFIRMED on timed stills (Play and Select, A/B vs `main`; `docs/status_log.md`), ✅ MERGED (PR #159), ⏳ an indefinite still on HW
 
 **What.** "Still off" (UOP18) is a *mandatory* user operation (*DVD Demystified* 3rd ed.,
 Table 9.15). Before this, `S_STILL` exited only on its timer, a VM jump or a seek. A timed

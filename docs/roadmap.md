@@ -621,7 +621,7 @@ in `CONF_STR`. Design: `docs/cdda.md` "`.cue` sheets". ⛔ CHD still not support
 > **top gap confirmed = exact chapters/PTT (7/7 discs); interactive GPRM-counter/NVTMR promoted
 > above parental on measured prevalence (3/7 game discs).** Phase 3 = close gaps in that order.
 
-### ✅ User Still off: Play/Pause or Select ends a still with no buttons (2026-10-05; ✅ HW-CONFIRMED on timed stills, A/B vs `main` — see `docs/dvd_nav.md` "Still off")
+### ✅ User Still off: Play/Pause or Select ends a still with no buttons (2026-10-05; ✅ HW-CONFIRMED on timed stills, A/B vs `main`, ✅ MERGED PR #159 — see `docs/dvd_nav.md` "Still off")
 
 The 3rd-edition audit's item 5, a mandatory user operation (UOP18). With Disc Menus on, on a
 parked still with no button armed or pending, Play/Pause or Select runs what the still's
