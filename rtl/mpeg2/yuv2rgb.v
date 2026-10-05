@@ -137,13 +137,28 @@ module yuv2rgb (clk, clk_en, rst, hard_rst,
    * b        = ( cy * (y - 16) - cbu * (u - 128)                   + 16384) >> 15;
    */
 
+  /*
+   * DVD-FORK FIX (colour matrix, docs/status_log.md "BT.601 default colour matrix"):
+   * "NOT SIGNALLED" DECODES AS BT.601, NOT BT.709.
+   * mat_coeff is 0 when the stream carries no colour description: no
+   * sequence_display_extension, colour_description=0, MPEG-1 (vld.v clears its per-sequence
+   * copy at every sequence header), or a reserved 8..255 value folded to 0 above.
+   * 13818-2 6.3.6 makes that BT.709, and upstream did. This core is SD only (27 MHz dot
+   * clock, <= 720x576): DVD-Video permits only matrix 5 (BT.470 B/G) or 6 (SMPTE 170M),
+   * both the BT.601 matrix (DVD Demystified 3rd ed., Table 9.18); MPEG-1 is CCIR 601 by
+   * definition; and the subpicture palette (dvd/pgc_palette.sv) is converted with BT.601,
+   * so a 709 picture put the subtitles in a different colour space from the video.
+   * ~60% of DVD features carry no colour description (tools/colour_scan.py), so they all
+   * decoded with the wrong matrix. An EXPLICIT tag (1 = 709, 4 = FCC, 7 = 240M) is still
+   * honoured: no disc in the library carries 1 or 7, and a tagged .mpg is then correct.
+   */
   parameter signed [17:0]
     cy = 18'sd38155;
 
   always @(posedge clk)
     if (clk_en)
       case (mat_coeff)
-        3'd0, /* default value, no sequence_display_extension */
+        /* DVD-FORK FIX (colour matrix): 3'd0 ("not signalled") moved to the BT.601 arm below. */
         3'd1: /* ITU-R Rec. 709 (1990) */
               begin
                 crv <= 18'sd58752;
@@ -151,6 +166,7 @@ module yuv2rgb (clk, clk_en, rst, hard_rst,
                 cgu <= 18'sd6977;
                 cgv <= 18'sd17452;
               end
+        3'd0, /* not signalled -- see the DVD-FORK FIX note above the table */
         3'd2, /* unspecified */
         3'd3, /* reserved */
         3'd5, /* ITU-R Rec. 624-4 System B, G */
