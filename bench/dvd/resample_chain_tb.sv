@@ -272,6 +272,14 @@ module resample_chain_tb;
     .out_pos(vs_pos), .out_wr(vs_wr), .out_almost_full(hs_in_almost_full)
   );
 
+  // +vsdump=F (feature/progressive-aspect): every pixel disp_vscale emits, one per line of F,
+  // for a branch-vs-baseline bit-identity diff of the module's output stream.
+  integer vsdump_f = 0;
+  reg [8*256-1:0] vsdump_name;
+  initial if ($value$plusargs("vsdump=%s", vsdump_name)) vsdump_f = $fopen(vsdump_name, "w");
+  always @(posedge clk) if (vsdump_f != 0 && vs_wr)
+    $fwrite(vsdump_f, "%02x %02x %02x %02x %0d\n", vs_y, vs_u, vs_v, vs_osd, vs_pos);
+
   // ---- disp_hstretch: horizontal pan-scan stretch (Crop). Pure pass-through when
   // rs_hcrop_en=0, so Fit/Letterbox are unaffected. Fed from disp_vscale. ----
   wire [7:0] hs_y, hs_u, hs_v, hs_osd;
@@ -562,6 +570,11 @@ module resample_chain_tb;
   reg        line_visible  [0:MAXLINE-1];
   reg  [7:0] line_luma     [0:MAXLINE-1];  // first visible luma per output line (linetag: = source disp_y&0xFF)
   reg        line_luma_set [0:MAXLINE-1];
+  // +exact=1 (feature/progressive-aspect): per-line pixel counts, so a PARTIALLY drawn line
+  // inside the band is visible (line_nonblack is "any pixel", hfill_ok is frame-wide).
+  integer    line_vispx    [0:MAXLINE-1];
+  integer    line_nbpx     [0:MAXLINE-1];
+  integer    exact = 0;
   reg        h_sync_out_d, v_sync_out_d, pixel_en_out_d;
   integer    frame_no = 0;
   integer    i;
@@ -613,7 +626,10 @@ module resample_chain_tb;
       exp_vpos_first = (vsmode == 1) ? (eff_vsz >> 3) : 0;                           // 60 / 0
       exp_vpos_last  = exp_vpos_first + content_woven - 1;                           // 419 / 479
       exp_nb         = crt ? (content_woven >> 1) : content_woven;                   // per field in crt
-      TOL            = 6;
+      // +exact=1: NO tolerance. The default TOL = 6 hid disp_vscale's progressive-frame
+      // defect for its whole life (docs/crt_anamorphic.md §11: 359 lines, hole = 1). Exact
+      // also requires every line of the band to be FULLY drawn (partial = a defect).
+      TOL            = exact ? 0 : 6;
       dvf = mixer.dbg_first_vpos;  dvl = mixer.dbg_last_vpos;
       // horizontal fill: the picture must span the WHOLE active region (left edge near
       // hact_min, right edge near hact_max). A Crop that failed to stretch would pillarbox
@@ -635,6 +651,15 @@ module resample_chain_tb;
                  (dvl >= exp_vpos_last  - TOL) && (dvl <= exp_vpos_last  + TOL) &&
                  (nb_cnt >= exp_nb - 2*TOL) && (nb_cnt <= exp_nb + 2*TOL) &&
                  (hole <= TOL) && hfill_ok) ? 1 : 0;
+        if (exact && fr_ok && first_video >= 0) begin : exact_lines
+          integer el;
+          for (el = first_video; el <= last_video; el = el + 1)
+            if (line_nbpx[el] !== line_vispx[el]) begin
+              if (fr_ok) $display("   [exact FAIL f%0d] out_line %0d: %0d of %0d visible pixels drawn",
+                                  frame_no, el, line_nbpx[el], line_vispx[el]);
+              fr_ok = 0;
+            end
+        end
         vs_good_frames = vs_good_frames + 1;
         if (fr_ok) vs_pass_frames = vs_pass_frames + 1;
         else $display("   [vscale FAIL f%0d] mode=%0d crt=%0d: dbg_first_vpos=%0d(exp %0d) dbg_last_vpos=%0d(exp %0d) nb=%0d(exp %0d) hole=%0d hfill=%0d(hnb %0d..%0d act %0d..%0d)",
@@ -761,6 +786,8 @@ module resample_chain_tb;
         line_visible[i]  = 1'b0;
         line_luma_set[i] = 1'b0;
         line_luma[i]     = 8'd0;
+        line_vispx[i]    = 0;
+        line_nbpx[i]     = 0;
       end
     end
     // advance output line + reset horizontal dot counter on h_sync_out rising edge
@@ -773,11 +800,13 @@ module resample_chain_tb;
     // sample displayed pixels
     if (pixel_en_out && out_line < MAXLINE) begin
       line_visible[out_line] = 1'b1;
+      line_vispx[out_line]   = line_vispx[out_line] + 1;
       // active-region horizontal extent (self-calibrating full-width reference)
       if (hdot < hact_min) hact_min = hdot;
       if (hdot > hact_max) hact_max = hdot;
       if (y_out != 8'd16) begin
         line_nonblack[out_line] = 1'b1;                    // 16 = mixer's black luma
+        line_nbpx[out_line]     = line_nbpx[out_line] + 1;
         // horizontal extent of real (non-black) picture (crop must FILL width)
         if (hdot < hnb_min) hnb_min = hdot;
         if (hdot > hnb_max) hnb_max = hdot;
@@ -917,6 +946,7 @@ module resample_chain_tb;
     void'($value$plusargs("pfr=%d",      pfr));
     void'($value$plusargs("crt=%d",      crt));
     void'($value$plusargs("vsmode=%d",   vsmode));
+    void'($value$plusargs("exact=%d",    exact));
     void'($value$plusargs("vgrad=%d",    vgrad));
     void'($value$plusargs("hgrad=%d",    hgrad));
     void'($value$plusargs("dumplines=%d", dumplines));

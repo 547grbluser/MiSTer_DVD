@@ -39,6 +39,18 @@
 //   [C10] vacuity: both kinds of scan (pickup and re-scan) were actually scored
 //   [C5] then says the held second field is byte-identical on every re-scan, [C4] with
 //   +pfr=1 that film is untouched, [C8] with +ilace=1 that nothing is marked.
+//
+// LETTERBOX AFTER THE BLEND, +vscale=1 (feature/progressive-aspect, docs/crt_anamorphic.md
+// §13): an explicit Letterbox now reaches the Progressive raster, so Deinterlace = Blend or
+// Bob runs AHEAD of disp_vscale. disp_vscale is switched on and scored as a module pair
+// against what field_blend actually emitted (so the kernel itself is not re-derived here):
+//   [C11]  every disp_vscale output scan is the exact 3/4 Bresenham blend of the field_blend
+//          scan it came from (luma), H*3/4 lines, tagged ROW_0 / ROW_1 / ROW_X -- the
+//          frame-path code convention both modules must agree on (a ROW_X on line 1 is the
+//          black line under the top bar, docs/crt_anamorphic.md §11)
+//   [C11V] vacuity: at least NSCORE scans were scored
+// The raster-level arms ([C1]..[C5]) are not run under +vscale: Letterbox changes their
+// geometry by design.
 `timescale 1ns/1ps
 module field_blend_chain_tb;
   localparam [7:0]  MB_WIDTH   = 8'd8;
@@ -56,6 +68,8 @@ module field_blend_chain_tb;
   reg rst = 0;
 
   integer pfr = 0, tff = 1, blend_en_i = 1, mix = 0, pause_i = 0, ilace = 0, bob_i = 0;
+  integer vscale_i = 0;
+  reg     vscale_r = 1'b0;
   reg        pause = 1'b0;
   reg        step_req = 1'b0;
   reg        progressive_frame = 1'b0;
@@ -121,7 +135,7 @@ module field_blend_chain_tb;
   wire       vs_wr, hs_in_almost_full;
   disp_vscale disp_vscale (
     .clk(clk), .clk_en(1'b1), .rst(rst),
-    .vscale_en(1'b0), .scan_start(scan_start), .scan_half(scan_half),
+    .vscale_en(vscale_r), .scan_start(scan_start), .scan_half(scan_half),
     .in_y(fb_y), .in_u(fb_u), .in_v(fb_v), .in_osd(fb_osd),
     .in_pos(fb_pos), .in_wr(fb_wr), .in_almost_full(vs_in_almost_full),
     .out_y(vs_y), .out_u(vs_u), .out_v(vs_v), .out_osd(vs_osd),
@@ -349,6 +363,79 @@ module field_blend_chain_tb;
     cur_px = cur_px + 1;
   end
 
+  // ====================================================================
+  // [C11] +vscale: disp_vscale scored against the field_blend scan it consumed
+  // ====================================================================
+  localparam integer VH  = (H * 3) / 4;       // output lines per scan
+  localparam integer FBR = 8;                 // field_blend scans kept (ring)
+  reg [7:0] fbuf [0:FBR*H*LINE_PX-1];
+  reg [2:0] fb_ft [0:FBR-1];                  // each fb scan's frame-top code
+  integer fb_n = -1, fb_line = 0, fb_px = 0, fb_prev_row0 = 0;
+  integer vs_n = -1, vs_line = 0, vs_px = 0, vs_prev_row0 = 0;
+  integer vs_scored = 0, vs_bad_px = 0, vs_bad_tag = 0, vs_bad_cnt = 0;
+  integer vk [0:VH-1], vf [0:VH-1];          // Bresenham base line + weight per output line
+  initial begin : bres
+    integer i, k, r;
+    k = 0; r = 0;
+    for (i = 0; i < VH; i = i + 1) begin
+      vk[i] = k; vf[i] = (r == 0) ? 0 : (r == 2) ? 85 : 171;
+      if (r >= 4) begin r = r - 4; k = k + 2; end else begin r = r + 2; k = k + 1; end
+    end
+  end
+  function integer bl8(input integer a, input integer b, input integer f);
+    integer p;
+    begin p = (b - a) * f + 128; bl8 = (a + (p >>> 8)) & 255; end
+  endfunction
+  // field_blend output: one ring slot per scan (a FRAME's paired ROW_1 is line 1, not a top)
+  always @(posedge clk) if (rst && vscale_i != 0 && fb_wr) begin
+    if (fb_pos == ROW_0_COL_0 || (fb_pos == ROW_1_COL_0 && !fb_prev_row0)) begin
+      fb_n = fb_n + 1; fb_line = -1; fb_ft[fb_n % FBR] = fb_pos;
+    end
+    if (fb_pos == ROW_0_COL_0 || fb_pos == ROW_1_COL_0 || fb_pos == ROW_X_COL_0) begin
+      fb_prev_row0 = (fb_pos == ROW_0_COL_0);
+      fb_line = fb_line + 1; fb_px = 0;
+    end
+    if (fb_n >= 0 && fb_line >= 0 && fb_line < H && fb_px < LINE_PX)
+      fbuf[((fb_n % FBR) * H + fb_line) * LINE_PX + fb_px] = fb_y;
+    fb_px = fb_px + 1;
+  end
+  task vs_close;   // the scan being received by the vs side is complete
+    begin
+      if (vs_n >= 0) begin
+        if (vs_line + 1 !== VH) begin
+          vs_bad_cnt = vs_bad_cnt + 1;
+          if (vs_bad_cnt <= 3) $display("  [C11] vs scan %0d: %0d lines (want %0d)", vs_n, vs_line + 1, VH);
+        end
+        vs_scored = vs_scored + 1;
+      end
+    end
+  endtask
+  always @(posedge clk) if (rst && vscale_i != 0 && vs_wr) begin : vs_chk
+    integer e, wantpos;
+    if (vs_pos == ROW_0_COL_0 || (vs_pos == ROW_1_COL_0 && !vs_prev_row0)) begin
+      vs_close;
+      vs_n = vs_n + 1; vs_line = -1;
+    end
+    if (vs_pos == ROW_0_COL_0 || vs_pos == ROW_1_COL_0 || vs_pos == ROW_X_COL_0) begin
+      vs_prev_row0 = (vs_pos == ROW_0_COL_0);
+      vs_line = vs_line + 1; vs_px = 0;
+      wantpos = (vs_line == 0) ? fb_ft[vs_n % FBR] : (vs_line == 1) ? ROW_1_COL_0 : ROW_X_COL_0;
+      if (vs_pos !== wantpos[2:0]) begin
+        vs_bad_tag = vs_bad_tag + 1;
+        if (vs_bad_tag <= 3) $display("  [C11] vs scan %0d line %0d: pos %0d, want %0d", vs_n, vs_line, vs_pos, wantpos);
+      end
+    end
+    if (vs_n >= 0 && vs_line >= 0 && vs_line < VH && vs_px < LINE_PX) begin
+      e = bl8(fbuf[((vs_n % FBR) * H + vk[vs_line]) * LINE_PX + vs_px],
+              fbuf[((vs_n % FBR) * H + vk[vs_line] + 1) * LINE_PX + vs_px], vf[vs_line]);
+      if (vs_y !== e[7:0]) begin
+        vs_bad_px = vs_bad_px + 1;
+        if (vs_bad_px <= 3) $display("  [C11] vs scan %0d line %0d col %0d: y %0d, want %0d", vs_n, vs_line, vs_px, vs_y, e);
+      end
+    end
+    vs_px = vs_px + 1;
+  end
+
   task run_phase(input integer ph, input integer nskip, input integer nscore, output integer npass);
     begin
       phase = ph; skip = nskip; ph_scans = 0; ph_pass = 0; prev_ok = 0;
@@ -391,6 +478,8 @@ module field_blend_chain_tb;
     void'($value$plusargs("ilace=%d", ilace));
     void'($value$plusargs("verbose=%d", verbose));
     void'($value$plusargs("bob=%d", bob_i));
+    void'($value$plusargs("vscale=%d", vscale_i));
+    vscale_r = (vscale_i != 0);
     progressive_frame = pfr[0];
     top_field_first = tff[0];
     blend_en = blend_en_i[0] && !bob_i;
@@ -401,7 +490,17 @@ module field_blend_chain_tb;
 
     repeat (8) @(posedge clk); rst = 1; repeat (8) @(posedge clk);
 
-    if (ilace) begin
+    if (vscale_i) begin
+      // Letterbox after the blend/bob: keep pictures coming (bob keeps a different field on
+      // pickup scans and re-scans), score NSCORE+ complete disp_vscale scans
+      while (vs_scored < NSCORE + 2) begin present_one; repeat (2) @(posedge clk); end
+      $display("  [V] letterbox after %s: %0d scans scored, %0d px / %0d tags / %0d counts wrong (blend_act=%0d bob_act=%0d)",
+               bob_i ? "bob" : "blend", vs_scored, vs_bad_px, vs_bad_tag, vs_bad_cnt, blend_act, bob_act);
+      if (vs_bad_px + vs_bad_tag + vs_bad_cnt != 0) begin
+        $display("FAIL: [C11] disp_vscale is not the 3/4 letterbox of the field_blend scans"); errors = errors + 1;
+      end
+      if (vs_scored < NSCORE) begin $display("FAIL: [C11V] vacuous: %0d scans scored", vs_scored); errors = errors + 1; end
+    end else if (ilace) begin
       // the fields arm: the addrgen emits TOP/BOTTOM scans; none may be marked
       repeat (3) present_one;
       sb0 = scan_begins;
@@ -456,7 +555,7 @@ module field_blend_chain_tb;
       end
     end
 
-    if (!ilace) begin
+    if (!ilace && !vscale_i) begin
       if (pfr) begin
         if (bad_int + bad_top + bad_bot != 0) begin
           $display("FAIL: [C4] film control: %0d pixels differ from the weave", bad_int + bad_top + bad_bot); errors = errors + 1;

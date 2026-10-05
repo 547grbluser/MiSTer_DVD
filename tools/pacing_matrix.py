@@ -27,6 +27,10 @@ Usage:
   --variants the Progressive-only cells (Film 24p Off/On, Bob, Blend); on by
              default, --no-variants skips them.
   --no-launch  measure whatever is already playing (base options ignored).
+  --aspect   instead of the Video Output cells, interleave Progressive Analog Aspect
+             Fit / Letterbox / Crop (docs/crt_anamorphic.md §13: Letterbox reads the
+             display at ~4/3 of Fit's rate during the band). Each change flips
+             VIDEO_ARX/ARY and re-inits the scaler; --settle covers it.
 
 Needs `mister.py deploy --agent` first (telemetry armed, osd FIFO present).
 The rig is shared: announce the run, and `mister.py restore` afterwards.
@@ -43,11 +47,15 @@ MISTER = [sys.executable, os.path.join(HERE, 'mister.py')]
 
 DEFAULTS = {'Video Output': 'Progressive', 'Film 24p Out': 'Auto',
             'Deinterlace': 'Weave', 'Frame Drop': 'On', 'A/V Sync': 'On',
-            'Debug Overlay': 'Off'}
+            'Debug Overlay': 'Off', 'Analog Aspect': 'Auto'}
+MODE_KEYS = ('Video Output', 'Film 24p Out', 'Deinterlace', 'Analog Aspect')
 
 VO_CELLS = [('prog', {'Video Output': 'Progressive'}),
             ('ilace', {'Video Output': 'Interlaced'}),
             ('auto', {'Video Output': 'Auto'})]
+ASPECT_CELLS = [('prog-fit', {'Video Output': 'Progressive', 'Analog Aspect': 'Fit'}),
+                ('prog-lb', {'Video Output': 'Progressive', 'Analog Aspect': 'Letterbox'}),
+                ('prog-crop', {'Video Output': 'Progressive', 'Analog Aspect': 'Crop'})]
 VARIANT_CELLS = [('prog-film-off', {'Film 24p Out': 'Off'}),
                  ('prog-film-on', {'Film 24p Out': 'On'}),
                  ('prog-bob', {'Deinterlace': 'Bob'}),
@@ -107,6 +115,7 @@ def main():
     ap.add_argument('--settle', type=float, default=15)
     ap.add_argument('--no-variants', dest='variants', action='store_false')
     ap.add_argument('--no-launch', dest='launch', action='store_false')
+    ap.add_argument('--aspect', action='store_true')
     ap.add_argument('--out', default='.sim/pacing')
     a = ap.parse_args()
 
@@ -126,14 +135,14 @@ def main():
 
     plan = []
     for r in range(a.rounds):
-        plan += [(f'{n}#{r + 1}', w) for n, w in VO_CELLS]
+        plan += [(f'{n}#{r + 1}', w) for n, w in (ASPECT_CELLS if a.aspect else VO_CELLS)]
     if a.variants:
         plan += [(n, dict(w, **{'Video Output': 'Progressive'})) for n, w in VARIANT_CELLS]
 
     results = []
     for name, want in plan:
         full = dict(want)
-        for k in ('Video Output', 'Film 24p Out', 'Deinterlace'):
+        for k in MODE_KEYS:
             full.setdefault(k, DEFAULTS[k])
         apply(cur, full)
         time.sleep(a.settle)
@@ -162,7 +171,7 @@ def main():
                  if 'pic' in s else ''))
 
     # put the three mode options back to the launch values
-    apply(cur, {k: DEFAULTS[k] for k in ('Video Output', 'Film 24p Out', 'Deinterlace')})
+    apply(cur, {k: DEFAULTS[k] for k in MODE_KEYS})
     with open(os.path.join(outdir, 'matrix.json'), 'w') as f:
         json.dump({'label': a.label, 'image': a.image, 'base': a.opt,
                    'cells': results}, f, indent=1)

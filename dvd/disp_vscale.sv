@@ -2,8 +2,9 @@
  * disp_vscale.sv — DVD-FORK (CRT anamorphic "Letterbox" — anti-aliased vertical downscale)
  *
  * A small CLK-DOMAIN vertical resampler inserted between resample_bilinear and disp_hstretch
- * (resample_bilinear -> disp_vscale -> disp_hstretch -> pixel_queue), used only by the CRT
- * "Letterbox" display mode. It downscales the source picture vertically by exactly 3/4
+ * (resample_bilinear -> disp_vscale -> disp_hstretch -> pixel_queue), used by the Analog
+ * Aspect "Letterbox" display mode (emu's analog_letterbox: the interlaced raster, or an
+ * explicit Letterbox on Progressive since feature/progressive-aspect). It downscales the source picture vertically by exactly 3/4
  * (480 -> 360 progressive, 240 -> 180 per field) with a TRUE 2-tap bilinear blend of the two
  * straddling SOURCE lines, so anamorphic 16:9 content shows at the right geometry WITHOUT the
  * banding of the old nearest-neighbour (line-drop) letterbox.
@@ -34,12 +35,28 @@
  * Only Letterbox (disp_vscale_en = analog_letterbox, i.e. Auto-on-16:9 or manual) reaches this;
  * Fit and Crop never blend vertically. Video Output = Interlaced restores the parity-safe
  * premise, because it puts the decoder back on the field path. See docs/analog_dual_raster.md.
+ * ★ 2026-10 (feature/progressive-aspect): the woven-frame case is LIVE AGAIN — an explicit
+ * Letterbox on Video Output = Progressive puts this module on the progressive FRAME path, the
+ * same cross-fade trade-off as above for true-interlaced content (and Deinterlace = Bob/Blend,
+ * when chosen, runs ahead of it in field_blend). Auto/Fit on Progressive never reach it.
+ *
+ * ★ FRAME-PATH POSITION CODES (the §11 latent defect, fixed 2026-10, docs/crt_anamorphic.md).
+ * A FRAME scan from resample_addrgen tags line 0 ROW_0_COL_0 AND line 1 ROW_1_COL_0 (its
+ * disp_y_sat walk 0 -> 1 -> 2); a FIELD scan tags only line 0, with its field's code. This
+ * module used to take the frame's second code for a new scan: it re-armed the Bresenham at
+ * source line 1 (359 output lines, source line 0 dropped) and tagged output line 1 ROW_X_COL_0,
+ * which the mixer refuses at disp_v_offset+1 (mixer.v display_first_pixel) -- one black line
+ * under the top bar. Now, as in dvd/field_blend.sv: a ROW_1_COL_0 that directly follows a
+ * ROW_0_COL_0 line is the frame's line 1, not a scan start (in_prev_row0 on the input side,
+ * so routing/mode/sideband are decided once per scan; h_prev_row0 on the head side, so the
+ * Bresenham is armed once), and output line 1 of such a scan carries ROW_1_COL_0. A field
+ * scan never pairs, so the field path is bit-identical (bench/dvd/run_vscale_frame.sh).
  *
  * BARS: unchanged. This module just emits the 360 / 180 CONTENT lines (carrying the scan's
  * original frame-top code on output line 0 so the mixer's parity placement is preserved); the
  * mixer's disp_v_offset (vertical_size/8) centres them with the black bars. Not re-invented here.
  *
- * PASS-THROUGH: when vscale_en is low (Fit / Crop / non-CRT) the module is a PURE
+ * PASS-THROUGH: when vscale_en is low (Fit / Crop / Auto on Progressive) the module is a PURE
  * COMBINATIONAL wire pass-through (FIFO + line buffer idle) — bit-identical to a direct
  * resample_bilinear -> disp_hstretch connection. Fit and Crop are therefore unaffected.
  *
@@ -84,7 +101,9 @@
  * this is a DOWNSCALE (fewer output than input lines) the input fills faster than the output
  * drains, so it back-pressures resample via prog_full (fine — Fit does too when the queue
  * fills). Sim: bench/dvd/resample_chain_tb.sv (+vsmode=1, progressive and +crt field, incl.
- * +linetag proving the 2-tap blend is real).
+ * +linetag proving the 2-tap blend is real; +exact=1 scores the progressive band with no
+ * tolerance) and bench/dvd/disp_vscale_frame_tb.sv (golden blend values + position codes,
+ * frame and field scans, mid-scan Letterbox toggles).
  */
 
 `include "timescale.v"
@@ -129,8 +148,20 @@ module disp_vscale (
    * the next can start, so no more than two frame-tops are ever between the modules. */
   reg   [3:0] sb_q;
   reg   [2:0] sb_n;
-  wire        in_ft   = (in_pos == ROW_0_COL_0) || (in_pos == ROW_1_COL_0);
+  /* DVD-FORK FIX (progressive Letterbox, feature/progressive-aspect): a FRAME scan carries
+   * TWO row codes -- ROW_0_COL_0 on line 0 AND ROW_1_COL_0 on line 1 (resample_addrgen's
+   * disp_y_sat walk) -- and the second is NOT a frame top. A FIELD scan carries one, and a
+   * bottom field's ROW_1_COL_0 never follows a ROW_0_COL_0 line, so the field path is
+   * untouched. Same convention as dvd/field_blend.sv (in_prev_row0 / h_prev_row0). Taking
+   * the second code for a new scan re-decided the scan's route and mode at line 1 (a
+   * Letterbox change landing there tore the frame) and popped the sideband twice. */
+  reg         in_prev_row0;
+  wire        in_col0 = (in_pos == ROW_0_COL_0) || (in_pos == ROW_1_COL_0) || (in_pos == ROW_X_COL_0);
+  wire        in_ft   = (in_pos == ROW_0_COL_0) || ((in_pos == ROW_1_COL_0) && ~in_prev_row0);
   wire        ft_arr  = in_wr & clk_en & in_ft;            // a frame-top pixel arrives
+  always @(posedge clk)
+    if (~rst) in_prev_row0 <= 1'b0;
+    else if (in_wr && clk_en && in_col0) in_prev_row0 <= (in_pos == ROW_0_COL_0);
   wire        sb_half = (sb_n != 3'd0) & sb_q[0];          // the arriving scan is HALF
   wire  [3:0] sb_pop  = ft_arr && (sb_n != 3'd0) ? {1'b0, sb_q[3:1]} : sb_q;
   wire  [2:0] sb_npop = ft_arr && (sb_n != 3'd0) ? sb_n - 3'd1 : sb_n;
@@ -199,7 +230,9 @@ module disp_vscale (
   wire  [2:0] h_pos = head[2:0];
   wire  [1:0] h_mode = head[36:35];    // per-pixel copy of its scan's mode (set at routing)
   wire        h_col0 = (h_pos == ROW_0_COL_0) || (h_pos == ROW_1_COL_0) || (h_pos == ROW_X_COL_0);
-  wire        h_ft   = (h_pos == ROW_0_COL_0) || (h_pos == ROW_1_COL_0);   // frame/field top => new scan
+  reg         h_prev_row0;             // the last line start consumed was ROW_0_COL_0
+  wire        h_ft   = (h_pos == ROW_0_COL_0) || ((h_pos == ROW_1_COL_0) && ~h_prev_row0);   // frame/field top => new scan
+  wire        h_pair = (h_pos == ROW_1_COL_0) && h_prev_row0;   // a FRAME scan's line 1 (see in_ft)
   wire        h_last = (h_pos == ROW_X_COL_LAST);
 
   /* ---- one-source-line buffer (ping-pong two banks in one BRAM) ----
@@ -222,6 +255,7 @@ module disp_vscale (
   reg   [7:0] line_f;                  // blend weight (Q0.8) held for the whole line
   reg  [10:0] col;                     // column of the pixel currently being processed
   reg   [1:0] scan_mode;               // mode of the scan being processed (latched at its frame-top)
+  reg         scan_frame;              // this scan is a FRAME (its line 1 carried the paired ROW_1_COL_0)
 
   /* f from the Bresenham remainder, in SIXTHS of a source line (DVD-FORK pause field still,
    * 2026-09-18: was thirds). The plain Letterbox walk only ever lands on r = 0/2/4, whose
@@ -250,6 +284,8 @@ module disp_vscale (
                                      : line_emit);
   wire        e_line_first = h_ft ? e_plain
                            : (h_col0 ? (emitted_cnt == 12'd0) : line_first);
+  /* output line 1 (meaningful at a non-frame-top line start that emits) */
+  wire        e_line_second = ~h_ft & (emitted_cnt == 12'd1);
   wire  [7:0] e_f          = h_col0 ? ((e_mode == M_HALF) ? 8'd128 : f_nr) : line_f;
 
   wire [10:0] bram_rd_addr = {e_rd_bank, e_col[9:0]};
@@ -277,9 +313,15 @@ module disp_vscale (
     end
   endfunction
   /* output position: same column boundaries as the source line (vertical scale only), with
-   * the scan frame-top code on output-line 0 (parity marker the mixer needs). */
+   * the scan frame-top code on output-line 0 (parity marker the mixer needs).
+   * DVD-FORK FIX (progressive Letterbox): on a FRAME scan output line 1 carries ROW_1_COL_0,
+   * as the source frame's line 1 did. It is the mixer's contract (mixer.v display_first_pixel
+   * REFUSES a ROW_X_COL_0 line start at disp_v_offset+1), so a ROW_X there slips the rest of
+   * the picture down a line and leaves a black line under the top bar. A field scan keeps
+   * ROW_X_COL_0 on line 1, exactly as before. */
   wire  [2:0] blend_pos = e_plain ? h_pos
-                        : h_col0 ? (e_line_first ? scan_ft_code : ROW_X_COL_0)
+                        : h_col0 ? (e_line_first ? scan_ft_code
+                                    : (e_line_second && scan_frame) ? ROW_1_COL_0 : ROW_X_COL_0)
                         : h_last ? ROW_X_COL_LAST : ROW_X_COL_X;
 
   /* ---- 1 pixel / clk pipeline ------------------------------------------------------
@@ -327,7 +369,7 @@ module disp_vscale (
       sline <= 12'd0; wr_bank <= 1'b0; rd_bank <= 1'b1;
       next_k <= 12'd0; next_r <= 3'd0; emitted_cnt <= 12'd0;
       line_emit <= 1'b0; line_first <= 1'b0; line_f <= 8'd0; col <= 11'd0;
-      scan_mode <= M_LB;
+      scan_mode <= M_LB; h_prev_row0 <= 1'b0; scan_frame <= 1'b0;
       s2_valid <= 1'b0; s2_emit <= 1'b0; s2_plain <= 1'b0; s2_f <= 8'd0; s2_pos <= ROW_X_COL_X;
       s2_by <= 8'd0; s2_bu <= 8'd0; s2_bv <= 8'd0; s2_bo <= 8'd0;
       s3_valid <= 1'b0; s3_emit <= 1'b0; s3_plain <= 1'b0; s3_f <= 8'd0; s3_pos <= ROW_X_COL_X;
@@ -342,13 +384,15 @@ module disp_vscale (
 
         if (h_col0) begin
           col <= 11'd1;                     // next pixel column
+          h_prev_row0 <= (h_pos == ROW_0_COL_0);
           if (h_ft) begin                   // ---- new scan (frame/field top) ----
-            seen_frametop <= 1'b1; scan_ft_code <= h_pos; scan_mode <= h_mode;
+            seen_frametop <= 1'b1; scan_ft_code <= h_pos; scan_mode <= h_mode; scan_frame <= 1'b0;
             sline <= 12'd0; wr_bank <= 1'b0; rd_bank <= 1'b1;
             next_k <= 12'd0; next_r <= (h_mode == M_LBH) ? 3'd3 : 3'd0;
             emitted_cnt <= (h_mode == M_PLAIN) ? 12'd1 : 12'd0;
             line_emit <= e_line_emit; line_first <= e_line_first; line_f <= 8'd0;
           end else begin                    // ---- new line within the scan ----
+            if (h_pair) scan_frame <= 1'b1;
             line_emit  <= e_line_emit;
             line_first <= e_line_first;
             line_f     <= e_f;

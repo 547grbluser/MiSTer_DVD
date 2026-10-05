@@ -23,15 +23,18 @@
 // SPRM14 (user decision 2026-10-04, "Analog Aspect decides"). DVD-Video bits 10-11 =
 // the player's preferred DISPLAY aspect (0 = 4:3, 3 = 16:9), bits 8-9 = the current
 // output mode for 16:9 content on a 4:3 display (0 normal/wide, 1 pan&scan, 2 letterbox):
-//     HDMI / progressive output          -> 16:9 TV, wide       0x0C00
-//     analog/interlaced, Auto/Letterbox  -> 4:3 TV, letterbox   0x0200
-//     analog/interlaced, Crop            -> 4:3 TV, pan&scan    0x0100
-//     analog/interlaced, Fit             -> 16:9 TV, wide       0x0C00
+//     interlaced raster, Auto/Letterbox  -> 4:3 TV, letterbox   0x0200
+//     interlaced raster, Crop            -> 4:3 TV, pan&scan    0x0100
+//     interlaced raster, Fit             -> 16:9 TV, wide       0x0C00
+//     Progressive, Auto or Fit           -> 16:9 TV, wide       0x0C00   (aa_live = 0)
+//     Progressive, Letterbox             -> 4:3 TV, letterbox   0x0200   (aa_live = 1)
+//     Progressive, Crop                  -> 4:3 TV, pan&scan    0x0100   (aa_live = 1)
 // (Fit applies no correction, which is only right for widescreen content on a
 // widescreen set.) aa_sel is emu's aa_osd_sel, so the B15 Aspect button counts.
-// aa_live is emu's "Analog Aspect is in force" gate -- the SAME predicate that
-// enables Letterbox/Crop (today interlaced_eff), so if Analog Aspect is ever
-// extended to other rasters (4:3 progressive displays), SPRM14 follows with it.
+// aa_live is emu's aa_live net, "Analog Aspect is in force": interlaced_eff, or an
+// explicit Letterbox/Crop on Progressive (feature/progressive-aspect). It is the SAME
+// net that gates analog_letterbox/analog_crop, so SPRM14 describes the picture the
+// core actually draws (tools/check_prog_aspect_wiring.py [5]).
 //
 // SPRM15: b14 Dolby Digital, b12 MPEG and b11 DTS. DTS decodes in fabric since
 // PRs #148/#149 once its codebooks are loaded (dts_ok), and Passthru always carries
@@ -43,7 +46,7 @@
 
 module player_regs (
     input  wire [7:0]  rmask,          // VMGI vmg_category byte 0x23 (1 = prohibited)
-    input  wire        aa_live,        // emu: Analog Aspect is in force (today interlaced_eff)
+    input  wire        aa_live,        // emu aa_live: interlaced_eff | explicit Letterbox/Crop
     input  wire [1:0]  aa_sel,         // emu aa_osd_sel: 0 Auto, 1 Fit, 2 Letterbox, 3 Crop
     input  wire        pass_mode,      // Audio Out = Passthru
     input  wire        dts_ok,         // DTS codebooks loaded (in-fabric DTS decode works)
@@ -62,7 +65,7 @@ module player_regs (
 
     // ---- SPRM14: preferred display aspect + current 4:3 output mode ----
     always @* begin
-        if (!aa_live)          sprm14 = 16'h0C00;   // HDMI/progressive: 16:9 TV
+        if (!aa_live)          sprm14 = 16'h0C00;   // Analog Aspect not in force: 16:9 TV
         else case (aa_sel)
             2'd1:                  sprm14 = 16'h0C00;   // Fit: a widescreen set
             2'd3:                  sprm14 = 16'h0100;   // Crop: 4:3 TV, pan&scan

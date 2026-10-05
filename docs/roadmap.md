@@ -634,17 +634,41 @@ HW against a `main` control arm: HARTSWAR_169 on HDMI boots VTS 3 (16:9) instead
 VTS 4, stays on VTS 4 under Interlaced + Letterbox, and 13_CONVERSATION boots unchanged.
 The region-2 path stays offline-only (no physical vehicle). **Next:** the 4:3-progressive follow-up below.
 
-**Follow-up (user question, 2026-10-04):** Analog Aspect does nothing on Progressive, so a
-31 kHz 4:3 display (VGA CRT, 480p component) gets the bare anamorphic raster, and a 4:3 HDMI
-display has no Crop. Proposed:
-- Manual Letterbox/Crop apply in every mode.
-- Auto letterboxes on Progressive only when the ini routes the native raster to the analog
-  pins (`analog_want`).
-- Possibly rename the option.
-- SPRM14 follows automatically through `aa_live`.
+### ✅ Explicit Analog Aspect Letterbox/Crop on Progressive (HW-CONFIRMED 2026-10-05, MERGED PR #155 — see `docs/crt_anamorphic.md` §13)
 
-Needs HW checks of Letterbox under Film 24p, Bob/Blend → Letterbox, and `crt_ov_map` on
-the progressive raster.
+The 2026-10-04 follow-up, built with these decisions (user, 2026-10-04/05):
+- **Only an explicit Letterbox or Crop acts on Progressive.** Auto and Fit are unchanged:
+  ascal follows `VIDEO_ARX/ARY`. The sketch's "Auto letterboxes on `analog_want` rigs" was
+  rejected.
+- **The interlaced raster is bit-identical.**
+- **B15 is unchanged.**
+- **The menu `permitted_df` swap applies on Progressive too.**
+- **No rename.**
+
+SPRM14 follows through the one `aa_live` net. The sketch's "follows automatically" was only
+true because `aa_live` became that named, evaluated net. A raster-level `aa_live` would have
+made Auto report a 4:3 TV while it was not letterboxing. The `disp_vscale` frame-path defect
+(§11) that this made reachable is fixed.
+
+HW (two rounds, against the playerregs control):
+- Auto and Fit are unchanged, and so is Interlaced.
+- Letterbox and Crop work on NTSC and PAL, with Film 24p, and with Bob/Blend.
+- Menus and subtitles are correct.
+- HARTSWAR_169 boots VTS 4.
+- 0 lates on ROGER, Office and Thayer.
+
+**Possible follow-ups:**
+- `vsz_eff`-derived overlay bars. That would lift the SIF guard and fix forced-PAL over
+  480-line content.
+- In-band aspect signalling on the analog output (maintainer question, 2026-10-05). An
+  analog signal carries no aspect, so a downstream scaler or TV picks it.
+  - Standards: 480i EIAJ CPX-1204 / IEC 61880 "Video ID" on lines 20/283; 480p
+    CPR-1204-1 / IEC 61880-2 on line 41; 576i WSS (EN 300 294) on line 23.
+  - Same shape of job as the line-21 caption inserter (`docs/closed_captions.md` §4).
+  - Value is limited: widescreen TVs honour WSS, but as far as found RetroTINK and OSSC
+    do not decode any of these. SCART pin 8 and the S-Video DC offset are hardware the
+    FPGA cannot drive.
+  - Not started.
 
 ### ✅ Subtitle tracks to the spec maximum (built in PR #152, HW-CONFIRMED 2026-10-04 — see `docs/track_selection.md` "32 subtitle tracks")
 
@@ -1029,7 +1053,7 @@ half-line, weave workaround, 1440-wide pixel repetition) is the
     Letterbox/Auto, and one that denies pan&scan is letterboxed under Crop — what a 4:3 set-top
     player does. Menus only, by user decision (main features deny pan&scan). Gate
     `run_menu_panscan.sh`. Detail: `docs/crt_anamorphic.md` §12.
-- ⛔ **[dropped — not needed (2026-09-01, user decision) — a want rather than a defect, for the narrow case of 16:9 anamorphic content on a 4:3 HDMI display]** **HDMI 4:3 output follows the same Fit / Letterbox / Crop setting as the analog CRT.**
+- ⛔ **[dropped — not needed (2026-09-01, user decision) — a want rather than a defect, for the narrow case of 16:9 anamorphic content on a 4:3 HDMI display]** (Partly revived 2026-10 as "Explicit Analog Aspect Letterbox/Crop on Progressive" above: an explicit Crop now reaches a 4:3 HDMI display. The automatic "follow the HDMI target's shape" part stays dropped.) **HDMI 4:3 output follows the same Fit / Letterbox / Crop setting as the analog CRT.**
   Today `O[4:3] CRT Aspect` (Fit/Letterbox/Crop, `docs/crt_anamorphic.md`) is gated on
   `crt_eff` (analog CRT mode only); HDMI instead gets its aspect from ascal via
   `O[20:19] Aspect Ratio` → `VIDEO_ARX/ARY`. Goal: when a **4:3 HDMI display** shows 16:9

@@ -22,6 +22,175 @@ predate later confirmations; the `CLAUDE.md` index carries the reconciled status
 
 ## Hardware status (THIS fork, verified 2026-06-21)
 
+- ✅ **EXPLICIT ANALOG ASPECT LETTERBOX/CROP ON THE PROGRESSIVE RASTER
+  (2026-10-04/05; HW-CONFIRMED on the rig, MERGED PR #155).** Full design:
+  `docs/crt_anamorphic.md` §13 (and §11 for the `disp_vscale` defect it made reachable).
+  - **Need (maintainer, 2026-10-04):** Analog Aspect was gated on `interlaced_eff`, so on
+    Progressive a 31 kHz analog display (VGA CRT, 480p component on a 4:3 set) showed 16:9
+    discs squeezed with no fix, and a 4:3 HDMI display had no Crop.
+  - **Built:**
+    - `wire aa_live = interlaced_eff | sel==Letterbox | sel==Crop` gates
+      `analog_letterbox`/`analog_crop` and `player_regs .aa_live`.
+    - The SIF guard is now `~sif_det_s2` (≡ the old `~p240_eff` on Interlaced).
+  - **Decisions (user):**
+    - Auto on Progressive is unchanged; Fit there is "no correction" as before
+      (2026-10-05).
+    - Interlaced is bit-identical.
+    - B15 stays on Aspect Ratio on Progressive (2026-10-04).
+    - The 16:9 menu `permitted_df` swap applies on Progressive too (2026-10-04).
+    - No option rename.
+  - **SPRM14 on Progressive:**
+
+    | Setting | SPRM14 |
+    |---|---|
+    | Auto | `0x0C00` |
+    | Fit | `0x0C00` |
+    | Letterbox | `0x0200` |
+    | Crop | `0x0100` |
+
+    Offline (`dvd_vm_ref.py --player prog-*`): HARTSWAR_169 boots VTS 4 (the 4:3 intro)
+    under prog-lb and prog-crop, and VTS 3 under prog-auto and prog-fit.
+  - **The latent `disp_vscale` defect is fixed** (`docs/crt_anamorphic.md` §11).
+    - The progressive frame path's paired `ROW_1_COL_0` re-armed the scan, giving 359
+      lines and a black line under the top bar.
+    - The doc's proposed fix was incomplete. The real fix pairs codes on both the input
+      side and the head side, and tags output line 1 `ROW_1_COL_0`.
+    - It is RED on the unfixed module in three benches.
+    - Field-path and Fit output is byte-identical to `main`'s module, `disp_vscale`'s
+      output stream diffed pixel for pixel:
+      - `disp_vscale_frame_tb`: field Letterbox, NTSC and PAL, with back-pressure;
+      - `resample_chain_tb` +crt (480i) vsmode 0/1/2: 0.8–1.1 M pixels each;
+      - `resample_chain_tb` +il vsmode 0/1/2, and progressive Fit/Crop.
+      Only progressive Letterbox differs, which is the fix: `+exact=1` gives `main` 0/18
+      frames (64-wide) and 0/12 (720×480), and the fix 18/18 and 12/12.
+  - **Gates:**
+    - `run_prog_aspect.sh --red`: 1,024-point evaluated truth table, 10 mutations.
+    - `run_vscale_frame.sh --red`.
+    - `run_field_blend.sh --red`: new `[C11]` arms for Blend, Bob and film followed by
+      Letterbox.
+    - `resample_chain_tb +exact=1`: `main`'s module 0/18 frames, fixed 18/18.
+    - `player_regs_tb [P5]`.
+    - Re-anchored: `run_menu_panscan.sh` (new M7), `run_p240.sh`,
+      `check_player_regs_wiring.py`.
+    - RED on main, shown by hand once: `check_prog_aspect_wiring.py` on
+      `main:dvd/emu.sv` → `[3] Letterbox/Crop do nothing on Progressive (128 points)` plus
+      the `[5]` lockstep checks.
+  - **Two rotted "RED on main" arms retired.** `run_player_regs.sh`'s arm and
+    `run_field_blend.sh`'s W0 checked a checker against `git show main:`. Each went green
+    the moment its feature merged, and failed every `--red` run after that. Do not
+    reintroduce the pattern.
+  - **Next:** nothing open for this feature; follow-ups are in `docs/roadmap.md`.
+  - **Known limitations:**
+    - SIF content is never corrected. Lifting that needs `vsz_eff`-derived overlay bars.
+    - SPRM14 still follows `aa_live` on a SIF title.
+    - On a 16:9 display, explicit Letterbox shows bars on all four sides (the manual
+      says to leave it on Auto).
+    - Bob/Blend run ahead of Letterbox, which softens more.
+    - Letterbox reads display lines at ~4/3 of Fit's rate during the band (measured:
+      no lates).
+    - Mapped menu highlights under Crop on Progressive sit +1.3 px right (the
+      `CE_PIXEL=1` lag). Not visible.
+  - **HW round 1 (2026-10-05).** Feature `DVD_progaspect_20261005_0220`, control
+    `DVD_playerregs_20261004_2358`, both through the same script. Disc: a full-frame 1.78
+    16:9 NTSC TV episode (the MythBusters 2008-03 rip), Disc Menus Off, raw-raster
+    screenshots at about 25 s.
+    - **Progressive geometry:**
+
+      | Setting | Control | Feature |
+      |---|---|---|
+      | Auto | 480 lines | 480 lines (unchanged) |
+      | Fit | 480 lines | 480 lines (unchanged) |
+      | Letterbox | 480 lines | **360 lines, rows 60–419**, row 60 fully lit, no hole |
+      | Crop | 480 lines, identical to Fit | 480 lines, cropped |
+
+      - The Letterbox band shows no black line under the top bar, so the §11 fix holds
+        on silicon.
+      - Crop was measured by content correlation: against Fit's centre 528 px stretched
+        to 720 it scores **0.994**, against Fit as-is 0.892. On the control, Crop is
+        identical to Fit (1.000).
+      - On the feature, Auto is identical to Fit (1.000).
+    - **Interlaced is unchanged against the control:** Auto and Letterbox give rows 60–419
+      (360 lines), Crop is full-height.
+    - **SPRM14 on hardware** (HARTSWAR_169, Debug Overlay `{PGCN, VTS}`):
+
+      | | Prog Auto | Prog Fit | Prog Letterbox | Prog Crop | Interlaced Letterbox |
+      |---|---|---|---|---|---|
+      | Control | VTS 3 | — | VTS 3 | VTS 3 | VTS 4 |
+      | Feature | VTS 3 | VTS 3 | **VTS 4** | **VTS 4** | VTS 4 |
+
+      This matches the offline `dvd_vm_ref --player prog-*` prediction.
+    - **Build:** `clk_dec` 88.47 MHz (100 °C) / 86.13 MHz (−40 °C), against a gate of 86;
+      SEED 1. 38,873 ALM, +160 against the control. `disp_vscale`'s line buffer still
+      infers an altsyncram.
+  - **HW round 2 (2026-10-05):** feature build only, split across the second rig and the
+    usual one while the usual one was in use.
+    - **Film 24p On + Letterbox** (28 Days Later, a scope film; raster 23.97 Hz): the
+      352-line picture becomes exactly 264 lines (× ¾), centred at rows 106–369, with no
+      hole. Crop fills the width.
+      - Film 24p On on this disc drops ~6 frames/s under Fit as well as Letterbox (≈6.0/s
+        both, the same window). Forcing 24p on mixed cadence (only 51 % progressive
+        pictures) causes it, not Letterbox. Fit's path is bit-identical to `main`.
+    - **Deinterlace Bob or Blend + Letterbox** (MythBusters, full-frame): 360 lines at
+      rows 60–419, no hole.
+    - **VCD** (dinosaur, 352×288): Fit, Letterbox and Crop give identical frames
+      (correlation 0.999 against Fit), so it is uncorrected, as designed.
+    - **Paused A/B on one frame** (28 Days Later, Title VTS 7, a dark 1.85 feature; Fit,
+      Letterbox and Crop set live):
+      - Letterbox matches Fit scaled ¾ at row 60: correlation 0.872, against 0.314 as-is.
+      - The HUD stays anchored to the raster bottom.
+      - Lesson for the next round: on a dark film, edge-based geometry misleads, so
+        score by content.
+    - **Menus:**
+      - The MythBusters menu (df=2) under Progressive Crop is letterboxed (251 lines,
+        against 328 under Fit), and its highlight sits on its row.
+      - The 28 Days Later menu (df=1) under Progressive Letterbox is cropped (0.973
+        against Fit's stretched centre), and the highlight icon is on LANGUAGE SELECTION.
+      - Measured against the crop mapping, the cropped highlight sits **+1.3 px** right
+        of where it should be. That is the predicted `CE_PIXEL=1` lag (`crt_ov_map.sv`
+        header); the icon is 41 px wide and the offset is not visible. Accepted, and
+        recorded as a known limitation.
+    - **Subtitles under Progressive Letterbox:** "No." and "Wait." draw crisp at their
+      authored position, in the bar below the picture. This is the designed behaviour,
+      as on Interlaced.
+    - **Decode pacing:** `tools/pacing_matrix.py --aspect --rounds 2`, with Fit, Letterbox
+      and Crop interleaved live:
+      - **0 lates and 0 drops** in every Letterbox and Crop cell on ROGER, THE_OFFICE_UK
+        (PAL) and Thayer's Quest.
+      - Worst single-picture decode times sit within the Fit cells' range (17–24 ms).
+      - The only non-zero aspect cell is one ROGER Fit window at 0.03 lates/s: the one
+        ROGER late accepted in PR #142.
+      - The ~4/3 display read rate during the band costs nothing measurable since F1/F2.
+      - The run's Film 24p On cells drop ~6/s on the 30 fps discs (ROGER, Thayer) with
+        Analog Aspect at Auto. That confirms the 24p drops above are a property of
+        forcing 24p, not of Letterbox. Data is under `.sim/pacing/aspect_*`.
+    - **PAL 576 Letterbox** (THE_OFFICE_UK, Progressive): Fit spans rows 1–574 (the
+      disc's edge half-lines, §11). Letterbox gives 430 lines at rows 73–502, which is
+      574 × ¾ under the 72-line bar.
+  - **Not covered on HW:** a VGA CRT, a 480p component TV or a 4:3 HDMI set judged by
+    eye. The analog path itself is covered below, through a RetroTINK.
+    - ✅ **Analog path through a RetroTINK (2026-10-05, rig ini `vga_scaler=0`, RGB
+      csync, Video Output = Progressive → 480p on the pins), captured at 1280×720.**
+      - The RetroTINK locks to the progressive analog raster and frames it as a 4:3
+        window (columns ≈151–1127).
+      - One paused frame, Analog Aspect switched live:
+
+        | Setting | Through the RetroTINK |
+        |---|---|
+        | Fit | full height, the anamorphic squeeze (the reported problem) |
+        | Letterbox | 540 of 720 lines, bars 91/89; matches Fit scaled ¾: 0.898 against 0.326 as-is |
+        | Crop | full height, stretched; matches Fit's stretched centre: 0.793 against 0.618 as-is |
+
+      - The HUD stays anchored at the bottom in all three.
+      - The first attempt failed because the RetroTINK was on the wrong input.
+      - ⚠ Instrument notes, for whoever captures next:
+        - The capture card's 1080p MJPEG mode stopped delivering frames during the
+          session, while 720p and 480p still worked.
+        - The card sometimes returns a whole capture of its flat no-signal frame
+          (level 7, std 0) on open, with nothing changed; retry.
+        - OBS holding the card makes captures fail outright.
+        - A title running to its end gives a black raster with lates at 60/s (one per
+          refresh) and 0 fps: read the HUD time before calling that a fault.
+
 - ✅ **PLAYER PARAMETERS SPRM14/15/20 FROM THE SETUP, NOT CONSTANTS (PR #154,
   2026-10-04; HW-CONFIRMED against a `main` control arm, MERGED PR #154).** Design: `docs/dvd_vm.md` "Player
   parameters SPRM14/15/20". These are the *DVD Demystified* 3rd-edition audit's items 2 and 3.

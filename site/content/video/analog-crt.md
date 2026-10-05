@@ -56,7 +56,8 @@ live on the [Video Output](interlaced.md) page.
 
 In Progressive mode the analog pins carry the plain progressive raster through the stock
 path — a **31 kHz** signal a 15 kHz CRT cannot sync — and the analog-only extras
-(line-21 captions, sub-720 fill, Analog Aspect) are off.
+(line-21 captions, sub-720 fill) are off. `Analog Aspect` works there only when you set it
+to **Letterbox** or **Crop** — see [On Progressive](#analog-aspect-on-progressive).
 
 !!! note "Changed in v0.4.0"
     On a rig configured for analog in `MiSTer.ini` (`vga_scaler=0` plus a sync mode) but
@@ -116,6 +117,9 @@ answer:
 - **Crop:** a 4:3 TV that shows pan-and-scan.
 - **Fit:** a widescreen TV.
 
+On Progressive, **Auto** answers "a widescreen TV" as well, since it applies no correction
+there.
+
 The disc reads it as it reaches each choice, so changing the setting mid-disc affects only
 the choices that come after.
 
@@ -129,7 +133,34 @@ that can make it visible. It is on the disc, and a set-top player letterboxing t
 disc puts it in the same place.
 
 For movies, **Auto never selects Crop** — it chooses between Letterbox and Fit, and Crop
-is a deliberate manual choice. Disc menus can override that choice, as described next.
+is a deliberate manual choice. Disc menus can override that choice, as described below.
+
+### Analog Aspect on Progressive
+
+With `Video Output` on **Progressive**, only an explicit **Letterbox** or **Crop** changes
+the picture. That is for a 4:3 display fed the progressive signal: a VGA CRT, a 4:3 set on
+480p component, or a 4:3 HDMI display.
+
+| Setting | On Progressive |
+|---|---|
+| **Auto** | No correction. The MiSTer scaler handles the aspect, exactly as on HDMI. |
+| **Fit** | No correction (the same as Auto here). |
+| **Letterbox** | The picture is letterboxed in the core, with black bars, as on a CRT. |
+| **Crop** | The picture is cropped to fill a 4:3 screen, as on a CRT. |
+
+- **On a widescreen display, leave it on Auto.** Letterbox and Crop make the picture 4:3, so a
+  16:9 TV shows Letterbox with bars on all four sides, and Crop with the sides cut off and
+  bars left and right.
+- Changing between Auto/Fit and Letterbox/Crop while a disc plays makes the display re-sync
+  once, like changing the `Aspect Ratio` setting.
+- The **Aspect** button still cycles `Aspect Ratio` on Progressive; set Letterbox or Crop
+  in the OSD.
+- With `Deinterlace` set to Bob or Blend, the deinterlaced picture is what gets letterboxed.
+- **With an external scaler on the analog output** (a RetroTINK, an OSSC), the scaler
+  decides the shape of what it outputs, because an analog signal carries no aspect
+  information. Under Auto or Fit the core sends the unmodified anamorphic picture; set the
+  scaler's own aspect to 16:9 for a widescreen picture. `Aspect Ratio` doesn't reach this
+  path: it only affects the MiSTer's own HDMI output.
 
 ### Widescreen disc menus
 
@@ -147,9 +178,10 @@ set-top player connected to a 4:3 TV does:
   you leave the menu, the picture goes back to your setting.
 
 Menu highlights follow the cropped or letterboxed picture, so they stay on their buttons.
-This only happens on the 15 kHz analog output (the interlaced raster), which is the only
-place Crop exists. With `Video Output` set to `Progressive`, or on an HDMI-only setup, a
-widescreen menu is shown the same way as before.
+This happens wherever the correction is in effect: on the 15 kHz analog output (the
+interlaced raster) under any setting, and on Progressive when `Analog Aspect` is Letterbox
+or Crop. On Progressive under Auto or Fit, a widescreen menu is shown the same way as
+before.
 
 !!! note "Changed in v0.4.0"
     **Subtitles are no longer scaled by Letterbox or Crop.** Dialogue subtitles now draw
@@ -184,8 +216,9 @@ frame to scale rather than an already-doubled one.
 It happens on its own, with nothing to set. There is no OSD option, and a normal DVD is
 untouched — only content 288 lines or shorter takes the 240p raster.
 
-**Analog Aspect has no effect while 240p is running.** VCD and MPEG-1 SIF content is 4:3,
-so there is nothing to letterbox or crop; the setting still applies to everything else.
+**Analog Aspect has no effect on VCD and MPEG-1 SIF content**, on the 240p raster or on
+Progressive. It is 4:3, so there is nothing to letterbox or crop; the setting still applies
+to everything else.
 
 !!! note "What you may notice"
     Switching in and out of the mode is a brief interruption, like a chapter skip, because

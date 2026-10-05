@@ -85,9 +85,10 @@ mutate R6-no-remount-clear rd "s|vmg_rmask  <= 8'h00;           // a new disc|; 
 echo "== RED: the emu seam"
 if python3 tools/check_player_regs_wiring.py --red > "$TMP/r.out" 2>&1; then sed 's/^/  /' "$TMP/r.out"
 else failed "check_player_regs_wiring.py --red"; cat "$TMP/r.out"; fi
-if python3 tools/check_player_regs_wiring.py <(git show main:dvd/emu.sv) > /dev/null 2>&1; then
-    failed "check_player_regs_wiring.py PASSED main's emu.sv (pre-feature)"
-else pass "check_player_regs_wiring.py is RED on main's emu.sv"; fi
+# (A "RED on main's emu.sv" arm stood here. It went green the moment PR #154 merged --
+# main then WAS the feature -- and failed every --red run after that. It was removed in
+# feature/progressive-aspect: RED-on-main is shown once, by hand, in docs/status_log.md;
+# the mutations above carry the same proof permanently.)
 
 [ $rc -eq 0 ] && echo "run_player_regs: ALL GREEN" || echo "run_player_regs: FAILURES"
 exit $rc
