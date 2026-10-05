@@ -22,9 +22,9 @@ predate later confirmations; the `CLAUDE.md` index carries the reconciled status
 
 ## Hardware status (THIS fork, verified 2026-06-21)
 
-- ✅ **NEXT/PREV CHAPTER AT THE TITLE'S EDGES (audit item 7, 2026-10-05, branch
-  `feature/chapter-edge`, `dev-chapedge`; sim-proven and ✅ HW-CONFIRMED against libdvdnav on
-  the rig, control arm first; not yet merged).**
+- ✅ **NEXT/PREV CHAPTER AT THE TITLE'S EDGES (audit item 7, 2026-10-05,
+  `dev-chapedge`; sim-proven and ✅ HW-CONFIRMED against libdvdnav on the rig, control arm
+  first; ✅ MERGED PR #158).**
   - **Gap.** A chapter skip with nowhere left to go clamped. Next on the last chapter did
     nothing, and Prev at chapter 1 restarted it. libdvdnav (`vm.c` `vm_jump_next_pg` /
     `vm_jump_prev_pg`) instead runs the PGC's POST, or follows `prev_pgc_nr` to that PGC's
@@ -100,7 +100,7 @@ predate later confirmations; the `CLAUDE.md` index carries the reconciled status
       build (about +156, fitter noise included). M10K and DSP unchanged.
     - **Reader regression:** `run_reader_regress.sh --baseline` (main worktree) is IDENTICAL
       on every arm.
-  - **Next:** PR and merge. Then the PTT-reload follow-up above.
+  - **Next:** the PTT-reload follow-up above.
 
 - ✅ **CLK_MEM TIMING: THE VICTIM INVALIDATE DEFERRED ONE CYCLE (2026-10-05; sim
   cycle-exact, HW smoke matches `main`; ✅ MERGED PR #157).**

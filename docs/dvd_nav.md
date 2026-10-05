@@ -2126,7 +2126,7 @@ JumpVTS_PTT-shaped jump instead — multi-PGC titles (Scene_It, PNP0NNS1) can fi
 skip across PGC boundaries, and the HUD `CH n` becomes the global PTT index. See
 "Resident PTT table" in the Phase-6 section above for the full mechanics.
 
-### Chapter skip at the title's edges (audit item 7) — ✅ HW-CONFIRMED 2026-10-05 (not yet merged)
+### Chapter skip at the title's edges (audit item 7) — ✅ HW-CONFIRMED 2026-10-05, ✅ MERGED (PR #158)
 
 A burst with **nowhere left to go in the title** no longer clamps silently when Disc Menus
 is on. The reader hands it to the VM, which does what libdvdnav does (`vm.c`

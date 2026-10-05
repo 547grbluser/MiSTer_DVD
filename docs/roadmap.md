@@ -621,7 +621,7 @@ in `CONF_STR`. Design: `docs/cdda.md` "`.cue` sheets". ⛔ CHD still not support
 > **top gap confirmed = exact chapters/PTT (7/7 discs); interactive GPRM-counter/NVTMR promoted
 > above parental on measured prevalence (3/7 game discs).** Phase 3 = close gaps in that order.
 
-### ✅ Next/Prev chapter at the title's edges (2026-10-05, branch `feature/chapter-edge`; ✅ HW-CONFIRMED vs libdvdnav, not yet merged — see `docs/dvd_nav.md` "Chapter skip at the title's edges")
+### ✅ Next/Prev chapter at the title's edges (2026-10-05; ✅ HW-CONFIRMED vs libdvdnav, ✅ MERGED PR #158 — see `docs/dvd_nav.md` "Chapter skip at the title's edges")
 
 The 3rd-edition audit's item 7. With Disc Menus on:
 - **Next from a title's last chapter runs the PGC's POST** (usually the menu, or the next
@@ -639,8 +639,7 @@ The HW-confirmed cross-PGC PTT skip is untouched, and Auto (Disc Menus off) is u
 Census: POST on the last chapter's PGC in 89.8 % of 24,381 titles; `prev_pgc_nr` on 802
 titles (162 discs). Gate: `bench/dvd/run_chap_edge.sh --red`.
 HW: `nav_diff` matches libdvdnav on Dr. Seuss, Civil War 2 and National Treasures 1, where
-the `main` control diverges. Timing closes on SEED 9, at about +156 ALM. **Next:** PR and
-merge.
+the `main` control diverges. Timing closes on SEED 9, at about +156 ALM. **Next:** the PTT-reload follow-up below.
 **Follow-up found here:** a TT jump by PGCN reloads the PTT table as `cur_ttn = 1`, so after
 an in-title PGC link the HUD's chapter total can be title 1's (pre-existing).
 
