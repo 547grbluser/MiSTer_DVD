@@ -22,8 +22,9 @@ predate later confirmations; the `CLAUDE.md` index carries the reconciled status
 
 ## Hardware status (THIS fork, verified 2026-06-21)
 
-- 🔧 **NEXT/PREV CHAPTER AT THE TITLE'S EDGES (audit item 7, 2026-10-05, branch
-  `feature/chapter-edge`, `dev-chapedge`; sim-proven, ⏳ HW round and build timing pending).**
+- ✅ **NEXT/PREV CHAPTER AT THE TITLE'S EDGES (audit item 7, 2026-10-05, branch
+  `feature/chapter-edge`, `dev-chapedge`; sim-proven and ✅ HW-CONFIRMED against libdvdnav on
+  the rig, control arm first; not yet merged).**
   - **Gap.** A chapter skip with nowhere left to go clamped. Next on the last chapter did
     nothing, and Prev at chapter 1 restarted it. libdvdnav (`vm.c` `vm_jump_next_pg` /
     `vm_jump_prev_pg`) instead runs the PGC's POST, or follows `prev_pgc_nr` to that PGC's
@@ -74,8 +75,30 @@ predate later confirmations; the `CLAUDE.md` index carries the reconciled status
   - **Found, not fixed (pre-existing):** a TT jump by PGCN reloads the PTT table as
     `cur_ttn = 1`, so after an in-title PGC link in another title the HUD total can be
     title 1's.
-  - **Next:** the build's timing (clk_dec ≥ 86, clk_mem ≥ 90), then a HIL round, control arm
-    (`main`) first.
+  - **HW (2026-10-05, rig, `nav_diff.py` against libdvdnav; the control arm `dev-clkmem`, whose
+    `dvd/` tree is `main`'s, ran first).**
+    - **Control fails, as it must.** Dr. Seuss "1 > > >": the edge Next stays in PGC 1, where
+      libdvdnav goes to PGC 10. National Treasures 1 "1 <": the board stays in PGC 1, where
+      libdvdnav goes to VMGM PGC 8.
+    - **`DVD_chapedge_20261005_1903.rbf`, no differences:**
+      - Dr. Seuss: the edge Next goes to PGC 10, the next title (POST JumpVTS_TT). Next on
+        that one-chapter title goes to VMGM PGC 6 (the single-chapter arm).
+      - Civil War 2, 8 chapters: the edge Next goes to VTS 2 PGC 1, the disc's POST GPRM
+        path.
+      - National Treasures 1: Prev at chapter 1 goes to VMGM PGC 8 (`prev_pgcn` 3 → its PRE
+        → the menu).
+      - Dr. Seuss, `prev_pgcn` 0: Prev restarts chapter 1 and stays in PGC 1.
+    - **HUD reads:**
+      - A Next ×3 burst from chapter 1 clamps to `CH 3/3` and stays in the title, and one
+        more Next then leaves it.
+      - **Disc Menus Off is unchanged.** A burst lands on `CH 3/3`, and the extra Next keeps
+        playing in that title.
+    - **Build:** SEED 9 unchanged. clk_dec 94.50 / 92.05 MHz (100 °C / −40 °C, gate 86) and
+      clk_mem 90.53 / 91.52 MHz (warn below 90). 38,792 ALM vs 38,636 on the `dev-clkmem`
+      build (about +156, fitter noise included). M10K and DSP unchanged.
+    - **Reader regression:** `run_reader_regress.sh --baseline` (main worktree) is IDENTICAL
+      on every arm.
+  - **Next:** PR and merge. Then the PTT-reload follow-up above.
 
 - ✅ **CLK_MEM TIMING: THE VICTIM INVALIDATE DEFERRED ONE CYCLE (2026-10-05; sim
   cycle-exact, HW smoke matches `main`; ✅ MERGED PR #157).**

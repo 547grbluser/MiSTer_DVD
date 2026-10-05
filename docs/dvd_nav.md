@@ -2125,7 +2125,7 @@ JumpVTS_PTT-shaped jump instead — multi-PGC titles (Scene_It, PNP0NNS1) can fi
 skip across PGC boundaries, and the HUD `CH n` becomes the global PTT index. See
 "Resident PTT table" in the Phase-6 section above for the full mechanics.
 
-### Chapter skip at the title's edges (audit item 7) — 🔧 sim-proven, ⏳ HW
+### Chapter skip at the title's edges (audit item 7) — ✅ HW-CONFIRMED 2026-10-05 (not yet merged)
 
 A burst with **nowhere left to go in the title** no longer clamps silently when Disc Menus
 is on. The reader hands it to the VM, which does what libdvdnav does (`vm.c`
@@ -2234,6 +2234,17 @@ libdvdnav run the post commands"; that is half right.
 - Navigation oracle: `tools/nav_diff.py <disc> --script "1 > > >"` (chapter tokens are
   compared on the immediate landing). Third opinion: `dvd_vm_ref.VM.next_pg_edge` /
   `prev_pg_edge`.
+
+**HW (2026-10-05).** `nav_diff` against libdvdnav, with the `main` control arm first; the
+control diverges at exactly the edge steps.
+- Dr. Seuss: the edge Next goes to PGC 10, and Next on that one-chapter title to VMGM
+  PGC 6.
+- Civil War 2: the edge Next goes to VTS 2 PGC 1.
+- National Treasures 1: Prev at chapter 1 goes to VMGM PGC 8.
+- With `prev_pgcn` 0, Prev restarts chapter 1.
+- A Next ×3 burst clamps to `CH 3/3`, and Disc Menus Off is unchanged.
+
+Detail: `docs/status_log.md`.
 
 **Multi-press debounce (`feature/chapter-skip-debounce`).** A single B2/B3 press used to
 fire an immediate seek, so a rapid multi-press *scrubbed* — the video visibly jumped through
