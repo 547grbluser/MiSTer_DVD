@@ -693,7 +693,11 @@ class VM(object):
             self.menu_seen = True           # RTL: `if (menu_active) menu_seen <= 1`
             self.last_menu = (dom, vts, pgcn)   # link-fail re-enter target
         self.pgc = self.nav.pgc(pit[pgcn - 1][1])
-        if pgn and self.pgc["pm"] and pgn <= len(self.pgc["pm"]):
+        if pgn == 0xFF and self.pgc["pm"]:
+            # "the LAST program" - the title-edge Prev landing (dvd_iso_reader
+            # P_PMAP: jpgn_l == 8'hFF takes the final program-map entry)
+            cell = self.pgc["pm"][-1] - 1
+        elif pgn and self.pgc["pm"] and pgn <= len(self.pgc["pm"]):
             cell = self.pgc["pm"][pgn - 1] - 1
         self.cell = cell if cell < max(self.pgc["nr_cells"], 1) else 0
         ast = self.regs.sprm[1] & 0xFF
@@ -970,6 +974,38 @@ class VM(object):
         self.log("== PGC END: post commands ==")
         self.fuse = 0
         return self._run_post()
+
+    # ---- chapter skip at the TITLE's edge (audit item 7) -----------------
+    # The reader decides the edge (dvd_iso_reader chap_edge: Next from the
+    # title's last chapter; Prev at chapter 1's start when prev_pgcn names
+    # ANOTHER PGC); these mirror dvd_vm.sv's ev_chedge arm, i.e. libdvdnav
+    # vm_jump_next_pg / vm_jump_prev_pg run through dvdnav_*_pg_search. Unlike
+    # the natural pgc_end(), both are USER chains: one that ends without a link
+    # (Exit, a fall-through with next_pgcn 0) is a no-op and playback goes on.
+    def next_pg_edge(self):
+        self.log("== CHAPTER EDGE: Next -> POST (user chain) ==")
+        if self.dom != DOM_TT:
+            return True                     # RTL: ignored while a menu is up
+        self.fuse = 0
+        link = eval_block(self.pgc["post"], self.regs, self.lfsr, FUSE, self.trace)
+        if link is not None and link[0] != "Exit":
+            return self._process(link)
+        if link is None and self.pgc["next"]:
+            self.log("  [post fall-through] -> next_pgcn %d" % self.pgc["next"])
+            return self._load_pgcn(DOM_TT, self.vts, self.pgc["next"])
+        self.log("  [edge chain ended without a jump] -> no-op, playback continues")
+        return True
+
+    def prev_pg_edge(self):
+        prev = self.pgc["prev"]
+        self.log("== CHAPTER EDGE: Prev -> prev_pgcn %d, last program ==" % prev)
+        if self.dom != DOM_TT or prev == 0 or prev == self.pgcn:
+            # the reader restarts chapter 1 itself (prev_pgcn 0, or naming
+            # this PGC - the deliberate libdvdnav deviation); no VM event
+            self.log("  [reader restarts chapter 1] -> no VM action")
+            return True
+        self.fuse = 0
+        return self._load_pgcn(DOM_TT, self.vts, prev, pgn=0xFF)
 
     # ---- full-playback driver (mirrors the reader's cell/cell-cmd/post loop) --
     # boot() and the _process chain walk through PRE blocks and command-only

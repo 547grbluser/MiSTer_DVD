@@ -503,7 +503,8 @@ module iso_reader_ptt_tb;
         chap_skip(1'b1, 5'd1);
         check_skip(8'hB2, 1'b1, 8'd3, "T-J: next ch2->ch3 (cross-PGC)");
 
-        // T-M: next at the last chapter = no move (legacy clamp rule)
+        // T-M: next at the last chapter = no reader move (the edge goes to
+        // the VM as chap_edge; iso_reader_chapedge_tb A covers the pulse)
         chap_skip(1'b1, 5'd1);
         check_noop(8'd3, "T-M: next at last chapter");
 
@@ -533,7 +534,11 @@ module iso_reader_ptt_tb;
         chap_skip(1'b1, 5'd5);
         check_skip(8'hB2, 1'b1, 8'd3, "T-O: next x5 ch1->ch3 (clamped cross)");
 
-        // T-P: single-chapter title (title 2: 1 PTT, 1 program) never arms
+        // T-P: single-chapter title (title 2: 1 PTT, 1 program): no seek and
+        // no jump. Since the title-edge change (audit item 7) Disc Menus on
+        // DOES arm it - Next there is the title's edge and pulses chap_edge
+        // for the VM to run POST (iso_reader_chapedge_tb J) - but the reader
+        // itself still moves nowhere, which is what this arm checks.
         busy = 0;
         do_jump(8'd1, 7'd2);
         check_jump(8'hB2, "T-P0: mount title 2 (single chapter)");
