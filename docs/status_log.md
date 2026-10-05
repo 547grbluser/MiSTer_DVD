@@ -22,8 +22,8 @@ predate later confirmations; the `CLAUDE.md` index carries the reconciled status
 
 ## Hardware status (THIS fork, verified 2026-06-21)
 
-- ✅ **PLAYER PARAMETERS SPRM14/15/20 FROM THE SETUP, NOT CONSTANTS (feature/player-regs,
-  2026-10-04; HW-CONFIRMED against a `main` control arm, not yet merged).** Design: `docs/dvd_vm.md` "Player
+- ✅ **PLAYER PARAMETERS SPRM14/15/20 FROM THE SETUP, NOT CONSTANTS (PR #154,
+  2026-10-04; HW-CONFIRMED against a `main` control arm, MERGED PR #154).** Design: `docs/dvd_vm.md` "Player
   parameters SPRM14/15/20". These are the *DVD Demystified* 3rd-edition audit's items 2 and 3.
   - **Was:** `sprm_read` returned libdvdnav's constants: 14 = `0x0100` ("4:3 TV,
     pan&scan" on every setup), 15 = `0x7CFC` (claims SDDS and karaoke), and 20 = `0x0001`.
@@ -62,7 +62,7 @@ predate later confirmations; the `CLAUDE.md` index carries the reconciled status
     where `main` boots VTS 4; under Interlaced + Letterbox both boot VTS 4; 13_CONVERSATION
     (mask 0x00, reads SPRM20 -- a broken region loop would land on its VTS 6 dead end) parks
     at the same `5/0` on both. Build: `clk_dec` 90.87 / 86.9 MHz, +142 ALM vs the control.
-  - **Next:** PR and merge when asked; the region-2 path stays offline-only.
+  - **Next:** the region-2 path stays offline-only; the 4:3-progressive Analog Aspect follow-up is queued in `docs/roadmap.md`.
   - **Follow-up queued:** Analog Aspect on 4:3 progressive displays (`docs/roadmap.md`).
 
 - ✅ **CSS ENCRYPTED ON A DISC THAT DECRYPTS FINE: A RAW READ RAN INTO A VOB (issue #147,

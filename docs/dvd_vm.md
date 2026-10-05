@@ -182,7 +182,7 @@ A faithful port of **libdvdnav `src/vm/decoder.c` `eval_command`**:
   5 VTS_TTN, 6 TT_PGCN, 7 PTTN, 8 HL_BTNN (init 0x400), 9/10 NVTMR (stored, never
   fires), 13 PML. Constants per libdvdnav `vm_reset`: SPRM0/16/18 = 'en' (the OSD
   Player Language), 12 = 'US'. **SPRM14 / 15 / 20 are NOT constants** since
-  feature/player-regs: they come from `dvd/player_regs.sv` (see "Player parameters
+  PR #154: they come from `dvd/player_regs.sv` (see "Player parameters
   SPRM14/15/20" below). The old values were 0x100 / 0x7CFC / 1, and 1 is region 1,
   not "region free" as this line used to say.
 - **SPRM8 shadows nav_pci's live selection** while buttons are armed (D-pad moves
@@ -191,7 +191,7 @@ A faithful port of **libdvdnav `src/vm/decoder.c` `eval_command`**:
 - Reset domain: **`reset_n`, NOT `pipe_rst_n`** — GPRM/RSM state must survive seeks
   and jumps (the pgc-palette seek-reset lesson). A mount (`start`) runs `vm_reset`.
 
-## Player parameters SPRM14/15/20 (feature/player-regs) — ✅ HW-CONFIRMED (2026-10-05), not yet merged
+## Player parameters SPRM14/15/20 — ✅ HW-CONFIRMED (2026-10-05), MERGED (PR #154)
 
 **What.** A disc's commands can *read* three player parameters: SPRM14 (the TV the
 player drives), SPRM15 (the audio it can play) and SPRM20 (its region). They used to be

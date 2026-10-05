@@ -621,7 +621,7 @@ in `CONF_STR`. Design: `docs/cdda.md` "`.cue` sheets". ⛔ CHD still not support
 > **top gap confirmed = exact chapters/PTT (7/7 discs); interactive GPRM-counter/NVTMR promoted
 > above parental on measured prevalence (3/7 game discs).** Phase 3 = close gaps in that order.
 
-### ✅ Player parameters SPRM14/15/20 from the setup, not constants (feature/player-regs, HW-CONFIRMED 2026-10-05, not yet merged — see `docs/dvd_vm.md` "Player parameters SPRM14/15/20")
+### ✅ Player parameters SPRM14/15/20 from the setup, not constants (HW-CONFIRMED 2026-10-05, MERGED PR #154 — see `docs/dvd_vm.md` "Player parameters SPRM14/15/20")
 
 The 3rd-edition audit's items 2 and 3. `dvd/player_regs.sv` gives each disc:
 - **SPRM20:** the first region the disc allows, from VMGI byte 0x23.
@@ -632,7 +632,7 @@ Sim, mutation and offline gates are green. On HDMI, the library boot diff moves 
 from a 4:3 intro VTS to its 16:9 copy, and 7 more to their 16:9 menu page.
 HW against a `main` control arm: HARTSWAR_169 on HDMI boots VTS 3 (16:9) instead of
 VTS 4, stays on VTS 4 under Interlaced + Letterbox, and 13_CONVERSATION boots unchanged.
-The region-2 path stays offline-only (no physical vehicle). **Next:** PR + merge when asked.
+The region-2 path stays offline-only (no physical vehicle). **Next:** the 4:3-progressive follow-up below.
 
 **Follow-up (user question, 2026-10-04):** Analog Aspect does nothing on Progressive, so a
 31 kHz 4:3 display (VGA CRT, 480p component) gets the bare anamorphic raster, and a 4:3 HDMI
