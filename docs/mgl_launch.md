@@ -109,6 +109,12 @@ Traced through `rtl/mpeg2/mixer.v` → `rtl/mpeg2/yuv2rgb.v` (SMPTE-170M coeffic
 `cy = 38155`). This is a genuinely reusable diagnostic — it splits three different bugs
 apart before any instrumentation is added.
 
+⚠ **Until 2026-10 the green row held only on discs TAGGED 5/6.** An untagged stream (about
+60% of DVD features) was decoded as BT.709, which turns Y=Cb=Cr=0 into **(0,77,0)**, not
+(0,136,0). Black and grey are the same under either matrix. "Not signalled" now decodes as
+BT.601 (`docs/status_log.md` "BT.601 default colour matrix"), so (0,136,0) holds on every
+DVD. If you are reading a screenshot from an older build, accept either green.
+
 | colour | RGB | what it means |
 |---|---|---|
 | **black** | (0,0,0) | nothing is scanning at all — the reader is wedged or the decoder is held in reset. `mixer` emits Y=16, U=V=128 when not displaying. |

@@ -22,6 +22,75 @@ predate later confirmations; the `CLAUDE.md` index carries the reconciled status
 
 ## Hardware status (THIS fork, verified 2026-06-21)
 
+- 🔧 **BT.601 DEFAULT COLOUR MATRIX (2026-10-05; branch `feature/bt601-default`,
+  sim-verified, ⏳ HW A/B pending).** *DVD Demystified* 3rd-edition audit, A/B #6.
+  - **Defects** (both pre-existing, both in upstream `rtl/mpeg2`):
+    1. `yuv2rgb.v` decoded `matrix_coefficients` 0 ("no colour description") as BT.709,
+       the ISO 13818-2 §6.3.6 default. DVD permits only matrix 5 or 6, both BT.601
+       (Table 9.18). MPEG-1 is CCIR 601. `dvd/pgc_palette.sv` converts subtitles and
+       highlights with BT.601, so on every untagged picture the overlay and the video
+       were in different colour spaces.
+    2. `vld.v` loaded the matrix only in `STATE_SEQUENCE_DISPLAY_EXT0`. That state is
+       skipped for `colour_description=0` and never reached by MPEG-1 or by a sequence
+       without the extension. Those sequences silently kept the PREVIOUS sequence's
+       matrix, or 0 after a decoder reset.
+  - **Measured (`tools/colour_scan.py`, 1,530 images):**
+    - 1,131 discs have untagged title sequences, and 116 more have `colour_description=0`.
+      By sequence-header count, untagged is the largest bucket: 15,023 title headers vs
+      8,269 tagged 6.
+    - `--feature` (8 windows across the main VTS) on 39 random discs: 24 features are
+      untagged, 14 tagged 6, 1 tagged 5. **About 60% of features decoded with the wrong
+      matrix.**
+    - Tags seen: 6, 5 and 4 (FCC, about 36 discs). **No disc is tagged 1 or 7.**
+    - About 8 discs carry unexplained out-of-range transfer/matrix bytes. See the tool's
+      docstring.
+  - **Visible size:** skin (Y150 Cb110 Cr160) is (213,143,118) under 709 and
+    (207,137,120) under 601. Saturated red and blue gain a green cast of up to 24 codes.
+  - **Fix:**
+    - `vld.v`: a per-sequence `mc_seq` is cleared at every sequence header, loaded from
+      the extension, and **committed to `matrix_coefficients` at the picture start code**.
+      This is the same acceptance the `mpeg1` latch uses.
+      - Committing at the picture, rather than clearing the output at the header, is
+        deliberate. A repeated sequence header (every GOP) would otherwise drop a tagged
+        stream to 0 for the few dozen clocks before its extension reloads it, which shows
+        as a short streak of wrong-matrix pixels per GOP.
+    - `yuv2rgb.v`: 0 moves to the BT.601 arm.
+      - **Decision: explicit tags are honoured** (1 = 709, 4 = FCC, 7 = 240M). That is
+        the roadmap item's wording, it keeps a tagged `.mpg` correct, and the census found
+        no disc where the choice changes the output.
+    - ~10 flops; the table change is free.
+  - **Side effect, a dead oracle revived:** `docs/mgl_launch.md`'s and
+    `tools/dvd_explore.py`'s "never-written framestore slot" green (0,136,0) is the
+    **601** result.
+    - On an untagged disc the old decoder showed (0,77,0), outside `COLOUR_TOL=12`, so
+      that soak-test oracle was blind on most discs.
+    - It now holds everywhere.
+  - **Gate:** `bench/dvd/run_colour_matrix.sh --red`.
+    - Six arms over a synthetic header-only stream from `tools/colour_matrix_es.py`. It
+      has to be synthetic: no disc is tagged 709, and the junctions under test need one.
+    - It runs the real `vld` + `getbits` + 5× `yuv2rgb` + `pgc_palette`. RGB is scored
+      against the textbook matrix, not against `yuv2rgb`'s own table.
+    - Arm [6] checks that subtitle and video RGB agree within 1 code. 1 is the measured
+      worst case over the whole legal range: `pgc_palette` truncates ×256, while
+      `yuv2rgb` rounds ×32768.
+    - Three mutated copies each fail exactly their own arms:
+
+      | Mutation | Fails arms |
+      |---|---|
+      | shipped vld | {2,4} |
+      | clear-without-commit | {5} |
+      | shipped table | {1,6} |
+
+    - Other benches that compile `vld.v` were re-run; none scores post-`yuv2rgb` RGB.
+  - **Known limitation (pre-existing):** the matrix changes when the vld *parses* a
+    picture, roughly a frame before that picture is displayed. It is visible only at a
+    709↔601 junction, which no library disc has.
+  - **Next:** HIL A/B.
+    - An untagged feature (SPACE_COWBOYS, FINDING_FORRESTER) must change colour vs `main`,
+      and a subtitle must match its old palette colour.
+    - **Null control:** a tagged-6 disc (FAMILY_MAN, big-buck-bunny-NTSC) must give a
+      bit-identical screenshot.
+
 - ✅ **EXPLICIT ANALOG ASPECT LETTERBOX/CROP ON THE PROGRESSIVE RASTER
   (2026-10-04/05; HW-CONFIRMED on the rig, MERGED PR #155).** Full design:
   `docs/crt_anamorphic.md` §13 (and §11 for the `disp_vscale` defect it made reachable).

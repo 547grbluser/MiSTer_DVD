@@ -52,6 +52,12 @@ much per line, and every disc measured keeps up on Progressive and on Interlaced
 including its busiest scenes. The one exception is by design: **Film 24p Out = On** with
 29.97 fps video (see [Troubleshooting](troubleshooting.md#video-skips-frames)).
 
+**Colours use the standard-definition (BT.601) conversion**, the one DVD-Video specifies.
+Most discs do not label their colour encoding. Earlier builds converted those discs with
+the high-definition (BT.709) formula, which tinted skin slightly green and put subtitles
+in a different colour space from the picture. Video that does carry a colour label, such
+as an `.mpg` encoded for BT.709, is converted the way its label says.
+
 ## Audio
 
 Covered in full on [Audio formats](../audio/formats.md). In short: AC-3 (all channel modes)
