@@ -1571,4 +1571,15 @@ set_global_assignment -name PHYSICAL_SYNTHESIS_COMBO_LOGIC OFF
 # clk_mem's 90). The sweep itself ranks on clk_dec alone and would have kept SEED 29, whose
 # clk_mem misses 90 -- choose by reading both lines. (SEED 9 "striped on HW" in 2026-07 was a
 # different netlist; seeds don't carry over.)
-set_global_assignment -name SEED 9
+
+# USER STILL OFF (2026-10-05, feature/still-off, CORE_VERSION dev-stilloff): a still_off
+# reader port, nav_pci btns_pend, emu's key decode (all clk_sys). SEED 9 (above) held
+# clk_dec (91.68/90.55) but clk_mem fell to 79.92/79.02 -- every worst path inside
+# mem_shim_burst (tag_ram, S_PEEK2 -> framestore), none of this change's logic: a re-roll.
+# Sweep, clk_dec / clk_mem restricted Fmax @100C / @-40C:
+#   SEED 13: 92.23/89.44 | 94.64/93.94      SEED  1: 89.41/85.86 | 70.38/71.45 (FAIL both)
+#   SEED  7: 93.55/89.74 | 95.22/96.38      SEED 29: 89.08/86.69 | 94.00/94.58
+# SEED 7 pinned: best on BOTH clocks. ~38.7k ALMs (92 %), 519/553 M10K, 87 DSP.
+# -> releases/DVD_stilloff_20261005_2238.rbf. (The sweep wrote SEED 29 here, the last seed it
+# fitted -- the trap recorded above; corrected by hand.)
+set_global_assignment -name SEED 7
