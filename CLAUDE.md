@@ -422,6 +422,7 @@ otherwise; `--red` runs its mutation arms).
 | Native 240p/288p for SIF, 352→720 horizontal fill | ✅ ⏳ PAL 288p, long VCD | `mpeg1.md` §B.3b | `run_p240.sh`, `check_p240_wiring.py` |
 | Line-21 closed captions (`cc_vbi`, pickup-paced) | ✅ | `closed_captions.md` | `cc_extract_tb`, `cc_line21_tb` |
 | 16:9 menu `permitted_df` overrides Analog Aspect Letterbox↔Crop (menus only) | ✅ | `crt_anamorphic.md` §12 | `run_menu_panscan.sh`, `check_menu_panscan_wiring.py` |
+| Explicit Analog Aspect Letterbox/Crop on Progressive (`aa_live`; Auto/Fit unchanged); `disp_vscale` frame-path fix | 🔧 ⏳ HW (`feature/progressive-aspect`) | `crt_anamorphic.md` §13, §11 | `run_prog_aspect.sh --red`, `run_vscale_frame.sh --red`, `check_prog_aspect_wiring.py` |
 | mem_shim tag/LRU store in M10K | ✅ | `history.md` §11 | `run_mem_shim.sh` |
 | Logic reclaim (AC-3, nav/VM, reader ×2; debug overlay retired) | ✅ (D HW-confirmed 2026-09-26) | `logic_reclaim.md` §8 | `bench/ac3` suites, `run_reader_regress.sh` |
 | Logic reclaim E: VM GPRMs in an M10K (−1,129 ALUTs) | ✅ | `logic_reclaim.md` §9 | `run_gprm_ram.sh`, `check_gprm_ram.py` |

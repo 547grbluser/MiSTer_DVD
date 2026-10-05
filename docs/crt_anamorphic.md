@@ -809,4 +809,13 @@ that exists; pre-existing on the interlaced raster).
   (FREE gains `sif_det_s2`; the title check covers the interlaced raster; new M7),
   `check_player_regs_wiring.py`'s mutation anchor.
 
-**HW:** ⏳ pending (see `docs/status_log.md`).
+**HW (round 1, 2026-10-05, against the playerregs control; detail in `docs/status_log.md`):**
+- **Progressive Letterbox:** 360 lines at rows 60–419, no black line under the bar.
+- **Progressive Crop:** a real centre crop (correlation 0.994 against the stretched Fit
+  centre).
+- **Progressive Auto and Fit:** unchanged.
+- **Interlaced:** unchanged.
+- **HARTSWAR_169:** VTS 4 under Progressive Letterbox/Crop, VTS 3 under Auto/Fit.
+
+⏳ Still to do: Film 24p, Bob/Blend → Letterbox, subtitles/highlights, a VCD, and
+decode-pacing lates.

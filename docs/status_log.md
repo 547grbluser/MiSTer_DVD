@@ -22,6 +22,112 @@ predate later confirmations; the `CLAUDE.md` index carries the reconciled status
 
 ## Hardware status (THIS fork, verified 2026-06-21)
 
+- 🔧 **EXPLICIT ANALOG ASPECT LETTERBOX/CROP ON THE PROGRESSIVE RASTER
+  (`feature/progressive-aspect`, 2026-10-04/05; ⏳ HW).** Full design:
+  `docs/crt_anamorphic.md` §13 (and §11 for the `disp_vscale` defect it made reachable).
+  - **Need (maintainer, 2026-10-04):** Analog Aspect was gated on `interlaced_eff`, so on
+    Progressive a 31 kHz analog display (VGA CRT, 480p component on a 4:3 set) showed 16:9
+    discs squeezed with no fix, and a 4:3 HDMI display had no Crop.
+  - **Built:**
+    - `wire aa_live = interlaced_eff | sel==Letterbox | sel==Crop` gates
+      `analog_letterbox`/`analog_crop` and `player_regs .aa_live`.
+    - The SIF guard is now `~sif_det_s2` (≡ the old `~p240_eff` on Interlaced).
+  - **Decisions (user):**
+    - Auto on Progressive is unchanged; Fit there is "no correction" as before
+      (2026-10-05).
+    - Interlaced is bit-identical.
+    - B15 stays on Aspect Ratio on Progressive (2026-10-04).
+    - The 16:9 menu `permitted_df` swap applies on Progressive too (2026-10-04).
+    - No option rename.
+  - **SPRM14 on Progressive:**
+
+    | Setting | SPRM14 |
+    |---|---|
+    | Auto | `0x0C00` |
+    | Fit | `0x0C00` |
+    | Letterbox | `0x0200` |
+    | Crop | `0x0100` |
+
+    Offline (`dvd_vm_ref.py --player prog-*`): HARTSWAR_169 boots VTS 4 (the 4:3 intro)
+    under prog-lb and prog-crop, and VTS 3 under prog-auto and prog-fit.
+  - **The latent `disp_vscale` defect is fixed** (`docs/crt_anamorphic.md` §11).
+    - The progressive frame path's paired `ROW_1_COL_0` re-armed the scan, giving 359
+      lines and a black line under the top bar.
+    - The doc's proposed fix was incomplete. The real fix pairs codes on both the input
+      side and the head side, and tags output line 1 `ROW_1_COL_0`.
+    - It is RED on the unfixed module in three benches.
+    - Field-path and Fit output is byte-identical to `main`'s module, `disp_vscale`'s
+      output stream diffed pixel for pixel:
+      - `disp_vscale_frame_tb`: field Letterbox, NTSC and PAL, with back-pressure;
+      - `resample_chain_tb` +crt (480i) vsmode 0/1/2: 0.8–1.1 M pixels each;
+      - `resample_chain_tb` +il vsmode 0/1/2, and progressive Fit/Crop.
+      Only progressive Letterbox differs, which is the fix: `+exact=1` gives `main` 0/18
+      frames (64-wide) and 0/12 (720×480), and the fix 18/18 and 12/12.
+  - **Gates:**
+    - `run_prog_aspect.sh --red`: 1,024-point evaluated truth table, 10 mutations.
+    - `run_vscale_frame.sh --red`.
+    - `run_field_blend.sh --red`: new `[C11]` arms for Blend, Bob and film followed by
+      Letterbox.
+    - `resample_chain_tb +exact=1`: `main`'s module 0/18 frames, fixed 18/18.
+    - `player_regs_tb [P5]`.
+    - Re-anchored: `run_menu_panscan.sh` (new M7), `run_p240.sh`,
+      `check_player_regs_wiring.py`.
+    - RED on main, shown by hand once: `check_prog_aspect_wiring.py` on
+      `main:dvd/emu.sv` → `[3] Letterbox/Crop do nothing on Progressive (128 points)` plus
+      the `[5]` lockstep checks.
+  - **Two rotted "RED on main" arms retired.** `run_player_regs.sh`'s arm and
+    `run_field_blend.sh`'s W0 checked a checker against `git show main:`. Each went green
+    the moment its feature merged, and failed every `--red` run after that. Do not
+    reintroduce the pattern.
+  - **Known limitations:**
+    - SIF content is never corrected. Lifting that needs `vsz_eff`-derived overlay bars.
+    - SPRM14 still follows `aa_live` on a SIF title.
+    - On a 16:9 display, explicit Letterbox shows bars on all four sides (the manual
+      says to leave it on Auto).
+    - Bob/Blend run ahead of Letterbox, which softens more.
+    - Letterbox reads display lines at ~4/3 of Fit's rate during the band.
+  - **HW round 1 (2026-10-05).** Feature `DVD_progaspect_20261005_0220`, control
+    `DVD_playerregs_20261004_2358`, both through the same script. Disc: a full-frame 1.78
+    16:9 NTSC TV episode (the MythBusters 2008-03 rip), Disc Menus Off, raw-raster
+    screenshots at about 25 s.
+    - **Progressive geometry:**
+
+      | Setting | Control | Feature |
+      |---|---|---|
+      | Auto | 480 lines | 480 lines (unchanged) |
+      | Fit | 480 lines | 480 lines (unchanged) |
+      | Letterbox | 480 lines | **360 lines, rows 60–419**, row 60 fully lit, no hole |
+      | Crop | 480 lines, identical to Fit | 480 lines, cropped |
+
+      - The Letterbox band shows no black line under the top bar, so the §11 fix holds
+        on silicon.
+      - Crop was measured by content correlation: against Fit's centre 528 px stretched
+        to 720 it scores **0.994**, against Fit as-is 0.892. On the control, Crop is
+        identical to Fit (1.000).
+      - On the feature, Auto is identical to Fit (1.000).
+    - **Interlaced is unchanged against the control:** Auto and Letterbox give rows 60–419
+      (360 lines), Crop is full-height.
+    - **SPRM14 on hardware** (HARTSWAR_169, Debug Overlay `{PGCN, VTS}`):
+
+      | | Prog Auto | Prog Fit | Prog Letterbox | Prog Crop | Interlaced Letterbox |
+      |---|---|---|---|---|---|
+      | Control | VTS 3 | — | VTS 3 | VTS 3 | VTS 4 |
+      | Feature | VTS 3 | VTS 3 | **VTS 4** | **VTS 4** | VTS 4 |
+
+      This matches the offline `dvd_vm_ref --player prog-*` prediction.
+    - **Build:** `clk_dec` 88.47 MHz (100 °C) / 86.13 MHz (−40 °C), against a gate of 86;
+      SEED 1. 38,873 ALM, +160 against the control. `disp_vscale`'s line buffer still
+      infers an altsyncram.
+    - Paused here: the rig was handed back for the maintainer's own testing.
+  - **Next:**
+    - Film 24p On + Letterbox.
+    - Bob/Blend + Letterbox.
+    - Subtitles and menu highlights under Letterbox/Crop on Progressive (28 Days Later
+      menu: df=1 → cropped under Letterbox; MythBusters menu: df=2 → letterboxed under
+      Crop). Check Crop highlights for the predicted ~1 px offset.
+    - A VCD under Letterbox stays uncorrected.
+    - Decode-pacing telemetry, Letterbox against Fit, on ROGER/Office/Thayer.
+
 - ✅ **PLAYER PARAMETERS SPRM14/15/20 FROM THE SETUP, NOT CONSTANTS (PR #154,
   2026-10-04; HW-CONFIRMED against a `main` control arm, MERGED PR #154).** Design: `docs/dvd_vm.md` "Player
   parameters SPRM14/15/20". These are the *DVD Demystified* 3rd-edition audit's items 2 and 3.
