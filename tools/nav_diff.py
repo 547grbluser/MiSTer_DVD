@@ -42,6 +42,20 @@ Script tokens (a subset of trace_nav's, chosen because the board can do them):
     mR    root menu                  (Menu key)
     mT    title menu                 (Title key)
     wN    wait N settle periods
+    >     Next Chapter               (next-chapter key; libdvdnav next_pg_search)
+    <     Prev Chapter               (prev-chapter key; libdvdnav prev_pg_search)
+
+CHAPTER TOKENS ARE COMPARED ON THE IMMEDIATE LANDING, NOT AT A PARK. A playing
+title never parks, and the landing of a title-edge Next can be another TITLE
+that plays for minutes before any menu (Dr. Seuss: POST JumpVTS_TT). So for `>`
+and `<` libdvdnav's state is read right after the search (trace_nav's
+VM[after-next/after-prev] line) and the board's {PGCN, VTS} off the HUD once it
+has read the same value twice (--chap-settle). The token BEFORE a chapter token
+(e.g. the Play button in "1 >") lands in a playing title, so it is applied and
+not compared -- trace_nav itself has no park there to pair it with. Audit item
+7 (docs/dvd_nav.md "Chapter skip at the title's edges") is what this is for:
+    nav_diff.py <disc> --script "1 > > >"      # Next off the end of a title
+    nav_diff.py <disc> --script "1 <"          # Prev at chapter 1's start
 """
 
 import argparse
@@ -95,7 +109,7 @@ def trace_landings(iso, script, seed=None):
     p = subprocess.run(cmd, capture_output=True, text=True, errors="replace", timeout=900)
     out = p.stdout
 
-    vm_re = re.compile(r'VM\[\w+\]\s+dom=(-?\d+)\s+vtsN=(-?\d+)\s+pgcN=(-?\d+)'
+    vm_re = re.compile(r'VM\[([\w-]+)\]\s+dom=(-?\d+)\s+vtsN=(-?\d+)\s+pgcN=(-?\d+)'
                        r'\s+pgN=(-?\d+)\s+cellN=(-?\d+)')
     park_re = re.compile(r'^===== PARK #(\d+)\s+title=(-?\d+)\s+part=(-?\d+)\s+'
                          r'buttons=(\d+)', re.M)
@@ -105,9 +119,12 @@ def trace_landings(iso, script, seed=None):
     for line in out.splitlines():
         m = vm_re.search(line)
         if m:
-            last_vm = dict(dom=int(m.group(1)), vts=int(m.group(2)),
-                           pgcn=int(m.group(3)), pg=int(m.group(4)),
-                           cell=int(m.group(5)))
+            last_vm = dict(dom=int(m.group(2)), vts=int(m.group(3)),
+                           pgcn=int(m.group(4)), pg=int(m.group(5)),
+                           cell=int(m.group(6)))
+            if m.group(1).startswith('after-'):
+                # the state right after a chapter search (see the docstring)
+                events.append(('chapvm', dict(last_vm)))
             continue
         m = park_re.match(line)
         if m:
@@ -138,6 +155,14 @@ def trace_landings(iso, script, seed=None):
     # state, which is the shape of every false difference this tool has produced.
     out_rows, pending, at_park, row_idx = [], None, None, None
     for kind, val in events:
+        if kind == 'chapvm':
+            # A chapter token's landing is the state right after it; the park
+            # that eventually follows must not overwrite it.
+            if pending is not None:
+                out_rows.append(dict(action=pending, applied_buttons=None,
+                                     buttons=None, chapter=True, **val))
+            pending, row_idx = None, None
+            continue
         if kind == 'park':
             if pending is not None:
                 row = dict(action=pending, applied_buttons=applied_at,
@@ -207,6 +232,33 @@ exit 1
                 still=blk['still_active']['value'],
                 elapsed=res.get('elapsed'), total=res.get('total'),
                 png=png)
+
+
+CHAP_KEYS = {'>': 'next-chapter', '<': 'prev-chapter'}
+
+
+def board_transport_landing(tmpdir, step, tries=8, gap=1.0):
+    """A chapter token's landing: the HUD's {PGCN, VTS} once two reads agree.
+
+    Not a park (see board_park) -- a title plays on after a chapter skip. The
+    trajectory is kept so a pass-through PGC is visible rather than inferred.
+    """
+    prev, traj = None, []
+    for k in range(tries):
+        got = board_landing(tmpdir, step * 100 + k)
+        if got is not None:
+            traj.append(f'{got["pgcn"]}/{got["vts"]}')
+            key = (got['pgcn'], got['vts'])
+            if key == prev:
+                got['traj'] = traj
+                return got
+            prev = key
+        time.sleep(gap)
+    if got is None:
+        return None
+    got['traj'] = traj
+    got['unsettled'] = True
+    return got
 
 
 def _secs(t):
@@ -414,6 +466,13 @@ def main():
                     help='seconds to reach the first armed park')
     ap.add_argument('--action-timeout', type=float, default=90.0,
                     help='seconds to re-park after an action')
+    ap.add_argument('--chap-settle', type=float, default=2.5,
+                    help='seconds after a chapter key (500 ms debounce + the '
+                         'seek or jump) before its landing is read')
+    ap.add_argument('--chap-lead', type=float, default=2.0,
+                    help='seconds after the token BEFORE a chapter token (a '
+                         'title starting) -- short, so a Prev lands inside '
+                         'the board\'s ~4 s "near the chapter start" window')
     ap.add_argument('--out')
     ap.add_argument('--list', action='store_true')
     ap.add_argument('--red', type=int, metavar='N',
@@ -499,6 +558,13 @@ def main():
 
     rows, menu_calls = [], 0
     for i, tok in enumerate(tokens):
+        nxt = tokens[i + 1] if i + 1 < len(tokens) else None
+        if tok in CHAP_KEYS:
+            M.cmd_key(argparse.Namespace(names=[CHAP_KEYS[tok]]))
+            time.sleep(args.chap_settle)
+            got = board_transport_landing(tmpdir, i + 1)
+            rows.append(dict(token=tok, did=CHAP_KEYS[tok], board=got))
+            continue
         # ⚠ RED PROOF. A differential that reports "no differences" is worth
         # nothing until it has been shown to report one. --red presses a
         # DIFFERENT button on the board than the oracle was given, so the two
@@ -510,6 +576,12 @@ def main():
             print(f'    [RED] oracle was given button {tok}; '
                   f'pressing {drive} on the board instead')
         did = board_apply(drive, args.settle)
+        if nxt in CHAP_KEYS:
+            # lands in a PLAYING title: no park to wait for, and the oracle
+            # pairs nothing with it either (see the docstring)
+            time.sleep(args.chap_lead)
+            rows.append(dict(token=tok, did=did, board=None, transient=True))
+            continue
         got = board_park(tmpdir, i + 1, args.settle,
                          timeout=args.action_timeout)
         if tok.startswith('m'):
@@ -527,7 +599,8 @@ def main():
     print('     (libdvdnav\'s VTS is domain-relative, the board\'s is absolute)')
     findings, expected, unknown, invalid, downstream = [], [], [], [], []
     diverged = False
-    acted = [r for r in rows if not r['token'].startswith('w')]
+    acted = [r for r in rows
+             if not r['token'].startswith('w') and not r.get('transient')]
     for n, r in enumerate(acted):
         o = oracle[n] if n < len(oracle) else None
         b = r['board']

@@ -12,6 +12,14 @@
  *   .     leave this screen (dvdnav_still_skip)      -- pass a timed/idle still
  *   mR    dvdnav_menu_call(Root)      mT = Title
  *   wK    passive: let K more cell-changes pass before the next park is honored
+ *   >     Next chapter: dvdnav_next_pg_search      <  = Prev (dvdnav_prev_pg_search)
+ *         Not consumed at a park -- a PLAYING title never parks. Applied at the
+ *         next cell change in the title domain instead, i.e. at a chapter's
+ *         start, which is where the board's Prev "near the start" rule holds
+ *         too. The title-edge audit item 7 diffs these (nav_diff.py `>`/`<`):
+ *         Next from the last chapter runs POST; Prev at chapter 1 follows
+ *         prev_pgc_nr. libdvdnav runs next_pg on a COPY of the VM and treats
+ *         a stopped copy as failure, so a no-op there means "keep playing".
  *
  * A button-bearing cell is only a PROVISIONAL park -- see the PROBATION note
  * above main() -- so it is confirmed before it is dumped or acted on.
@@ -279,6 +287,18 @@ int main(int argc, char **argv) {
       }
       blocks_in_cell = 0; parked = 0; acted = 0;
       if (wait_cells > 0) wait_cells--;
+      /* Chapter tokens: applied in a title at a cell change (see the header). */
+      else if (tokidx < ntok && (tok[tokidx][0] == '>' || tok[tokidx][0] == '<') &&
+               nav->vm && nav->vm->state.domain == DVD_DOMAIN_VTSTitle) {
+        int nxt = tok[tokidx][0] == '>';
+        tokidx++;
+        dvdnav_status_t st = nxt ? dvdnav_next_pg_search(nav) : dvdnav_prev_pg_search(nav);
+        printf(">> action: %s_pg_search -> %s\n", nxt ? "next" : "prev",
+               st == DVDNAV_STATUS_OK ? "OK" : dvdnav_err_to_string(nav));
+        dump_vm(nav, nxt ? "after-next" : "after-prev");
+        if (tokidx >= ntok)
+          printf("[script done after a chapter token: running on to the next park]\n");
+      }
       if (cells > 4000) { printf("[cell cap]\n"); finished = 1; }
       break; }
     case DVDNAV_HIGHLIGHT: {
