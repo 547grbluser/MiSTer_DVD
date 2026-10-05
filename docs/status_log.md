@@ -23,7 +23,7 @@ predate later confirmations; the `CLAUDE.md` index carries the reconciled status
 ## Hardware status (THIS fork, verified 2026-06-21)
 
 - ✅ **EXPLICIT ANALOG ASPECT LETTERBOX/CROP ON THE PROGRESSIVE RASTER
-  (`feature/progressive-aspect`, 2026-10-04/05; HW-CONFIRMED on the rig, not yet merged).** Full design:
+  (2026-10-04/05; HW-CONFIRMED on the rig, MERGED PR #155).** Full design:
   `docs/crt_anamorphic.md` §13 (and §11 for the `disp_vscale` defect it made reachable).
   - **Need (maintainer, 2026-10-04):** Analog Aspect was gated on `interlaced_eff`, so on
     Progressive a 31 kHz analog display (VGA CRT, 480p component on a 4:3 set) showed 16:9
@@ -79,7 +79,7 @@ predate later confirmations; the `CLAUDE.md` index carries the reconciled status
     `run_field_blend.sh`'s W0 checked a checker against `git show main:`. Each went green
     the moment its feature merged, and failed every `--red` run after that. Do not
     reintroduce the pattern.
-  - **Next:** a PR.
+  - **Next:** nothing open for this feature; follow-ups are in `docs/roadmap.md`.
   - **Known limitations:**
     - SIF content is never corrected. Lifting that needs `vsz_eff`-derived overlay bars.
     - SPRM14 still follows `aa_live` on a SIF title.

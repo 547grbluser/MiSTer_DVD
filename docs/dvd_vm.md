@@ -236,7 +236,7 @@ combinational, with no functions and no casts (the Quartus 17 lessons).
   - `aa_live` is the SAME net that gates `analog_letterbox`/`analog_crop`.
     `tools/check_player_regs_wiring.py` and `tools/check_prog_aspect_wiring.py` [5]
     enforce it.
-  - ★ Since `feature/progressive-aspect` that net is `interlaced_eff | sel==Letterbox |
+  - ★ Since PR #155 that net is `interlaced_eff | sel==Letterbox |
     sel==Crop` (`docs/crt_anamorphic.md` §13): an explicit Letterbox/Crop now corrects the
     Progressive picture, and SPRM14 follows it there. Auto and Fit on Progressive still read
     `0x0C00`. The old note here said SPRM14 would follow "without new wiring"; that was
@@ -264,7 +264,7 @@ paths now fetch @32 first.
 - **On Progressive under Auto or Fit, SPRM14 says 16:9**, even on a 4:3 HDMI display.
   ascal letterboxes 16:9 content there anyway, so a disc's 16:9 choice still looks right. A
   user who picks Letterbox or Crop on Progressive now gets the 4:3 answer
-  (`feature/progressive-aspect`). `disp_wide_q` (emu) already knows the HDMI display shape,
+  (PR #155). `disp_wide_q` (emu) already knows the HDMI display shape,
   if Auto should ever follow it.
 - **libdvdnav is no longer an oracle for the discs that read SPRM14.** It still answers
   `0x0100`/`0x7CFC`/`1`, so `tools/nav_diff.py` reports a boot divergence on HARTSWAR_169,

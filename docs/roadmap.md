@@ -634,7 +634,7 @@ HW against a `main` control arm: HARTSWAR_169 on HDMI boots VTS 3 (16:9) instead
 VTS 4, stays on VTS 4 under Interlaced + Letterbox, and 13_CONVERSATION boots unchanged.
 The region-2 path stays offline-only (no physical vehicle). **Next:** the 4:3-progressive follow-up below.
 
-### ✅ Explicit Analog Aspect Letterbox/Crop on Progressive (`feature/progressive-aspect`, HW-CONFIRMED 2026-10-05, unmerged — see `docs/crt_anamorphic.md` §13)
+### ✅ Explicit Analog Aspect Letterbox/Crop on Progressive (HW-CONFIRMED 2026-10-05, MERGED PR #155 — see `docs/crt_anamorphic.md` §13)
 
 The 2026-10-04 follow-up, built with these decisions (user, 2026-10-04/05):
 - **Only an explicit Letterbox or Crop acts on Progressive.** Auto and Fit are unchanged:
@@ -657,10 +657,18 @@ HW (two rounds, against the playerregs control):
 - HARTSWAR_169 boots VTS 4.
 - 0 lates on ROGER, Office and Thayer.
 
-**Next:**
-- A PR (the analog path is confirmed through a RetroTINK).
-- Possible follow-up: `vsz_eff`-derived overlay bars. That would lift the SIF guard and fix
-  forced-PAL over 480-line content.
+**Possible follow-ups:**
+- `vsz_eff`-derived overlay bars. That would lift the SIF guard and fix forced-PAL over
+  480-line content.
+- In-band aspect signalling on the analog output (maintainer question, 2026-10-05). An
+  analog signal carries no aspect, so a downstream scaler or TV picks it.
+  - Standards: 480i EIAJ CPX-1204 / IEC 61880 "Video ID" on lines 20/283; 480p
+    CPR-1204-1 / IEC 61880-2 on line 41; 576i WSS (EN 300 294) on line 23.
+  - Same shape of job as the line-21 caption inserter (`docs/closed_captions.md` §4).
+  - Value is limited: widescreen TVs honour WSS, but as far as found RetroTINK and OSSC
+    do not decode any of these. SCART pin 8 and the S-Video DC offset are hardware the
+    FPGA cannot drive.
+  - Not started.
 
 ### ✅ Subtitle tracks to the spec maximum (built in PR #152, HW-CONFIRMED 2026-10-04 — see `docs/track_selection.md` "32 subtitle tracks")
 

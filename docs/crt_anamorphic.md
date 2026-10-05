@@ -711,7 +711,7 @@ VMGM `0x4E` → 2). 8 mutation arms, each caught by its own assertion.
 **HW (2026-10-01, rig, Interlaced, control arm = v0.8.0 through the same script):** *28 Days Later* (VTSM df=1) under Letterbox — v0.8.0 letterboxes the menu, the new build shows it full-height cropped, highlight on its button after a down-press (same authored position as the control), and Play Movie (VTS df=2) returns to letterbox. *MythBusters 2008-03* (df=2) under Crop — v0.8.0 crops off the episode list's left edge, the MYTHBUSTERS logo and the PLAY ALL box; the new build letterboxes it with everything visible.
 Not separately exercised on HW: Auto (same `analog_want_lb` term as Letterbox, gated in sim), Fit and Progressive (resolve unchanged there; the gate proves it).
 
-## 13. Explicit Letterbox/Crop on the Progressive raster (2026-10, `feature/progressive-aspect`)
+## 13. Explicit Letterbox/Crop on the Progressive raster (2026-10, ✅ HW-CONFIRMED, MERGED PR #155)
 
 **Field need (maintainer, 2026-10-04).** Analog Aspect did nothing on Progressive: the gate was
 `interlaced_eff`. Two kinds of user were stuck:
