@@ -1553,6 +1553,14 @@ reg  [7:0] seek_cell;
 reg        chap_pulse;               // pulse: chapter skip -> reader
 reg        chap_dir;                 // 1 = next chapter, 0 = previous
 reg  [4:0] chap_mag;                 // # chapters to skip this burst (>=1) -> reader
+// TITLE-EDGE chapter skip (audit item 7): the reader resolves a burst that has
+// nowhere left to go in the title (Next from the last chapter, Prev at chapter
+// 1's start with an authored prev_pgcn) to this pulse instead of a seek, and
+// the VM acts on it - Next runs the PGC's POST, Prev follows prev_pgcn to its
+// last program. reader -> VM only; gated by menus_on in the reader (vm_mode).
+// Gated by tools/check_chap_edge_wiring.py (emu has no bench).
+wire       chap_edge_w;              // pulse: the burst hit the title's edge
+wire       chap_edge_dir_w;          // 1 = Next, 0 = Prev
 // Chapter-skip DEBOUNCE: repeated B2/B3 presses inside a short window accumulate
 // into a signed net count instead of each firing an immediate seek (which made the
 // video visibly scrub through every intermediate scene). When the window elapses
@@ -2744,6 +2752,8 @@ dvd_vm dvd_vm_inst (
     .key_title     (key_title_p),
     .key_return    (key_return_p),
     .key_cmenu     (key_cmenu_p),
+    .key_chedge    (chap_edge_w),      // reader: chapter skip at the title's edge
+    .key_chedge_dir(chap_edge_dir_w),
 
     .btn_cmd       (hl_btn_cmd),
     .btn_cmd_valid (hl_btn_cmd_valid),
@@ -3603,6 +3613,8 @@ dvd_iso_reader dvd_iso_reader_inst (
     .chap_dir       (chap_dir),
     .chap_mag       (chap_mag),           // debounced burst magnitude (# chapters)
     .chap_at_start  (chap_at_start),      // prev: restart current chapter unless <5 s in
+    .chap_edge      (chap_edge_w),        // -> dvd_vm.key_chedge (title edge, audit item 7)
+    .chap_edge_dir  (chap_edge_dir_w),
     .angle_pulse    (angle_pulse),        // Phase 9: B6 = cycle camera angle
     .cur_angle      (cur_angle),
     .angle_count    (angle_count),

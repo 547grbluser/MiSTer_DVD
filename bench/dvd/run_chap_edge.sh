@@ -14,6 +14,7 @@
 #        + the chapter/PTT regressions that share the resolve path:
 #          iso_reader_chapter_tb, iso_reader_ptt_tb, iso_reader_linkptt_tb,
 #          iso_reader_autoptt_tb
+#        + tools/check_chap_edge_wiring.py --red (the emu.sv seam)
 # RED  : sed-mutated copies of the RTL. Each must fail exactly its own arms.
 #   reader (iso_reader_chapedge_tb):
 #     R1 no-gr-emit   : CH_GR legacy branch never emits      -> A D E J
@@ -65,6 +66,12 @@ run chapter  "ISO_READER_CHAPTER_TB: ALL TESTS PASSED"  bench/dvd/iso_reader_cha
 run ptt      "ISO_READER_PTT_TB: ALL TESTS PASSED"      bench/dvd/iso_reader_ptt_tb.sv $RD
 run linkptt  "ALL TESTS PASSED"                         bench/dvd/iso_reader_linkptt_tb.sv $RD
 run autoptt  "ISO_READER_AUTOPTT_TB: ALL TESTS PASSED"  bench/dvd/iso_reader_autoptt_tb.sv $RD
+# emu.sv has no bench: the reader -> VM seam is read out of the file
+if python3 tools/check_chap_edge_wiring.py --red > "$OUT/wiring.log" 2>&1; then
+    echo "  PASS check_chap_edge_wiring (+ its red self-test)"
+else
+    echo "  FAIL check_chap_edge_wiring"; sed 's/^/      /' "$OUT/wiring.log"; fail=1
+fi
 
 if [ $RED -eq 1 ]; then
     echo "== RED (each mutation must fail exactly its arms) =="
