@@ -22,6 +22,47 @@ predate later confirmations; the `CLAUDE.md` index carries the reconciled status
 
 ## Hardware status (THIS fork, verified 2026-06-21)
 
+- 🔧 **USER STILL OFF: PLAY/PAUSE OR SELECT ENDS A STILL WITH NO BUTTONS (audit item 5,
+  2026-10-05, `dev-stilloff`, branch `feature/still-off`; sim-verified, ⏳ HW-confirm
+  pending).**
+  - **Gap.** Still off (UOP18) is a mandatory user operation (3rd ed. Table 9.15). `S_STILL`
+    exited only on its timer, a VM jump or a seek. A timed still or a button-less indefinite
+    still could be escaped only with a chapter skip, and a menu-domain one not at all.
+  - **Decisions (user, 2026-10-05):**
+    - **Keys: Play/Pause and Select**, after VLC 2026 (`StillSkipIfNoButtons` on both pause
+      and activate) and Kodi (Select/Next skip a button-less still). Next keeps meaning
+      chapter skip.
+    - **Timed and indefinite stills both**, where VLC does indefinite only.
+  - **Built.**
+    - **Reader:** `still_off` runs the still's own `still_next` (next cell / cell command /
+      PGC end), the action its timer runs at expiry. The 0xFF entry now records it.
+      `still_act` is 0 on the dead-end holds (POST fall-through, malformed menu cell,
+      menus-off), which ignore the key.
+    - **nav_pci:** `btns_pend`, an HLI with buttons parsed but not yet promoted.
+    - **emu:** `still_off_ok` = Disc Menus on, parked, no button armed or pending, not
+      stopped. The press preempts the pause toggle and clears pause.
+    - **`check_select_noop.py` amended:** the Still off decode is Select's one named, gated
+      exception to "one meaning". Any other new reader of `sel_edge` still fails.
+  - **Found and fixed on the way: a stale still timer.** `jump_go`, `seek_jump` and the
+    mount never cleared `still_timed`. A timed still left by a button jump (Thayer) left its
+    countdown behind, and the next dead-end hold fired the stale `still_next`. Arm E
+    reproduces it, and mutation R5 (the old exits) fails E alone.
+  - **Gates.**
+    - `bench/dvd/run_still_off.sh --red`: `iso_reader_stilloff_tb` A–H, `nav_pci_tb`
+      `btns_pend` checks, `check_still_off_wiring.py --red` (10 miswirings) and 8 RTL
+      mutations, each failing exactly its arms.
+    - `run_reader_regress.sh`: bit-identical to `main` on every arm (key tied 0).
+    - `run_select_noop.sh --red` green with new arms R7/R8. Its `iso_reader_vm` compile had
+      been failing on `main` since PR #154 (`player_regs` missing from its file list), and
+      is fixed here.
+  - **Audit bookkeeping.** This resolves row 5 of the A/B table in `docs/conformance.md` on
+    the unmerged `docs/demystified-3rd-audit` branch (and its roadmap item 5). Mark it there
+    when that branch lands.
+  - **Next step:** HIL. Find a button-less still: a census of cells with `still_time != 0`
+    in PGCs whose VOBUs carry no HLI. Then check Play and Select on a timed one, an
+    indefinite one mid-PGC and one at a PGC end, plus a menu with buttons, where nothing
+    may change. Full design: `docs/dvd_nav.md` "Still off".
+
 - ✅ **NEXT/PREV CHAPTER AT THE TITLE'S EDGES (audit item 7, 2026-10-05,
   `dev-chapedge`; sim-proven and ✅ HW-CONFIRMED against libdvdnav on the rig, control arm
   first; ✅ MERGED PR #158).**
