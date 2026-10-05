@@ -637,7 +637,7 @@ module mem_shim_burst #(
             // which is consumed only in S_STREAM behind a stage-A hit (pB_valid) and in
             // S_SERVE via the serve-queue arm. The fill's re-validate of the same line
             // is >= LINEW beats away. bench/dvd/run_mem_shim.sh's LOCKSTEP arm compares
-            // every output, every cycle, against the pre-retime module.
+            // every functional output, every cycle, against the pre-retime module.
             if (inv_a_pend) cache_valid[cur_set][sel_way] <= 1'b0;
             if (inv_b_pend) cache_valid[ifb_set][ifb_way] <= 1'b0;
             inv_a_pend <= 1'b0;

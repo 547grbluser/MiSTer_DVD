@@ -54,7 +54,9 @@ predate later confirmations; the `CLAUDE.md` index carries the reconciled status
   - **Gate:** `bench/dvd/run_mem_shim.sh --red`.
     - It adds a **LOCKSTEP** arm. `mem_shim_ab_tb -DMSAB_LOCKSTEP` gives both rigs shared
       seeds, against the pre-retime module built from git at `RETIME_BASE=1ee4f2b`. Every
-      output is compared with `!==` on every cycle: 43–50k cycles, **0 mismatches**, in
+      functional output (the request pop, the response port, the DDR3 command port) plus
+      the FSM state is compared with `!==` on every cycle. The `debug_*` telemetry
+      counters are not compared; `cache_missrate_tb` covers them. Result: 43–50k cycles, **0 mismatches**, in
       all four cwf/dual combos, covering 1,351 misses and 210 pairs.
     - RED arms: a wrong-way clear at either site is caught (mismatch at about cycle
       13,000), and a stuck pending flag trips the guard by its message.

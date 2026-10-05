@@ -52,7 +52,7 @@ for d in "-DMSAB_CWF=1 -DMSAB_DUAL=1" "-DMSAB_CWF=1 -DMSAB_DUAL=0" \
 done
 
 # 2b. LOCKSTEP retime gate (clk_mem timing, 2026-10-05): the live module must be
-# CYCLE-exact -- every output, every cycle, identical inputs -- against the module as
+# CYCLE-exact -- every functional port plus the FSM state, every cycle, identical inputs -- against the module as
 # it was before the deferred-victim-invalidate retime. The reference is built from git
 # at RETIME_BASE (a commit on main), renamed, so no 1,100-line frozen copy is checked in.
 # ⚠ This arm pins one intended-no-op change. A later change to mem_shim_burst that is

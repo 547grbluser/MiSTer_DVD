@@ -24,9 +24,11 @@
 // LOCKSTEP mode (-DMSAB_LOCKSTEP, added 2026-10-05 for the clk_mem retime): for a change
 // that must be CYCLE-exact, not just decision-exact. Both rigs get the SAME seeds, the
 // reference is whatever module -DMSAB_REF_MOD names (run_mem_shim.sh builds it from the
-// pre-change commit with git), and every DUT output is compared with !== on every cycle
-// from reset release. Identical inputs + identical outputs on every cycle = the change
-// is unobservable at the ports.
+// pre-change commit with git), and from reset release every functional output -- the
+// request pop (rd_en), the response port, the whole DDR3 command port -- plus debug_state
+// is compared with !== on every cycle. The debug_* telemetry counters are not compared
+// (cache_missrate_tb covers those). Identical inputs + identical outputs on every cycle =
+// the change is unobservable at the functional ports.
 // =============================================================================
 `timescale 1ns/1ps
 module mem_shim_ab_tb;
@@ -274,7 +276,7 @@ module mem_shim_ab_tb;
         .debug_cache_missrate(rig[1].dbg_mr)
     );
 
-    // ---- LOCKSTEP: every DUT output, every cycle ----
+    // ---- LOCKSTEP: every functional output + debug_state, every cycle ----
     integer ls_cycles = 0, ls_errs = 0;
     wire [255:0] ls_out0 = {rig[0].req_en, rig[0].res_en, rig[0].res_dta, rig[0].ddr_addr,
                             rig[0].ddr_burstcnt, rig[0].ddr_read, rig[0].ddr_write,
