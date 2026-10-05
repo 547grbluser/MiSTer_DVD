@@ -22,8 +22,8 @@ predate later confirmations; the `CLAUDE.md` index carries the reconciled status
 
 ## Hardware status (THIS fork, verified 2026-06-21)
 
-- ✅ **BT.601 DEFAULT COLOUR MATRIX (2026-10-05; branch `feature/bt601-default`,
-  sim-verified and HW A/B-measured on the rig; not yet merged).** *DVD Demystified* 3rd-edition audit, A/B #6.
+- ✅ **BT.601 DEFAULT COLOUR MATRIX (2026-10-05; sim-verified and HW A/B-measured on the
+  rig; ✅ MERGED PR #156).** *DVD Demystified* 3rd-edition audit, A/B #6.
   - **Defects** (both pre-existing, both in upstream `rtl/mpeg2`):
     1. `yuv2rgb.v` decoded `matrix_coefficients` 0 ("no colour description") as BT.709,
        the ISO 13818-2 §6.3.6 default. DVD permits only matrix 5 or 6, both BT.601
@@ -98,7 +98,7 @@ predate later confirmations; the `CLAUDE.md` index carries the reconciled status
     - Motion menus were excluded: FAMILY_MAN, BILL_AND_TEDS, QUIPIT.
     - The instrument is `.sim/`-local (screenshots plus a numpy model). The method is in
       this entry.
-  - **Next:** merge (PR). Optional extra look: a subtitle over skin on an untagged
+  - **Next:** none required. Optional extra look: a subtitle over skin on an untagged
     feature.
 
 - ✅ **EXPLICIT ANALOG ASPECT LETTERBOX/CROP ON THE PROGRESSIVE RASTER
