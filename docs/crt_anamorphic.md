@@ -111,7 +111,10 @@ One raster feeds both outputs. Letterbox/Crop are baked only when O[14] CRT mode
 (`crt_eff`); HDMI keeps using `VIDEO_ARX/ARY` via ascal, so there is no double letterbox. In
 CRT-off mode all three menu choices collapse to today's Fit output.
 
-**Planned:** make a 4:3 HDMI output honor the same Fit/Letterbox/Crop setting (roadmap item
+**Partly built (2026-10, §13):** an EXPLICIT Letterbox or Crop now applies on the
+Progressive raster too, so a 4:3 HDMI display (and a 31 kHz analog one) can have Crop. Auto
+and Fit on Progressive are unchanged. The text below is the original 2026-07 plan, kept for
+its reasoning: make a 4:3 HDMI output honor the same Fit/Letterbox/Crop setting (roadmap item
 "HDMI 4:3 output follows the same … setting as the analog CRT"). Fit/Letterbox are already
 reachable on HDMI via ascal `ARX/ARY`; only **Crop** needs the core `disp_hstretch` path
 un-gated from `crt_eff`. Different framing per output at once is the separate decoupled-framing
@@ -574,7 +577,7 @@ letterbox bar the frame proves nothing. Without one, a concert disc with two bla
 bottom was flagged from three outlier frames — a false positive the maintainer caught by simply
 opening it in VLC. Same shape as the film-evidence gate (`docs/film_24p_plan.md` §14).
 
-### Unrelated latent bug found en route (UNREACHABLE today — do not "fix" blind)
+### Unrelated latent bug found en route — ✅ FIXED 2026-10 (it became reachable with §13)
 
 `disp_vscale` treats `ROW_1_COL_0` as a scan re-arm (`dvd/disp_vscale.sv:128`), but on the
 **progressive FRAME** path the addrgen tags *both* of the first two lines as frame-tops
@@ -590,6 +593,24 @@ exists per field. It **is** exercised by `bench/dvd/resample_chain_tb.sv`'s defa
 live the moment `disp_vscale_en` is un-gated from `interlaced_eff` — i.e. the §4 roadmap item
 "make a 4:3 HDMI output honor the same Fit/Letterbox/Crop setting". Fix at that point: ignore a
 `ROW_1_COL_0` that arrives when the scan armed on the immediately preceding line.
+
+**Fixed with §13, and the fix above was incomplete.** Ignoring the second code alone gives 360
+lines but still tags output line 1 `ROW_X_COL_0`, and `mixer.v` refuses a `ROW_X_COL_0` line
+start at `disp_v_offset+1` as well, so the black line stays. The fix copies
+`dvd/field_blend.sv`'s convention, which already had to solve this:
+- a `ROW_1_COL_0` directly after a `ROW_0_COL_0` line is the frame's line 1, not a scan start,
+  on BOTH sides of the module: the input side (`in_prev_row0`, so route, mode and the sideband
+  are decided once per scan) and the head side (`h_prev_row0`, so the Bresenham arms once);
+- output line 1 of such a FRAME scan carries `ROW_1_COL_0`, as the source frame's did.
+
+A field scan never pairs, so the field path is bit-identical: the output streams of
+`disp_vscale_frame_tb` (field, Fit) and of `resample_chain_tb` (+crt / +il, vsmode 0/1/2)
+were diffed against `main`'s module, byte for byte. Gate: `bench/dvd/run_vscale_frame.sh
+--red` (golden blend values + position codes, NTSC/PAL, back-pressure, and a Letterbox toggle
+landing between a frame's line 0 and line 1 — the case that tears without the INPUT-side half;
+a Letterbox→Fit toggle cannot see it, Fit→Letterbox can). `resample_chain_tb +exact=1` now
+scores the progressive band with no tolerance and per-line pixel counts; on `main`'s module
+it reports the defect.
 
 ⚠ Also worth knowing before trusting that bench on edge behaviour: its geometry check is
 `TOL = 6` on the line count, `hole` counts only **fully** black lines, and `hfill_ok` is a
@@ -665,10 +686,10 @@ raw-byte scan. **It is a centre crop**; the decoder still skips `picture_display
   applies the transform twice (the fj#168 hardware lesson, `docs/dvd_nav.md`).
 
 **Known limitations.**
-- **Analog interlaced raster only**, exactly like Crop itself: in Progressive mode or on an
-  HDMI-only rig there is no crop path (ascal letterboxes; "HDMI 4:3 Fit/Letterbox/Crop" was
-  dropped, `docs/roadmap.md`). On the interlaced raster HDMI shows the shared raster, so it
-  shows the crop too.
+- **Wherever Analog Aspect is in force** (`aa_live`): the interlaced raster, and since §13 an
+  explicit Letterbox/Crop on Progressive (user decision 2026-10-04: the swap applies there
+  too). Auto/Fit on Progressive leave menus alone, as before. HDMI shows the one raster, so
+  it shows the crop too.
 - The Crop window is 528 px, not the authored 540 (§1): a button drawn flush to the pan
   window's edge loses its outer ~6 px. Fixing it needs a non-macroblock column window in
   `resample_addrgen` — not done.
@@ -677,8 +698,8 @@ raw-byte scan. **It is a centre crop**; the decoder still skips `picture_display
   live on the CRT (maintainer, 2026-10-01): the cropped menu → letterboxed movie switch on
   *28 Days Later* looked seamless.
 - In-title menus (HLI in the title domain) are titles here and are not overridden.
-- SPRM14 is still the constant `0x0100` ("4:3 TV, pan&scan"); a disc program that branches
-  on it never sees the user's setting. Untouched by this change.
+- ~~SPRM14 is still the constant `0x0100`~~ — superseded by PR #154: SPRM14 follows
+  Analog Aspect through `aa_live` (`docs/dvd_vm.md` "Player parameters").
 - The override is silent: no OSD/HUD message says the menu forced Crop or Letterbox.
 
 **Gate:** `bench/dvd/run_menu_panscan.sh [--red]` — `tools/check_menu_panscan_wiring.py`
@@ -689,3 +710,103 @@ VMGM `0x4E` → 2). 8 mutation arms, each caught by its own assertion.
 
 **HW (2026-10-01, rig, Interlaced, control arm = v0.8.0 through the same script):** *28 Days Later* (VTSM df=1) under Letterbox — v0.8.0 letterboxes the menu, the new build shows it full-height cropped, highlight on its button after a down-press (same authored position as the control), and Play Movie (VTS df=2) returns to letterbox. *MythBusters 2008-03* (df=2) under Crop — v0.8.0 crops off the episode list's left edge, the MYTHBUSTERS logo and the PLAY ALL box; the new build letterboxes it with everything visible.
 Not separately exercised on HW: Auto (same `analog_want_lb` term as Letterbox, gated in sim), Fit and Progressive (resolve unchanged there; the gate proves it).
+
+## 13. Explicit Letterbox/Crop on the Progressive raster (2026-10, `feature/progressive-aspect`)
+
+**Field need (maintainer, 2026-10-04).** Analog Aspect did nothing on Progressive: the gate was
+`interlaced_eff`. Two kinds of user were stuck:
+- a **31 kHz analog display** (`vga_scaler=0`: VGA CRT, 480p component on a 4:3 set) showed
+  16:9 discs squeezed horizontally, with no fix at all;
+- a **4:3 HDMI display** got ascal's letterbox for 16:9 content, but no Crop.
+
+**Decisions (user):**
+- **Auto on Progressive does NOT change** (2026-10-05): no in-raster correction, ascal
+  follows `VIDEO_ARX/ARY`. Only an EXPLICIT Letterbox or Crop corrects. Fit on Progressive
+  was already "no correction" and stays so. (The 2026-10-04 roadmap sketch had Auto
+  letterboxing on `analog_want` rigs; rejected — Auto keeps meaning "the scaler decides" on
+  Progressive.)
+- **The interlaced raster is bit-for-bit unchanged.**
+- **The B15 Aspect button is unchanged** (2026-10-04): it keeps cycling Aspect Ratio on
+  Progressive, which is what an HDMI-only user needs; Letterbox/Crop are set in the OSD.
+  (Gating the button on `aa_live` would also be circular — `aa_live` depends on the value
+  the button would cycle.)
+- **The 16:9 menu `permitted_df` swap (§12) applies on Progressive too** (2026-10-04),
+  whenever Letterbox/Crop is chosen — one predicate for both rasters.
+- **No option rename.** `Analog Aspect` keeps its name and its CONF_STR row (a CONF_STR edit
+  re-rolls the seed for no functional gain); the manual explains that on Progressive only
+  Letterbox and Crop act.
+
+**Mechanism — one net (`dvd/emu.sv`):**
+```verilog
+wire aa_live = interlaced_eff | (aa_osd_sel == 2'd2) | (aa_osd_sel == 2'd3);
+assign analog_letterbox = aa_live & ~sif_det_s2 & ( ...menu-swapped want_lb... );
+assign analog_crop      = aa_live & ~sif_det_s2 & ( ...menu-swapped want_crop... );
+player_regs_inst .aa_live (aa_live)
+```
+- Under Auto (sel 0) or Fit (sel 1) with `interlaced_eff = 0`, `aa_live = 0`: neither enable can
+  rise, so Auto-on-16:9 (`analog_want_lb`'s sel-0 term) never reaches Progressive.
+- With `interlaced_eff = 1`, `aa_live = 1` and `~sif_det_s2` is exactly the old `~p240_eff`
+  (`p240_eff = interlaced_eff & sif_det_s2`), so the interlaced resolve is unchanged.
+- **SPRM14 follows the same net** (`player_regs`, PR #154), so the TV shape a disc reads
+  matches the picture: Progressive Auto/Fit → `0x0C00` (16:9), Letterbox → `0x0200` (4:3
+  letterbox), Crop → `0x0100` (4:3 pan&scan). An MGM-style disc (HARTSWAR_169) therefore
+  picks its 4:3 intro under Progressive + Letterbox.
+- **Everything downstream follows the two enables unchanged:** `disp_vscale_en` /
+  `disp_hcrop_en` (decoder), `VIDEO_ARX/ARY` forced 4:3 (HDMI geometry), `ov_hcrop_mb` and
+  `crt_ov_map`'s `letterbox_en`/`crop_en` (overlay inverse, §9).
+- **`sp_disp_mode` was already ungated** (it reads `aa_osd_sel`), so a saved Letterbox/Crop
+  on Progressive already picked the letterbox/pan&scan subtitle variant over an uncorrected
+  wide picture. The picture now matches it.
+
+**The SIF guard (`~sif_det_s2`, not `~p240_eff`).** `crt_ov_map`'s bar geometry is handed
+literals authored for a full-height frame (`v_bar` 60/72, `v_band` 360/432). On Progressive a
+VCD is a 352×240 window, so Letterbox there would draw a 180-line band but map subtitles and
+highlights into 360-line geometry. SIF content is 4:3 anyway, so it is never corrected, on
+either raster — the guard names the CONTENT it protects rather than the raster. SVCD (480
+lines) is not SIF-height and keeps Letterbox/Crop. Making the bars `vsz_eff`-derived would
+lift the guard (and fix forced-PAL over 480-line content); not done, `docs/roadmap.md`.
+⚠ SPRM14 still follows `aa_live` on a SIF title (a disc reading SPRM14 on a VCD is not a case
+that exists; pre-existing on the interlaced raster).
+
+**What un-gating made reachable, and how each was settled:**
+- **`disp_vscale` on the progressive FRAME path** — the §11 latent defect (359 lines, a black
+  line under the top bar). Fixed; §11.
+- **Deinterlace = Bob/Blend followed by Letterbox.** `field_blend` runs ahead of `disp_vscale`
+  (`mpeg2video.v`), and emits exactly the ROW_0/ROW_1/ROW_X convention the fixed module
+  expects. The emu comment "Blend is inert on Letterbox" was only true because the two gates
+  excluded each other; corrected. Accepted as an explicit user choice on both settings.
+- **The pause field still** cannot reach Progressive: `still_want` requires the addrgen's
+  `interlaced` (field) input, so `scan_half` is always 0 there.
+- **Film 24p** is fine by construction: `disp_vscale` has no raster-timing input, the bars are
+  the mixer holding the frame top until `disp_v_offset`.
+- **`crt_ov_map` horizontal lag.** At `CE_PIXEL = 1` the mapper's one-clock lag is a whole
+  pixel, not the half pixel its header assumed — a possible ~1 px offset of mapped menu
+  highlights under Crop on Progressive. Checked on HW (below).
+- **Display read rate.** Letterbox reads all 480 source lines in ~420 raster line-times, so
+  during the band the display re-reads DDR3 at ~4/3 of Fit's rate — the decode-pacing
+  contention of `docs/decode_pacing.md`. Interlaced Letterbox has the same ratio per field.
+  Measured on HW (below); confined to users who pick Letterbox.
+- **Scaler re-init.** Choosing Letterbox/Crop flips `VIDEO_ARX/ARY` to 4:3 — one scaler
+  re-init on an explicit change. Nothing flips it unprompted: `aa_osd_sel` moves only on an
+  OSD edit or B15 (which does not touch Analog Aspect on Progressive), and the menu swap moves
+  only between the two 4:3 modes.
+- ⚠ **A 16:9 HDMI display under explicit Letterbox** gets bars on all four sides (the raster is
+  4:3-true and ascal pillarboxes it). That is what Letterbox means; the manual says to leave a
+  widescreen display on Auto.
+
+**Gates:**
+- `bench/dvd/run_prog_aspect.sh --red` — `tools/check_prog_aspect_wiring.py` evaluates the
+  resolve over all 1,024 input points: [1] interlaced identical to `main` @ 4da0adc (frozen),
+  [2] Auto/Fit never correct on Progressive, [3] explicit Letterbox/Crop on Progressive =
+  the interlaced resolve, [4] SIF never corrected, [5] `aa_live`'s definition/declaration/
+  truth table and that `player_regs` reads it, [6] B15 unchanged, [7] ARX/ARY follow. Plus
+  `player_regs_tb` [P5] (the Progressive SPRM14 profiles) and `run_vscale_frame.sh`. Ten
+  mutations, each caught by its own arm (M1 = "Auto now corrects on Progressive"; M2 = Fit
+  added to `aa_live`, output-equivalent today and so caught only by [5]'s truth table).
+- RED on `main` (shown once, by hand — a `git show main:` arm rots at merge): `[3] Letterbox/
+  Crop do nothing on Progressive (128 points)` plus the `[5]` lockstep checks.
+- Re-anchored: `check_p240_wiring.py` / `run_p240.sh` M9, `check_menu_panscan_wiring.py`
+  (FREE gains `sif_det_s2`; the title check covers the interlaced raster; new M7),
+  `check_player_regs_wiring.py`'s mutation anchor.
+
+**HW:** ⏳ pending (see `docs/status_log.md`).

@@ -137,8 +137,11 @@ module emu (
 wire ar_wide_eff;
 // DVD-FORK (dual-raster analog output): while Analog Aspect Letterbox/Crop is
 // active the RASTER ITSELF is made 4:3-true upstream (disp_vscale/disp_hstretch),
-// and under dual raster HDMI sees that raster too — so force the scaler aspect to
-// 4:3 or ascal would stretch the already-letterboxed image back to 16:9.
+// and HDMI sees that one raster too — so force the scaler aspect to 4:3 or ascal
+// would stretch the already-letterboxed image back to 16:9. On Progressive that only
+// happens under an EXPLICIT Letterbox/Crop (aa_live): a user change there re-inits the
+// scaler once, and nothing flips it unprompted (B15 does not cycle Analog Aspect on
+// Progressive, and the menu permitted_df swap moves only between two 4:3 modes).
 // DVD-FORK (idle screen, PR #9 follow-up): while NO media has been mounted the
 // Auto aspect path has no stream DAR to follow and idled at 4:3 -- on a 16:9
 // display ascal pillarboxed the raster, confining the bouncing logo to the
@@ -278,7 +281,8 @@ wire       analog_want_raw = ((ini_csync | ini_ypbpr | ini_sog) & ~ini_vga_scale
 wire       analog_want;
 // The ONE resolved output mode. Session flag: drives the decoder fields mode (il_eff)
 // = the pixrep 480i/576i half-line MAIN raster that both ascal and the analog pins
-// consume, and every analog-only nicety (SIF fill, Analog Aspect, line-21 CC).
+// consume, and every analog-only nicety (SIF fill, line-21 CC, and Analog Aspect --
+// which on Progressive also applies an EXPLICIT Letterbox/Crop: aa_live, below).
 wire       interlaced_eff = (video_out_mode == 2'd1)
                           | ((video_out_mode == 2'd0) & analog_want);
 // Analog Aspect resolves near the decoder (needs ar_wide_auto_eff); forward-declared
@@ -340,6 +344,8 @@ wire il_eff = interlaced_eff;
 //                  and the modeline walk's interlaced/halfline/VERT_RES/deinterlace.
 //   il_eff      -> CE_PIXEL, ov_h_gen, sp_qx (the pixrep inverses) and every analog-only
 //                  nicety (SIF h-fill, Analog Aspect, csync_smpte.en) — all still correct.
+//                  (Analog Aspect has since widened to aa_live: interlaced_eff, or an
+//                  explicit Letterbox/Crop on Progressive -- docs/crt_anamorphic.md §13.)
 //
 // Splitting it this way is what keeps the change small: the two unchanged readings are the
 // majority of the ~15 consumers, and re-pointing them would be churn with a regression risk.
@@ -827,7 +833,11 @@ parameter CONF_STR = {
     // no detector and no alternating anchor, so it cannot shimmer (the shelved Stage A
     // deinterlacer's failure); the cost is vertical softness, and motion shows a soft
     // ghost instead of comb. Inert on film/progressive pictures, on Video Output =
-    // Interlaced (real fields, ascal deinterlaces), 240p, SIF and Letterbox. Only the
+    // Interlaced (real fields, ascal deinterlaces), 240p and SIF. Under an explicit
+    // Letterbox on Progressive (feature/progressive-aspect) it runs AHEAD of
+    // disp_vscale: the filtered frame is then letterboxed (field_blend_chain_tb
+    // +vscale). It used to say "and Letterbox" only because the two gates excluded each
+    // other (Letterbox needed interlaced_eff, Blend/Bob need ~interlaced_eff). Only the
     // decoded picture is filtered -- subpictures, highlights, the HUD are composited
     // downstream.
     //   ⚠ Index 0 = the default = OFF (user decision 2026-09-24): progressive_frame = 0
@@ -835,13 +845,15 @@ parameter CONF_STR = {
     // pf=0 discs and ~half a sample of NTSC ones never comb), which a blend only
     // softens. (That is also why Deinterlace defaults to Weave.)
     // (retired) "O[49],Progressive Deint,Off,Blend;" -- bit 49 reserved.
-    // Analog Aspect: how anamorphic content is fitted to the 4:3 analog TV (ONLY
-    // active while the analog 480i raster is engaged). Auto = Fit for 4:3 streams,
+    // Analog Aspect: how anamorphic content is fitted to a 4:3 TV. On the interlaced
+    // raster every value applies; on Progressive only an EXPLICIT Letterbox/Crop does
+    // (Auto/Fit leave it to the scaler) -- aa_live, docs/crt_anamorphic.md §13.
+    // Auto = Fit for 4:3 streams,
     // Letterbox for 16:9 (from the sequence header aspect code). Fit = raster
     // passthrough (16:9 shows squished/tall — also the correct 4:3 no-op).
     // Letterbox = vertical downscale 3/4 + black bars (correct 16:9 geometry),
     // vertically anti-aliased (2-tap blend). Crop = horizontal pan-scan: full
-    // vertical resolution, sides cropped to fill 4:3 (no bars). NOTE (dual raster):
+    // vertical resolution, sides cropped to fill 4:3 (no bars). NOTE (one raster):
     // the rescale happens upstream in the shared raster, so HDMI shows it too —
     // VIDEO_ARX/ARY switch to 4:3 while active so HDMI geometry stays correct.
     // status[4:3]: 0=Auto, 1=Fit, 2=Letterbox, 3=Crop. See docs/crt_anamorphic.md.
@@ -1497,6 +1509,15 @@ reg  [3:0] rq_voldn_seq;     // +1 per Vol Down press (wraps)
 // aspect_ctl instance, and emu.sv has no `default_nettype none`.
 wire [1:0] ar_osd_sel;       // effective Aspect Ratio   (button override of status[20:19])
 wire [1:0] aa_osd_sel;       // effective Analog Aspect  (button override of status[4:3])
+// "Analog Aspect is in force" (feature/progressive-aspect, docs/crt_anamorphic.md §13):
+// always on the interlaced raster, and on Progressive ONLY for an EXPLICIT Letterbox (2)
+// or Crop (3). Auto and Fit on Progressive leave the aspect to the scaler (ascal, via
+// VIDEO_ARX/ARY), exactly as before -- user decision 2026-10-05, Auto must not change.
+// ONE net, read by BOTH analog_letterbox/analog_crop AND player_regs .aa_live, so the
+// picture correction and the TV shape a disc reads (SPRM14) cannot disagree.
+// tools/check_prog_aspect_wiring.py evaluates it. Declared here because player_regs_inst
+// reads it ~1,100 lines before the Analog Aspect resolve.
+wire       aa_live = interlaced_eff | (aa_osd_sel == 2'd2) | (aa_osd_sel == 2'd3);
 wire       aspct_evt_w;      // pulse: the aspect target moved (HUD)
 wire       aspct_evt_analog_w;
 wire [1:0] aspct_evt_val_w;
@@ -2656,15 +2677,17 @@ wire [15:0] vm_rnd_seed = entropy_ctr[15:0] ^
 // Player parameters a disc can READ (feature/player-regs, docs/dvd_vm.md "Player
 // parameters"): SPRM20 = the first region the disc allows (the old constant 0x0001 was
 // region 1, and on a region-2-only disc the region check took its dead-end path);
-// SPRM14 = the TV shape the output settings describe (HDMI/progressive 16:9, the
-// analog raster's Analog Aspect choice); SPRM15 = AC-3 + MPEG, plus DTS whenever it
+// SPRM14 = the TV shape the output settings describe (16:9 unless Analog Aspect is in
+// force, then its choice); SPRM15 = AC-3 + MPEG, plus DTS whenever it
 // can be played (Passthru, or the DTS codebooks loaded). ⚠ aa_sel reads aa_osd_sel,
-// NOT status[4:3]: the B15 Aspect button overrides the OSD value. aa_live must be the
-// SAME gate as analog_letterbox/analog_crop's (interlaced_eff today).
+// NOT status[4:3]: the B15 Aspect button overrides the OSD value. aa_live is the SAME
+// net that gates analog_letterbox/analog_crop (declared beside aa_osd_sel): the
+// interlaced raster, or an explicit Letterbox/Crop on Progressive. So Progressive reads
+// 16:9 TV under Auto/Fit (unchanged), 4:3 letterbox under Letterbox, 4:3 pan&scan under Crop.
 wire [15:0] pr_sprm14, pr_sprm15, pr_sprm20;
 player_regs player_regs_inst (
     .rmask                (vmg_rmask_w),
-    .aa_live              (interlaced_eff),
+    .aa_live              (aa_live),
     .aa_sel               (aa_osd_sel),
     .pass_mode            (pass_mode),
     .dts_ok               (cb_tables_ok),
@@ -5747,8 +5770,12 @@ wire ar_wide_auto_eff = (menus_on && menu_active) ? menu_ar_wide_w : ar_wide_aut
 
 // DVD-remote Aspect button (B15) -- dvd/aspect_ctl.sv. It cycles whichever
 // aspect control is LIVE (Analog Aspect while the analog raster is engaged,
-// Aspect Ratio otherwise), because Analog Aspect is gated on interlaced_eff and
-// so does nothing at all on an HDMI-only rig. The core cannot write status[]
+// Aspect Ratio otherwise). On Progressive Analog Aspect does act since
+// feature/progressive-aspect, but only for an EXPLICIT Letterbox/Crop chosen in the
+// OSD; the button stays on Aspect Ratio there BY DECISION (user, 2026-10-04), so it
+// remains useful on an HDMI-only rig, where Aspect Ratio is the control that
+// matters. Hence .analog_live stays interlaced_eff, NOT aa_live (aa_live depends on
+// the very value the button would be cycling). The core cannot write status[]
 // (dvd_telem.sv:11-16 -- stock Main polls UIO_GET_STATUS every frame and would
 // overwrite the user's settings), so the module publishes an OVERRIDE that is
 // surrendered the moment the OSD value changes, and both reads below go through
@@ -5757,7 +5784,7 @@ aspect_ctl aspect_ctl_inst (
     .clk         (clk_sys),
     .rst_n       (reset_n),
     .aspct_edge  (aspct_edge),
-    .analog_live (interlaced_eff),   // the only mode where Analog Aspect does anything
+    .analog_live (interlaced_eff),   // B15 cycles Analog Aspect on the interlaced raster only (see above)
     .osd_ar      (status[20:19]),
     .osd_aa      (status[4:3]),
     .ar_sel      (ar_osd_sel),
@@ -5779,11 +5806,14 @@ assign ar_wide_eff = (ar_osd_sel == 2'b01) ? 1'b0 :   // force 4:3
 //   - disp_hcrop_en (HORIZONTAL, dvd/disp_hstretch.sv): Crop = horizontal pan-scan — the
 //     addrgen reads only the centre columns and the stretcher fills the raster width
 //     (full vertical resolution, no bars). 0 for Fit/Letterbox.
-// ONLY active while the analog 480i raster is engaged (interlaced_eff). NOTE (dual
-// raster): the rescale is upstream in the SHARED raster, so HDMI shows it too —
-// VIDEO_ARX/ARY switch to 4:3 while active (see the assign at the top) so HDMI
-// geometry stays correct instead of re-stretching the letterboxed image.
-// Auto = Letterbox for 16:9 streams / Fit for 4:3 (Crop is manual only).
+// Active while aa_live: the interlaced raster (any setting), or Progressive under an
+// EXPLICIT Letterbox/Crop (feature/progressive-aspect, docs/crt_anamorphic.md §13 -- a
+// 31 kHz analog display or a 4:3 HDMI set). The rescale is in the ONE raster, so HDMI
+// shows it too — VIDEO_ARX/ARY switch to 4:3 while active (see the assign at the top) so
+// HDMI geometry stays correct instead of re-stretching the letterboxed image.
+// Auto = Letterbox for 16:9 streams / Fit for 4:3 on the interlaced raster (Crop is
+// manual only). On Progressive, Auto and Fit apply NO correction (aa_live is 0 there):
+// ascal follows VIDEO_ARX/ARY, exactly as before this branch -- user decision 2026-10-05.
 // Quasi-static (menu-rate) into the clk_dec core.
 //
 // disp_vscale_mode (the OLD addrgen nearest-neighbour vertical decimation) is RETIRED —
@@ -5794,17 +5824,22 @@ wire [1:0] analog_aspect_sel = aa_osd_sel;   // 0 Auto, 1 Fit, 2 Letterbox, 3 Cr
 // menu-aware aspect — IFO V_ATR while a menu is up, PR #86) instead of the raw
 // stream aspect, matching what HDMI's ascal path does: an anamorphic menu now
 // letterboxes on the CRT under Auto exactly like it corrects on HDMI.
-// ⚠ DVD-FORK (native 240p): SUPPRESSED on the 240p/288p raster, and this is a real gap
-// rather than tidiness. crt_ov_map's bar geometry is handed LITERALS authored for a
-// 480/576-line frame (`v_bar` = vertical_size/8 = 60/72, `v_band` = 3/4 = 360/432, see
-// the instantiation below), so on a 240-line raster the bars would be twice their proper
-// depth and the overlay inverse would map subtitles and menu highlights into the wrong
-// rows. Making that geometry raster-aware is real work for a case that does not exist:
-// SIF content is 4:3 by construction, so there is nothing to letterbox or crop. Auto was
-// already safe here (it follows ar_wide_auto_eff, and MPEG-1 pixel-aspect codes never
-// resolve 16:9 — docs/vcd_svcd.md §2d); what this gates is a MANUAL Letterbox/Crop
-// selection while a VCD plays. Same shape as filmp_eff being suppressed by
-// interlaced_eff: a raster that cannot carry a feature says so, in RTL.
+// ⚠ DVD-FORK (native 240p): SUPPRESSED for SIF-height content (sif_det_s2, <= 288 lines),
+// and this is a real gap rather than tidiness. crt_ov_map's bar geometry is handed
+// LITERALS authored for a 480/576-line frame (`v_bar` = vertical_size/8 = 60/72, `v_band`
+// = 3/4 = 360/432, see the instantiation below), so on a 240-line picture the bars would
+// be twice their proper depth and the overlay inverse would map subtitles and menu
+// highlights into the wrong rows. That holds on BOTH rasters: the 240p/288p one, and the
+// Progressive raster since feature/progressive-aspect, where a VCD is a 352x240 window
+// that ascal scales. Making that geometry content-aware (from vsz_eff) is real work for a
+// case that does not exist: SIF content is 4:3 by construction, so there is nothing to
+// letterbox or crop. Auto was already safe here (it follows ar_wide_auto_eff, and MPEG-1
+// pixel-aspect codes never resolve 16:9 — docs/vcd_svcd.md §2d); what this gates is a
+// MANUAL Letterbox/Crop selection while a VCD plays. On the interlaced raster
+// ~sif_det_s2 IS the old ~p240_eff (p240_eff = interlaced_eff & sif_det_s2), so
+// Interlaced is bit-identical. SVCD (480 lines) is not SIF-height and keeps Letterbox/
+// Crop on both rasters. ⚠ SPRM14 still follows aa_live there (a disc reading it on a
+// VCD is not a case that exists; recorded in docs/status_log.md).
 // DVD-FORK (menu pan&scan, 2026-10-01): a 16:9 MENU's permitted display mode overrides the
 // user's Letterbox/Crop choice, the way a 4:3 set-top player treats the IFO V_ATR
 // permitted_df field (libdvdread video_attr_t; dvdnav.h "bit0 set = deny letterboxing,
@@ -5820,15 +5855,17 @@ wire [1:0] analog_aspect_sel = aa_osd_sel;   // 0 Auto, 1 Fit, 2 Letterbox, 3 Cr
 // menu load. Both modes drive ARX/ARY 4:3, so a title<->menu flip between them never
 // re-inits the scaler; crt_ov_map follows analog_letterbox/analog_crop, so the menu
 // highlight tracks the swapped geometry. docs/crt_anamorphic.md §12.
+// On Progressive the swap applies under the same aa_live gate, i.e. only once the user has
+// picked Letterbox or Crop there (user decision 2026-10-04); Auto/Fit menus are untouched.
 wire analog_menu169  = menus_on & menu_active & menu_ar_wide_w;
 wire analog_want_lb  = (analog_aspect_sel == 2'd2) |
                        ((analog_aspect_sel == 2'd0) & ar_wide_auto_eff);   // Letterbox or Auto-16:9
 wire analog_want_crop = (analog_aspect_sel == 2'd3);                       // Crop (manual)
 wire menu_lb_to_crop = analog_menu169 & (menu_ar_df_w == 2'd1);            // menu: pan&scan only
 wire menu_crop_to_lb = analog_menu169 & (menu_ar_df_w == 2'd2);            // menu: letterbox only
-assign analog_letterbox = interlaced_eff & ~p240_eff &
+assign analog_letterbox = aa_live & ~sif_det_s2 &
                           ((analog_want_lb   & ~menu_lb_to_crop) | (analog_want_crop & menu_crop_to_lb));
-assign analog_crop      = interlaced_eff & ~p240_eff &
+assign analog_crop      = aa_live & ~sif_det_s2 &
                           ((analog_want_crop & ~menu_crop_to_lb) | (analog_want_lb   & menu_lb_to_crop));
 wire       disp_vscale_en   = analog_letterbox;                             // downstream 2-tap letterbox
 // DVD-FORK FIX (SIF analog fill): mode 2 = the re-armed addrgen 2x line repeat (v_step

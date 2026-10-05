@@ -6,15 +6,23 @@
 //
 //   Aspect Ratio  O[20:19]  Auto / 4:3 / 16:9   -- the scaler aspect (HDMI)
 //   Analog Aspect O[4:3]    Auto / Fit / Letterbox / Crop
-//                                               -- the raster rescale, and it
-//                                                  is gated on interlaced_eff,
-//                                                  so it does NOTHING at all in
-//                                                  Progressive or on an
-//                                                  HDMI-only rig.
+//                                               -- the raster rescale. On the
+//                                                  interlaced raster every value
+//                                                  acts; on Progressive (and so
+//                                                  on an HDMI-only rig) Auto and
+//                                                  Fit do nothing, and only an
+//                                                  EXPLICIT Letterbox/Crop acts
+//                                                  (feature/progressive-aspect).
 //
 // Binding the button to Analog Aspect alone would therefore read as a dead
 // button to most users. It cycles whichever control is actually live instead:
 // Analog Aspect while the analog raster is engaged, Aspect Ratio otherwise.
+// When Letterbox/Crop reached Progressive, the button deliberately stayed on
+// Aspect Ratio there (user decision 2026-10-04): the HDMI-only user is the one
+// on Progressive, and Aspect Ratio is the control that matters to them. Gating
+// it on emu's aa_live instead would also be circular -- aa_live depends on the
+// very Analog Aspect value the button would be cycling. A 31 kHz analog or 4:3
+// HDMI user sets Letterbox/Crop once, in the OSD.
 //
 // ⛔ THE CORE CANNOT WRITE status[]. dvd/dvd_telem.sv records why: stock Main
 // polls UIO_GET_STATUS every frame and writes the result straight into

@@ -217,10 +217,12 @@ combinational, with no functions and no casts (the Quartus 17 lessons).
 |---|---|---|
 | SPRM20 | one-hot of the **lowest region the disc allows** | VMGI `vmg_category` byte 0x23. Bit n set = region n+1 **prohibited**. A mask of 0 reads region 1 (the old value). |
 | SPRM20, all prohibited | `0x0001`, plus `rmask_all_prohibited` | The anti-autoswitch trap. It is visible on telemetry word 14 bit 9 and Main's `flags.rgn_allp`, never silent. |
-| SPRM14 | HDMI/progressive `0x0C00` (16:9, wide) | `aa_live` low |
-| | Analog, Auto or Letterbox: `0x0200` (4:3, letterbox) | `aa_live` high, `aa_sel` 0/2 |
-| | Analog, Crop: `0x0100` (4:3, pan&scan) | `aa_sel` 3 |
-| | Analog, Fit: `0x0C00` (16:9) | `aa_sel` 1. Fit applies no correction, which is only right on a widescreen set. |
+| SPRM14 | Progressive, Auto or Fit: `0x0C00` (16:9, wide) | `aa_live` low |
+| | Progressive, Letterbox: `0x0200` (4:3, letterbox) | `aa_live` high (explicit Letterbox), `aa_sel` 2 |
+| | Progressive, Crop: `0x0100` (4:3, pan&scan) | `aa_live` high (explicit Crop), `aa_sel` 3 |
+| | Interlaced, Auto or Letterbox: `0x0200` (4:3, letterbox) | `aa_live` high, `aa_sel` 0/2 |
+| | Interlaced, Crop: `0x0100` (4:3, pan&scan) | `aa_sel` 3 |
+| | Interlaced, Fit: `0x0C00` (16:9) | `aa_sel` 1. Fit applies no correction, which is only right on a widescreen set. |
 | SPRM15 | `0x5800`: AC-3 + MPEG + DTS | b11 DTS = `pass_mode \| cb_tables_ok`. Without Passthru and without the DTS codebooks: `0x5000`. SDDS and karaoke stay clear. |
 
 **Decisions:**
@@ -231,10 +233,17 @@ combinational, with no functions and no casts (the Quartus 17 lessons).
     (`conformance.md` "Region enforcement" ⛔).
 - **SPRM14 follows Analog Aspect** (user, 2026-10-04, "Analog Aspect decides").
   - `aa_sel` is `aa_osd_sel`, so the B15 Aspect button counts.
-  - `aa_live` must be the SAME gate as `analog_letterbox`/`analog_crop` (`interlaced_eff`
-    today). `tools/check_player_regs_wiring.py` enforces both. If Analog Aspect is ever
-    extended to 4:3 progressive displays (user question, 2026-10-04), SPRM14 follows
-    without new wiring.
+  - `aa_live` is the SAME net that gates `analog_letterbox`/`analog_crop`.
+    `tools/check_player_regs_wiring.py` and `tools/check_prog_aspect_wiring.py` [5]
+    enforce it.
+  - ★ Since `feature/progressive-aspect` that net is `interlaced_eff | sel==Letterbox |
+    sel==Crop` (`docs/crt_anamorphic.md` §13): an explicit Letterbox/Crop now corrects the
+    Progressive picture, and SPRM14 follows it there. Auto and Fit on Progressive still read
+    `0x0C00`. The old note here said SPRM14 would follow "without new wiring"; that was
+    only half true. It follows automatically only because `aa_live` became one named
+    net with an evaluated definition. Under the roadmap's first sketch (Auto letterboxing
+    on `analog_want` rigs), a raster-level `aa_live` would have made Auto report a 4:3 TV
+    while not letterboxing.
 - **SPRM15 claims DTS whenever the core can play it.** Passthru always carries it, and
   Decode needs the codebook copy to have passed. A disc that picks its DTS track for a
   DTS-capable player then gets sound.
@@ -252,9 +261,11 @@ paths now fetch @32 first.
 **Known limitations:**
 - **No physical region-2 or region-4 disc exists in the library.** The region path is
   proven offline (synthetic masks in `dvd_vm_ref`) and in benches only.
-- **On HDMI, SPRM14 always says 16:9**, even on a 4:3 HDMI display. ascal letterboxes
-  16:9 content there anyway, so a disc's 16:9 choice still looks right. `disp_wide_q`
-  (emu) already knows the HDMI display shape, if that is ever wanted.
+- **On Progressive under Auto or Fit, SPRM14 says 16:9**, even on a 4:3 HDMI display.
+  ascal letterboxes 16:9 content there anyway, so a disc's 16:9 choice still looks right. A
+  user who picks Letterbox or Crop on Progressive now gets the 4:3 answer
+  (`feature/progressive-aspect`). `disp_wide_q` (emu) already knows the HDMI display shape,
+  if Auto should ever follow it.
 - **libdvdnav is no longer an oracle for the discs that read SPRM14.** It still answers
   `0x0100`/`0x7CFC`/`1`, so `tools/nav_diff.py` reports a boot divergence on HARTSWAR_169,
   SPECIES2 and the 21 others in the status log entry on an HDMI setup. That divergence is

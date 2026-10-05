@@ -5,15 +5,17 @@
 # A 4:3 set-top player follows the IFO V_ATR permitted_df field: a 16:9 menu that
 # denies letterbox is pan&scanned even when the player is set to Letterbox, and one
 # that denies pan&scan is letterboxed even when set to Pan&Scan. The core does the
-# same on the analog interlaced raster, for MENUS only (user decision: 935/940 main
-# features deny pan&scan, so honouring the title flag would just undo Crop).
+# same wherever Analog Aspect is in force (aa_live: the interlaced raster, and since
+# feature/progressive-aspect an explicit Letterbox/Crop on Progressive -- user decision
+# 2026-10-04), for MENUS only (user decision: 935/940 main features deny pan&scan, so
+# honouring the title flag would just undo Crop).
 #
 # Two arms, one per place the feature lives:
 #   check_menu_panscan_wiring.py  THE RESOLVE AND ITS SEAMS. emu.sv has no bench, so
 #                                 the checker pulls analog_letterbox/analog_crop's
 #                                 whole definition closure out of emu.sv and runs it
 #                                 over all 1024 input points against a reference
-#                                 model (+ titles bit-identical to v0.8.0), then
+#                                 model (+ interlaced titles bit-identical to v0.8.0), then
 #                                 checks the port and the downstream consumers.
 #   iso_reader_menu_tb  T2/T4     THE CAPTURE. menu_ar_df = V_ATR high byte [1:0],
 #                                 VTSM 0x4D -> 1 (P&S only), then VMGM 0x4E -> 2
@@ -26,6 +28,7 @@
 #   M4  emu: menu gate dropped               -> "TITLE resolve changed"
 #   M5  emu: crop arm reads want_lb raw      -> "both high"
 #   M6  emu: disp_hcrop_en decoupled         -> "disp_hcrop_en"
+#   M7  emu: Crop's gate off aa_live         -> "disagrees with the model" (the Progressive half)
 #   R1  reader: wrong bit pair [3:2]         -> T2 menu_ar_df
 #   R2  reader: bit pair reversed            -> T2 menu_ar_df
 #
@@ -88,6 +91,7 @@ emu_red M3 "s@(menu_ar_df_w == 2'd1)@(menu_ar_df_w == 2'd2)@"                   
 emu_red M4 's@wire analog_menu169  = menus_on & menu_active & menu_ar_wide_w;@wire analog_menu169  = menu_ar_wide_w;@' 'TITLE resolve changed'
 emu_red M5 's@| (analog_want_lb   & menu_lb_to_crop));@| analog_want_lb);@'                 'both high'
 emu_red M6 's@wire       disp_hcrop_en    = analog_crop;@wire       disp_hcrop_en    = analog_crop \& ~menu_active;@' 'disp_hcrop_en'
+emu_red M7 's@assign analog_crop      = aa_live \& ~sif_det_s2 \&@assign analog_crop      = interlaced_eff \& ~sif_det_s2 \&@' 'disagrees with the model'
 
 reader_red() {  # $1 = label, $2 = sed program, $3 = the ERR the bench must print
     mut dvd/dvd_iso_reader.sv "$2" "$TMP/$1.sv" || return

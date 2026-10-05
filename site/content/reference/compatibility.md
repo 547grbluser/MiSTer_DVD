@@ -80,8 +80,9 @@ A disc's own checks get honest answers about the player:
 
 - **Region.** The core reports a region the disc allows, so a disc from any region passes
   its own region check, rather than showing its "wrong region" screen.
-- **TV shape.** Discs are told the shape of your TV from your output settings: widescreen
-  on HDMI, and on the analog output whatever **Analog Aspect** describes. Discs that carry
+- **TV shape.** Discs are told the shape of your TV from your output settings: whatever
+  **Analog Aspect** describes on the interlaced analog output, and widescreen on
+  Progressive and HDMI unless you set Analog Aspect to Letterbox or Crop there. Discs that carry
   both a 4:3 and a 16:9 copy of an intro or menu therefore play the 16:9 one on a
   widescreen setup.
 - **Audio.** Discs are told which audio formats the core can actually play (Dolby Digital,

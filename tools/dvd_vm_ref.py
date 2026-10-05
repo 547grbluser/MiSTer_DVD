@@ -79,6 +79,13 @@ PLAYER_PROFILES = {          # name: (aa_live, aa_sel)  aa_sel 0 Auto 1 Fit 2 LB
     'analog-fit':  (1, 1),
     'analog-lb':   (1, 2),
     'analog-crop': (1, 3),
+    # Progressive (feature/progressive-aspect): emu's aa_live is
+    # interlaced_eff | sel==Letterbox | sel==Crop, so Auto/Fit read as HDMI does and an
+    # explicit Letterbox/Crop reads as the analog raster's (docs/crt_anamorphic.md §13).
+    'prog-auto':   (0, 0),
+    'prog-fit':    (0, 1),
+    'prog-lb':     (1, 2),
+    'prog-crop':   (1, 3),
 }
 
 

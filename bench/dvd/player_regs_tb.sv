@@ -11,6 +11,11 @@
 //   [P3] SPRM15: AC-3 + MPEG always; DTS iff Passthru or the codebooks are loaded;
 //        never SDDS or karaoke
 //   [P4] the decided spot values, written out, so the table cannot drift unnoticed
+//   [P5] the PROGRESSIVE profiles (feature/progressive-aspect): emu feeds
+//        aa_live = interlaced_eff | sel==2 | sel==3, so on Progressive Auto/Fit arrive
+//        with aa_live = 0 and Letterbox/Crop with aa_live = 1. Written out: Auto 0x0C00,
+//        Fit 0x0C00, Letterbox 0x0200, Crop 0x0100. tools/check_prog_aspect_wiring.py
+//        proves emu feeds exactly that aa_live; this proves what the module makes of it.
 `timescale 1ns/1ps
 module player_regs_tb;
     reg  [7:0] rmask;
@@ -88,6 +93,23 @@ module player_regs_tb;
             errors++; $display("  FAIL [P4] analog letterbox, no DTS tables: %04x %04x (want 0200 5000)", sprm14, sprm15);
         end
         if (errors == 0) $display("  [P4] OK: decided spot values");
+
+        // [P5] the Progressive profiles, written out
+        begin : p5
+            reg [15:0] want [0:3];
+            integer pe;
+            want[0] = 16'h0C00; want[1] = 16'h0C00; want[2] = 16'h0200; want[3] = 16'h0100;
+            pe = 0;
+            for (int s = 0; s < 4; s++) begin
+                aa_sel = s[1:0]; aa_live = (s == 2) || (s == 3); #1;    // emu's aa_live with interlaced_eff = 0
+                if (sprm14 !== want[s]) begin
+                    pe++; $display("  FAIL [P5] Progressive, Analog Aspect %0d (aa_live %b) -> sprm14=%04x (want %04x)",
+                                   s, aa_live, sprm14, want[s]);
+                end
+            end
+            errors = errors + pe;
+            if (pe == 0) $display("  [P5] OK: progressive profiles Auto 0C00, Fit 0C00, Letterbox 0200, Crop 0100");
+        end
 
         if (errors == 0) $display("RESULT: PASS (player_regs)");
         else $fatal(1, "RESULT: FAIL (%0d errors)", errors);

@@ -141,7 +141,7 @@ emu_red "M8 horizontal fill switched off at 240p" \
 # M9 — Analog Aspect left reachable at 240p: crt_ov_map would draw 480-line bars on a
 # 240-line raster and map the overlay inverse into the wrong rows.
 emu_red "M9 Letterbox left reachable at 240p" \
-  "s|assign analog_letterbox = interlaced_eff \& ~p240_eff \&|assign analog_letterbox = interlaced_eff \&|"
+  "s|assign analog_letterbox = aa_live \& ~sif_det_s2 \&|assign analog_letterbox = aa_live \&|"
 
 # ---- detector mutations ---------------------------------------------------
 pd_red() {   # $1 = label, $2 = sed program, $3 = plusargs

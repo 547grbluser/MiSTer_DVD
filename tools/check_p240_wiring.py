@@ -112,12 +112,16 @@ def main():
     # authored for a 480/576-line frame, so the bars would be twice their proper depth and
     # the overlay inverse would map subtitles into the wrong rows. SIF is 4:3 by
     # construction, so there is nothing to letterbox or crop.
+    # Since feature/progressive-aspect the gate is aa_live & ~sif_det_s2: the guard names
+    # the SIF-height CONTENT (it applies on the Progressive raster too), and on the
+    # interlaced raster ~sif_det_s2 is exactly ~p240_eff (p240_eff = interlaced_eff &
+    # sif_det_s2). tools/check_prog_aspect_wiring.py evaluates the whole gate.
     want("analog_letterbox",
-         r"assign analog_letterbox = interlaced_eff & ~p240_eff &",
+         r"assign analog_letterbox = aa_live & ~sif_det_s2 &",
          "Letterbox must be suppressed on the 240p raster -- crt_ov_map's v_bar/v_band are "
          "480/576-line literals and SIF content is 4:3, so there is nothing to letterbox")
     want("analog_crop",
-         r"assign analog_crop += interlaced_eff & ~p240_eff &",
+         r"assign analog_crop += aa_live & ~sif_det_s2 &",
          "Crop must be suppressed on the 240p raster, for the same reason")
 
     want("csync_smpte.prog", r"\.prog +\( *p240_eff *\)",

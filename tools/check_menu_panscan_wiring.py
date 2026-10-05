@@ -10,7 +10,8 @@ emu.sv has no bench, and a module bench would be HANDED the two enables -- it co
 not see a wrong term in the resolve or a dropped port. So this reads the resolve
 out of dvd/emu.sv and EVALUATES it: every comb definition in the closure of
 analog_letterbox/analog_crop is parsed into an expression tree and run across the
-whole input space (512 points) against the reference model below. A token grep
+whole input space (every combination of FREE, 1,024 points) against the reference
+model below. A token grep
 would pass a swapped `== 2'd1` / `== 2'd2`, a dropped menu gate, or a `&` that
 became `|`; a truth table does not.
 
@@ -19,10 +20,16 @@ The contract (the reference model):
   * permitted_df == 1 (letterbox denied): a Letterbox -- or Auto-on-16:9 -- choice
     becomes Crop. permitted_df == 2 (pan&scan denied): a Crop choice becomes
     Letterbox. df 0 / df 3 and Fit are never touched.
-  * Titles (menu_active = 0) resolve EXACTLY as before the feature -- by user
-    decision the title's own flag is not honoured (935/940 features deny P&S).
-  * The interlaced_eff & ~p240_eff gate still wraps everything; the two enables
-    are never both high.
+  * Titles (menu_active = 0) on the interlaced raster resolve EXACTLY as before the
+    feature -- by user decision the title's own flag is not honoured (935/940
+    features deny P&S). (Progressive titles changed deliberately later, with
+    feature/progressive-aspect; tools/check_prog_aspect_wiring.py owns that.)
+  * The gate wraps everything; the two enables are never both high. The gate is
+    aa_live & ~sif_det_s2 since feature/progressive-aspect (docs/crt_anamorphic.md
+    §13): the interlaced raster, or an explicit Letterbox/Crop on Progressive; never
+    SIF-height content. On the interlaced raster that is the old
+    interlaced_eff & ~p240_eff exactly. The swap applies wherever the gate does
+    (user decision 2026-10-04: on Progressive too).
 
 Seams checked as well, because "everything downstream follows" is the claim that
 made the feature small: the reader port is connected, disp_vscale_en /
@@ -47,7 +54,7 @@ ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 # The free inputs of the resolve, with their widths. Anything else in the closure
 # must have exactly one comb definition in emu.sv.
 FREE = {
-    'interlaced_eff': 1, 'p240_eff': 1, 'aa_osd_sel': 2,
+    'interlaced_eff': 1, 'sif_det_s2': 1, 'aa_osd_sel': 2,
     'menus_on': 1, 'menu_active': 1, 'menu_ar_wide_w': 1,
     'menu_ar_df_w': 2, 'ar_wide_auto': 1,
 }
@@ -216,15 +223,17 @@ def model(e):
         lb, crop = True, False
     else:
         lb, crop = want_lb, want_crop
-    gate = e['interlaced_eff'] and not e['p240_eff']
+    gate = (e['interlaced_eff'] or sel in (2, 3)) and not e['sif_det_s2']
     return int(lb and gate), int(crop and gate)
 
 
 def pre_feature(e):
-    """The v0.8.0 resolve, verbatim -- titles must still match it exactly."""
+    """The v0.8.0 resolve, verbatim -- interlaced titles must still match it exactly.
+    (p240_eff = interlaced_eff & sif_det_s2, emu.sv.)"""
     menu_ctx = e['menus_on'] and e['menu_active']
     wide_eff = e['menu_ar_wide_w'] if menu_ctx else e['ar_wide_auto']
-    gate = e['interlaced_eff'] and not e['p240_eff']
+    p240 = e['interlaced_eff'] and e['sif_det_s2']
+    gate = e['interlaced_eff'] and not p240
     sel = e['aa_osd_sel']
     return int(gate and (sel == 2 or (sel == 0 and wide_eff))), int(gate and sel == 3)
 
@@ -254,7 +263,7 @@ def main():
                 both += 1
             if got != model(e):
                 bad.append((e, got, model(e)))
-            if not e['menu_active'] and got != pre_feature(e):
+            if e['interlaced_eff'] and not e['menu_active'] and got != pre_feature(e):
                 bad_title.append((e, got, pre_feature(e)))
     except (LookupError, ValueError, KeyError) as ex:
         fails.append(f'cannot evaluate the resolve: {ex}')
@@ -265,8 +274,8 @@ def main():
                          f'{e} -> (lb,crop)={got}, want {want}')
         if bad_title:
             e, got, want = bad_title[0]
-            fails.append(f'TITLE resolve changed at {len(bad_title)} points (menus only, by user '
-                         f'decision); first: {e} -> {got}, v0.8.0 gave {want}')
+            fails.append(f'interlaced TITLE resolve changed at {len(bad_title)} points (menus only, by '
+                         f'user decision); first: {e} -> {got}, v0.8.0 gave {want}')
         if both:
             fails.append(f'analog_letterbox and analog_crop both high at {both} points')
 

@@ -307,6 +307,11 @@ Set **`Analog Aspect`** to `Letterbox` (or `Crop`). Anamorphic content is stored
 into a 4:3 raster and needs unsqueezing. See
 [Analog Aspect](../video/analog-crt.md#analog-aspect).
 
+The same applies to a 31 kHz display (a VGA CRT, or 480p component on a 4:3 set) on
+`Video Output = Progressive`. There, `Auto` does not correct the picture, so choose
+`Letterbox` or `Crop` explicitly — see
+[On Progressive](../video/analog-crt.md#analog-aspect-on-progressive).
+
 ### A disc menu is cropped even though Analog Aspect is set to Letterbox
 
 This is intended. Most widescreen menus allow only pan-and-scan on a 4:3 TV, because

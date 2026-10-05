@@ -183,7 +183,7 @@ def check(raw):
 
 MUTATIONS = [
     ('aa_sel from status', r'\.aa_sel\s*\(\s*aa_osd_sel\s*\)', '.aa_sel (status[4:3])'),
-    ('aa_live on another gate', r'\.aa_live\s*\(\s*interlaced_eff\s*\)', '.aa_live (fields_eff)'),
+    ('aa_live on another gate', r'\.aa_live\s*\(\s*aa_live\s*\)', '.aa_live (fields_eff)'),
     ('dts_ok tied high', r'\.dts_ok\s*\(\s*cb_tables_ok\s*\)', ".dts_ok (1'b1)"),
     ('pass_mode dropped', r'\.pass_mode\s*\(\s*pass_mode\s*\)\s*,', ".pass_mode (1'b0),"),
     ('reader mask open', r'\.vmg_rmask\s*\(\s*vmg_rmask_w\s*\)', '.vmg_rmask ()'),

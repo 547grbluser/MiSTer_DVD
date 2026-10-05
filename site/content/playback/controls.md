@@ -385,7 +385,9 @@ The disc stays loaded either way. To unload it and return to the idle screen, us
 **B15 (Aspect)** cycles the aspect setting that applies to whatever you are watching on:
 `Analog Aspect` when the analog/CRT raster is running, and `Aspect Ratio` otherwise. The
 popup names which one moved — `ASPECT 16:9`, `ANALOG LETTERBOX` — so you can find it again
-in the OSD. Changing the same setting in the OSD hands control back to the OSD.
+in the OSD. Changing the same setting in the OSD hands control back to the OSD. On
+Progressive, where `Analog Aspect` acts only as Letterbox or Crop, the button stays on
+`Aspect Ratio`; set Letterbox or Crop in the OSD.
 
 Rapid presses settle before anything is applied, so holding down or mashing the button does
 not make the display re-sync over and over.

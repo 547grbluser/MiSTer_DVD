@@ -46,8 +46,12 @@
  *
  * TIMING: mapped outputs register one clk_sys after a position change. Vertical changes
  * at line rate (irrelevant); horizontal means the mapped x lags the raw query by one
- * clk_sys = HALF a CRT pixel (13.5 MHz CE, 2 clk_sys per pixel — Crop is CRT-only), a
- * sub-pixel shift absorbed by the SP_QX_ADJ calibration.
+ * clk_sys = HALF a CRT pixel (13.5 MHz CE, 2 clk_sys per pixel), a sub-pixel shift
+ * absorbed by the SP_QX_ADJ calibration. ⚠ Crop is no longer CRT-only: an explicit
+ * Crop on Progressive (feature/progressive-aspect, docs/crt_anamorphic.md §13) runs at
+ * CE_PIXEL = 1, where the same one-clock lag is a WHOLE pixel against the raw (unmapped)
+ * context's calibration -- a ~1 px horizontal offset of mapped menu highlights, checked
+ * on hardware there rather than assumed.
  *
  * PASS-THROUGH: with letterbox_en/crop_en low the outputs are combinational copies of
  * the inputs — bit-identical to the pre-mapper wiring (HDMI and CRT-Fit unaffected).
