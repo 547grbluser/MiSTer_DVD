@@ -169,6 +169,14 @@ predate later confirmations; the `CLAUDE.md` index carries the reconciled status
   - **Not covered on HW:** a 31 kHz analog display (VGA CRT, 480p component) or a 4:3
     HDMI set judged by eye. Every check here was on the raw raster. Left to the
     maintainer.
+    - An analog-path capture through a RetroTINK on the rig (2026-10-05) was
+      inconclusive.
+      - The capture card returned a flat level-7 frame and silent audio (−87 dB) in
+        every mode, Interlaced included.
+      - That means no source lock, not a core result.
+      - Possible cause: the RetroTINK's output mode. The card takes 1080p up to 60 Hz,
+        but 1440p only at 30 Hz.
+      - The raw rasters captured alongside it were correct.
 
 - ✅ **PLAYER PARAMETERS SPRM14/15/20 FROM THE SETUP, NOT CONSTANTS (PR #154,
   2026-10-04; HW-CONFIRMED against a `main` control arm, MERGED PR #154).** Design: `docs/dvd_vm.md` "Player
