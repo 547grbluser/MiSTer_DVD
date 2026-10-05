@@ -44,6 +44,11 @@
 //         RSM must not be re-blessed).
 //   [S18] key_return (B13 "Return"): GoUp = in-domain jump to the loaded
 //         PGC's authored goup_pgcn (dvdnav_go_up); goup==0 = strict no-op.
+//   [S27] key_chedge (audit item 7, a chapter skip at the TITLE's edge):
+//         Next runs POST as a USER chain (immediate jump), a fall-through
+//         follows next_pgcn, a chain with no jump is a strict no-op with
+//         vm_adv masked; Prev jumps to prev_pgcn's LAST program (pgn 0xFF).
+//         Arms V1-V8, mutated by bench/dvd/run_chap_edge.sh --red.
 //
 // Run: iverilog -g2012 -o /tmp/vmtb dvd/dvd_vm.sv bench/dvd/dvd_vm_tb.sv && vvp /tmp/vmtb
 
@@ -82,6 +87,7 @@ module dvd_vm_tb;
 
     reg        key_menu = 0, key_title = 0, key_return = 0;
     reg        key_cmenu = 0;
+    reg        key_chedge = 0, key_chedge_dir = 0;
     reg [63:0] btn_cmd = 0;
     reg        btn_cmd_valid = 0;
     reg [5:0]  btn_sel = 6'd1;
@@ -148,6 +154,7 @@ module dvd_vm_tb;
         .cell_count(cell_count),
         .next_pgcn(next_pgcn), .prev_pgcn(prev_pgcn), .goup_pgcn(goup_pgcn),
         .key_menu(key_menu), .key_title(key_title), .key_return(key_return), .key_cmenu(key_cmenu),
+        .key_chedge(key_chedge), .key_chedge_dir(key_chedge_dir),
         .btn_cmd(btn_cmd), .btn_cmd_valid(btn_cmd_valid),
         .btn_sel(btn_sel), .btns_armed(btns_armed),
         .btn_force(btn_force), .btn_force_val(btn_force_val),
@@ -255,7 +262,7 @@ module dvd_vm_tb;
     // any event latched but not yet consumed = the VM is still busy
     wire vm_pending = dut.ev_boot | dut.ev_loaded | dut.ev_error |
                       dut.ev_cellcmd | dut.ev_pgcend | dut.ev_btn |
-                      dut.ev_menu;
+                      dut.ev_menu | dut.ev_chedge;
 
     // wait for the VM to return to V_IDLE with nothing pending
     task wait_idle;
@@ -1814,6 +1821,117 @@ module dvd_vm_tb;
     end
     endtask
 
+    // ---------------- [S27] chapter skip at the TITLE's edge -----------------
+    // The reader decides the edge and pulses key_chedge (its own bench is
+    // iso_reader_chapedge_tb); here the VM's half. A title is playing
+    // (menu_active = 0) and the reader is STREAMING, not waiting - which is
+    // why a chain that ends without a jump must not pulse vm_adv.
+    task edge_key(input dir);
+    begin
+        @(negedge clk); key_chedge = 1; key_chedge_dir = dir;
+        @(negedge clk); key_chedge = 0;
+    end
+    endtask
+
+    // Isolation for the "nothing happens" arms: if a mutation made one jump,
+    // answer it so the VM is back in V_IDLE before the next arm starts.
+    task s27_recover;
+    begin
+        if (saw_jump) begin nr_pre = 0; nr_post = 0; pulse_loaded; wait_idle; end
+    end
+    endtask
+
+    task run_s27;
+    begin
+        nav_ready = 0; vm_restart; wait_idle;
+        menu_active = 0; enable = 1;
+        cur_vts = 8'd5; cur_pgcn = 16'd2; cur_cell = 8'd2; cell_count = 8'd3;
+        next_pgcn = 16'd0; prev_pgcn = 16'd0; goup_pgcn = 16'd0;
+
+        // V1: Next, POST = JumpSS VMGM menu 2 -> that jump, IMMEDIATE (a user
+        // chain: vm_from_wait = 0, so the reader does not tail-drain it).
+        wr_cmd(0, 64'h3006000000420000);
+        nr_pre = 0; nr_post = 1; nr_cell = 0;
+        clear_actions; edge_key(1'b1); wait_settled;
+        if (!saw_jump || cap_jdom !== 2'd1) fail("S27-V1: Next did not run POST's JumpSS");
+        else if (cap_natural !== 1'b0)      fail("S27-V1: the POST jump sampled natural (must be immediate)");
+        else $display("  ok  S27 V1 Next runs POST, immediate");
+        nr_post = 0; pulse_loaded; wait_idle;
+
+        // V2: Next, POST falls through (a Set only), next_pgcn = 9 -> LinkNextPGC
+        wr_cmd(0, 64'h71000004DEAD0000);         // g4 = 0xDEAD
+        nr_pre = 0; nr_post = 1; next_pgcn = 16'd9;
+        clear_actions; edge_key(1'b1); wait_settled;
+        if (!saw_jump || cap_jdom !== 2'd3 || cap_jpgcn !== 16'd9 || cap_jvts !== 8'd5)
+            fail("S27-V2: POST fall-through did not follow next_pgcn 9 in VTS 5");
+        else if (cap_natural !== 1'b0) fail("S27-V2: the next_pgcn jump sampled natural");
+        else $display("  ok  S27 V2 POST fall-through follows next_pgcn");
+        nr_post = 0; next_pgcn = 16'd0; pulse_loaded; wait_idle;
+
+        // V3: Next, POST falls through, next_pgcn = 0 -> nothing at all
+        wr_cmd(0, 64'h71000004DEAD0000);
+        nr_pre = 0; nr_post = 1; next_pgcn = 16'd0;
+        clear_actions; edge_key(1'b1); wait_settled;
+        if (saw_jump || saw_seek) fail("S27-V3: a fall-through with no next_pgcn moved");
+        else if (saw_adv)         fail("S27-V3: the fall-through pulsed vm_adv (reader is streaming)");
+        else $display("  ok  S27 V3 fall-through, no next_pgcn: strict no-op");
+        s27_recover;
+
+        // V4: Next, POST = Exit -> a strict no-op (libdvdnav: a stopped VM is a
+        // failed next_pg_search, playback continues)
+        wr_cmd(0, 64'h3001000000000000);
+        nr_pre = 0; nr_post = 1;
+        clear_actions; edge_key(1'b1); wait_settled;
+        if (saw_jump || saw_seek) fail("S27-V4: Exit in POST moved");
+        else if (saw_adv)         fail("S27-V4: Exit in POST pulsed vm_adv");
+        else $display("  ok  S27 V4 Exit in POST: strict no-op");
+        s27_recover;
+
+        // V5: Prev, prev_pgcn = 4 -> jump to PGC 4 at its LAST program
+        nr_pre = 0; nr_post = 0; prev_pgcn = 16'd4;
+        clear_actions; edge_key(1'b0); wait_settled;
+        if (!saw_jump || cap_jdom !== 2'd3 || cap_jvts !== 8'd5 ||
+            cap_jpgcn !== 16'd4 || cap_jpgn !== 8'hFF)
+            fail("S27-V5: Prev did not jump to prev_pgcn 4, pgn 0xFF");
+        else if (cap_natural !== 1'b0) fail("S27-V5: the Prev jump sampled natural");
+        else $display("  ok  S27 V5 Prev -> prev_pgcn at its last program");
+        prev_pgcn = 16'd0; pulse_loaded; wait_idle;
+
+        // V6: a menu is up -> the key is ignored (POST would be the MENU's)
+        wr_cmd(0, 64'h3006000000420000);
+        nr_pre = 0; nr_post = 1; menu_active = 1;
+        clear_actions; edge_key(1'b1); wait_settled;
+        if (saw_jump || saw_seek || saw_adv) fail("S27-V6: the edge key acted in a menu");
+        else $display("  ok  S27 V6 ignored while a menu is up");
+        menu_active = 0;
+        s27_recover;
+
+        // V7: Next with NO POST block, next_pgcn = 6 -> straight to next_pgcn
+        nr_pre = 0; nr_post = 0; next_pgcn = 16'd6;
+        clear_actions; edge_key(1'b1); wait_settled;
+        if (!saw_jump || cap_jdom !== 2'd3 || cap_jpgcn !== 16'd6)
+            fail("S27-V7: no-POST Next did not follow next_pgcn 6");
+        else if (cap_natural !== 1'b0) fail("S27-V7: the next_pgcn jump sampled natural");
+        else $display("  ok  S27 V7 no POST: follows next_pgcn");
+        next_pgcn = 16'd0; pulse_loaded; wait_idle;
+
+        // V8: the mask is the edge chain's alone. After a masked no-op chain
+        // (V3's shape), the reader's next ordinary wait - a cell command with
+        // no command - must still get its vm_adv verdict.
+        wr_cmd(0, 64'h71000004DEAD0000);
+        nr_pre = 0; nr_post = 1; nr_cell = 0;
+        clear_actions; edge_key(1'b1); wait_idle;
+        clear_actions;
+        @(negedge clk); vm_cell_cmd = 1; cell_cmd_nr = 8'd0;
+        @(negedge clk); vm_cell_cmd = 0;
+        wait_idle;
+        if (!saw_adv) fail("S27-V8: a cell-command verdict was masked after an edge chain");
+        else $display("  ok  S27 V8 vm_adv mask released after the edge chain");
+        nr_post = 0;
+        $display("S27 chapter skip at the title edge (POST / next_pgcn / prev_pgcn) PASS");
+    end
+    endtask
+
     // ========================================================================
     initial begin
         repeat (4) @(negedge clk);
@@ -1825,6 +1943,7 @@ module dvd_vm_tb;
         part2;
         run_s25;
         run_s26;
+        run_s27;
         part3;
 
         if (errors == 0) $display("ALL TESTS PASS (dvd_vm_tb)");

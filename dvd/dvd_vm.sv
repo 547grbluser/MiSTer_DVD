@@ -40,6 +40,14 @@
 //                      must be a clean no-op, not a failed jump.
 //   key_return      -> GoUp: in-domain jump to the loaded PGC's authored
 //                      goup_pgcn (libdvdnav dvdnav_go_up); goup==0 = no-op
+//   key_chedge      -> a chapter skip hit the TITLE's edge (the reader decides;
+//                      audit item 7). Next: run this PGC's POST as a USER chain
+//                      (nat_src=0, so its jump is immediate) and on a fall-
+//                      through follow next_pgcn (libdvdnav vm_jump_next_pg);
+//                      Prev: prev_pgcn at its LAST program (vm_jump_prev_pg).
+//                      A chain that ends without a jump is a strict no-op:
+//                      playback continues (dvdnav_next_pg_search treats a
+//                      stopped VM as failure), so its vm_adv is masked.
 //   pgc_error       -> fallback chain (own VTSM -> best-menu-VOB VTSM ->
 //                      VMGM Title -> resume/auto title), ported from the
 //                      Phase-2/3 emu glue this module replaces.
@@ -118,6 +126,8 @@ module dvd_vm (
     input             key_title,      // B12: VMGM Title ("Top Menu") key
     input             key_return,     // B13: Return = GoUp (authored goup_pgcn)
     input             key_cmenu,      // B16: Chapter/PTT menu (VTSM entry 7)
+    input             key_chedge,     // pulse: chapter skip hit the title's edge
+    input             key_chedge_dir, // 1 = Next (POST), 0 = Prev (prev_pgcn)
 
     // Button activation (nav_pci)
     input      [63:0] btn_cmd,
@@ -151,7 +161,7 @@ module dvd_vm (
     output reg        seek_pulse,     // in-PGC cell seek (flushing)
     output reg [7:0]  seek_cell,
     output reg        vm_replay,      // pulse: replay current cell (no flush)
-    output reg        vm_adv,         // pulse: reader continues authored behaviour
+    output            vm_adv,         // pulse: reader continues authored behaviour
     // NATURAL-JUMP PROVENANCE (tail-drain Phase B, docs/dvd_nav.md).
     // vm_from_wait = wait_verdict && nat_src: 1 only while the executing
     // block is CELL/POST AND the command chain was STARTED by a reader wait
@@ -622,6 +632,18 @@ wire wait_verdict = (blk == BLK_CELL || blk == BLK_POST);  // reader is waiting
 reg nat_src;
 assign vm_from_wait = wait_verdict && nat_src;
 
+// TITLE-EDGE user chain (key_chedge, audit item 7). usr_edge is set by the
+// ev_chedge dispatch and holds for the whole chain it starts; every V_IDLE
+// cycle clears it (a chain ends in V_IDLE), and so does a new PGC's PRE.
+// While it is set, vm_adv is MASKED at the port: the chain is a POST block, so
+// wait_verdict=1 and each of its no-op arms (fall-through, Exit, LinkTailPGC
+// "already there", LinkRSM without RSM, Link*PGC to 0) would pulse vm_adv - and
+// the reader is still STREAMING, not waiting. A reader parked in S_VM_WAIT on a
+// cell command would take that stray pulse as its own verdict and advance.
+reg usr_edge;
+reg vm_adv_q;
+assign vm_adv = vm_adv_q && !usr_edge;
+
 reg [3:0]  fetch_i;
 reg [12:0] fuse;               // instructions executed this activation
 reg [6:0]  chain;              // VM-issued jumps this activation
@@ -629,6 +651,7 @@ reg [6:0]  chain;              // VM-issued jumps this activation
 // Pending events
 reg ev_boot, ev_loaded, ev_error, ev_cellcmd, ev_pgcend, ev_btn;
 reg ev_menu, ev_title, ev_return, ev_cmenu;
+reg ev_chedge, ev_chedge_dir;
 reg [7:0]  ev_cellcmd_nr;
 reg [63:0] ev_btn_cmd;
 reg nav_ready_d;
@@ -846,6 +869,7 @@ always @(posedge clk or negedge rst_n) begin
         ev_boot <= 1'b0; ev_loaded <= 1'b0; ev_error <= 1'b0;
         ev_cellcmd <= 1'b0; ev_pgcend <= 1'b0; ev_btn <= 1'b0;
         ev_menu <= 1'b0;
+        ev_chedge <= 1'b0; ev_chedge_dir <= 1'b0; usr_edge <= 1'b0;
         ev_cellcmd_nr <= 8'd0;
         ev_btn_cmd <= 64'd0;
         nav_ready_d <= 1'b0;
@@ -876,7 +900,7 @@ always @(posedge clk or negedge rst_n) begin
         jump_vts <= 8'd0; jump_pgcn <= 16'd0; jump_entry <= 4'd0;
         jump_ttn <= 7'd0; jump_pgn <= 8'd0; jump_cell <= 8'd0; jump_ptt <= 10'd0;
         seek_pulse <= 1'b0; seek_cell <= 8'd0;
-        vm_replay <= 1'b0; vm_adv <= 1'b0;
+        vm_replay <= 1'b0; vm_adv_q <= 1'b0;
         btn_force <= 1'b0; btn_force_val <= 6'd1;
     end else begin
         // GPRM write request: one cycle, unless something issues it below.
@@ -893,7 +917,7 @@ always @(posedge clk or negedge rst_n) begin
         jump_ptt   <= 10'd0;
         seek_pulse <= 1'b0;
         vm_replay  <= 1'b0;
-        vm_adv     <= 1'b0;
+        vm_adv_q     <= 1'b0;
         btn_force  <= 1'b0;
         link_fail  <= 1'b0;
         // SPRM8 shadow WRITE-BACK: while an HLI is armed and no activation has
@@ -995,6 +1019,10 @@ always @(posedge clk or negedge rst_n) begin
             if (key_title)                  ev_title  <= 1'b1;
             if (key_return)                 ev_return <= 1'b1;
             if (key_cmenu)                  ev_cmenu  <= 1'b1;
+            if (key_chedge) begin
+                ev_chedge     <= 1'b1;
+                ev_chedge_dir <= key_chedge_dir;
+            end
         end
 
         // ---- mount: vm_reset --------------------------------------------
@@ -1026,6 +1054,7 @@ always @(posedge clk or negedge rst_n) begin
             ev_cellcmd <= 1'b0; ev_pgcend <= 1'b0; ev_btn <= 1'b0;
             ev_menu <= 1'b0; ev_title <= 1'b0;
             ev_return <= 1'b0; ev_cmenu <= 1'b0;
+            ev_chedge <= 1'b0; usr_edge <= 1'b0;
             state <= V_IDLE;
         end else begin
             case (state)
@@ -1033,6 +1062,7 @@ always @(posedge clk or negedge rst_n) begin
             // ------------------------------------------------------------
             V_IDLE: begin
                 fetch_i <= 4'd0;
+                usr_edge <= 1'b0;   // a chain has ended (the ev_chedge arm re-sets it)
                 // DVD-game entropy, applied only in idle (no command is writing
                 // a GPRM/LFSR here, so these can't race a command write):
                 //  - counter-mode GPRMs +1 per elapsed second (wall clock).
@@ -1085,11 +1115,12 @@ always @(posedge clk or negedge rst_n) begin
                     ev_boot <= 1'b0; ev_loaded <= 1'b0; ev_error <= 1'b0;
                     ev_btn  <= 1'b0; ev_menu <= 1'b0;
                     ev_title <= 1'b0; ev_return <= 1'b0; ev_cmenu <= 1'b0;
+                    ev_chedge <= 1'b0;
                     // a reader wait must still be released (O[1] flipped off
                     // mid-flight; the reader also has its own timeout)
                     if (ev_cellcmd || ev_pgcend) begin
                         ev_cellcmd <= 1'b0; ev_pgcend <= 1'b0;
-                        vm_adv <= 1'b1;
+                        vm_adv_q <= 1'b1;
                     end
                 end else if (ev_boot) begin
                     // BOOT: run the First Play PGC
@@ -1219,6 +1250,7 @@ always @(posedge clk or negedge rst_n) begin
                     ev_cellcmd <= 1'b0;   // stale waits died with the old PGC
                     ev_pgcend  <= 1'b0;
                     ev_btn     <= 1'b0;
+                    ev_chedge  <= 1'b0;   // the edge was resolved against the old PGC
                     nat_src    <= 1'b0;   // fresh PGC's PRE: not a natural chain
                     // A title is playing again -> forget any menu-key toggle state
                     // (a later Menu press should re-invoke the Root menu, not resume
@@ -1284,7 +1316,7 @@ always @(posedge clk or negedge rst_n) begin
                     fuse <= 13'd0; chain <= 7'd0;
                     nat_src <= 1'b1;      // reader-initiated: natural chain
                     if (ev_cellcmd_nr == 8'd0 || ev_cellcmd_nr > nr_cell) begin
-                        vm_adv <= 1'b1;
+                        vm_adv_q <= 1'b1;
                     end else begin
                         blk <= BLK_CELL;
                         blk_base <= nr_pre + nr_post + ev_cellcmd_nr - 8'd1;
@@ -1294,6 +1326,7 @@ always @(posedge clk or negedge rst_n) begin
                     end
                 end else if (ev_pgcend) begin
                     ev_pgcend <= 1'b0;
+                    ev_chedge <= 1'b0;    // the PGC ended anyway: its POST runs once
                     fuse <= 13'd0; chain <= 7'd0;
                     nat_src <= 1'b1;      // reader-initiated: natural chain
                     if (nr_post != 8'd0) begin
@@ -1303,7 +1336,42 @@ always @(posedge clk or negedge rst_n) begin
                         pc       <= nr_pre;
                         state    <= V_FETCH;
                     end else begin
-                        vm_adv <= 1'b1;   // no post: authored next_pgcn/still
+                        vm_adv_q <= 1'b1;   // no post: authored next_pgcn/still
+                    end
+                end else if (ev_chedge) begin
+                    // TITLE-EDGE chapter skip (audit item 7; the reader only
+                    // pulses it in a title, at the edge, with Disc Menus on).
+                    // A USER chain, exactly like a button's LinkTailPGC (the
+                    // HW-proven Tomb Raider shape): nat_src=0, so a jump it
+                    // makes flushes and executes immediately.
+                    ev_chedge <= 1'b0;
+                    fuse <= 13'd0; chain <= 7'd0;
+                    nat_src <= 1'b0;
+                    if (!menu_active) begin
+                        usr_edge <= 1'b1;
+                        if (ev_chedge_dir) begin
+                            // Next: this PGC's POST (libdvdnav play_PGC_post).
+                            // An empty block reaches the BLK_POST fall-through in
+                            // V_NEXT directly, which follows next_pgcn.
+                            blk      <= BLK_POST;
+                            blk_base <= nr_pre;
+                            blk_end  <= nr_pre + nr_post;
+                            pc       <= nr_pre;
+                            state    <= V_NEXT;
+                        end else if (prev_pgcn != 16'd0) begin
+                            // Prev: prev_pgcn starting at its LAST program
+                            // (vm_jump_prev_pg; pgn 0xFF = "last" in the reader).
+                            // Its PRE runs on the load, as play_PGC does.
+                            blk <= BLK_BTN;
+                            jump_domain <= DOM_TT;
+                            jump_vts <= cur_vts; jump_pgcn <= prev_pgcn;
+                            jump_entry <= 4'd0; jump_ttn <= 7'd0;
+                            jump_pgn <= 8'hFF; jump_cell <= 8'd0;
+                            jump_pulse <= 1'b1;
+                            fb <= FB_NONE;
+                            wait_tmr <= 24'd0;
+                            state <= V_WAIT;
+                        end
                     end
                 end else if (ev_menu) begin
                     ev_menu <= 1'b0;
@@ -1515,7 +1583,7 @@ always @(posedge clk or negedge rst_n) begin
                 link_cond_l <= link_cond_pre;   // pre-set compare (see above)
                 if (fuse >= 13'd4095) begin
                     // runaway program: stop; release the reader if waiting
-                    vm_adv <= wait_verdict;
+                    vm_adv_q <= wait_verdict;
                     state  <= V_IDLE;
                 end else begin
                     case (ins_type)
@@ -1661,7 +1729,7 @@ always @(posedge clk or negedge rst_n) begin
                     // ---- jump instructions (type 1, bit60=1) ----
                     case (lnk_op)
                     4'd1: begin                      // Exit: stop, hold frame
-                        vm_adv <= wait_verdict;
+                        vm_adv_q <= wait_verdict;
                         state <= V_IDLE;
                     end
                     4'd2: begin                      // JumpTT n (TT_SRPT resolve)
@@ -1877,7 +1945,7 @@ always @(posedge clk or negedge rst_n) begin
                     end
                     case (sub_op)
                     5'd0: begin                      // LinkNoLink (button only)
-                        vm_adv <= wait_verdict;
+                        vm_adv_q <= wait_verdict;
                         state <= V_IDLE;
                     end
                     5'd1: begin                      // LinkTopC: replay cell
@@ -1888,7 +1956,7 @@ always @(posedge clk or negedge rst_n) begin
                         if (cur_cell + 8'd1 >= cell_count) begin
                             // past the last cell -> POST block
                             if (nr_post == 8'd0) begin
-                                vm_adv <= 1'b1;
+                                vm_adv_q <= 1'b1;
                                 state <= V_IDLE;
                             end else begin
                                 blk <= BLK_POST;
@@ -1917,7 +1985,7 @@ always @(posedge clk or negedge rst_n) begin
                             end else if (sub_op == 5'd6) begin
                                 if (cur_cell + 8'd1 >= cell_count) begin
                                     if (nr_post == 8'd0) begin
-                                        vm_adv <= 1'b1;
+                                        vm_adv_q <= 1'b1;
                                         state <= V_IDLE;
                                     end else begin
                                         blk <= BLK_POST;
@@ -1958,7 +2026,7 @@ always @(posedge clk or negedge rst_n) begin
                     end
                     5'd10, 5'd11, 5'd12: begin       // LinkNext/Prev/GoUpPGC
                         if (pgc_nav_target == 16'd0) begin
-                            vm_adv <= wait_verdict;
+                            vm_adv_q <= wait_verdict;
                             state <= V_IDLE;
                         end else begin
                             jump_domain <= vm_dom;
@@ -1974,7 +2042,7 @@ always @(posedge clk or negedge rst_n) begin
                     end
                     5'd13: begin                     // LinkTailPGC: run POST now
                         if (blk == BLK_POST || nr_post == 8'd0) begin
-                            vm_adv <= 1'b1;          // already there / none
+                            vm_adv_q <= 1'b1;          // already there / none
                             state <= V_IDLE;
                         end else begin
                             blk <= BLK_POST;
@@ -1986,7 +2054,7 @@ always @(posedge clk or negedge rst_n) begin
                     end
                     5'd16: begin                     // LinkRSM
                         if (rsm_vts == 8'd0) begin
-                            vm_adv <= wait_verdict;
+                            vm_adv_q <= wait_verdict;
                             state <= V_IDLE;
                         end else begin
                             sprm4 <= rsm_r4; sprm5 <= rsm_r5; sprm6 <= rsm_r6;
@@ -2042,7 +2110,7 @@ always @(posedge clk or negedge rst_n) begin
                             if (pg_final + 8'd1 > nr_pgms) begin
                                 // past the last program -> POST block
                                 if (nr_post == 8'd0) begin
-                                    vm_adv <= 1'b1;
+                                    vm_adv_q <= 1'b1;
                                     state <= V_IDLE;
                                 end else begin
                                     blk <= BLK_POST;
@@ -2095,7 +2163,7 @@ always @(posedge clk or negedge rst_n) begin
                         link_ptt    <= 10'd0;
                         state       <= V_WAIT;
                     end else begin
-                        vm_adv <= wait_verdict;
+                        vm_adv_q <= wait_verdict;
                         state <= V_IDLE;
                     end
                 end else begin
@@ -2165,13 +2233,29 @@ always @(posedge clk or negedge rst_n) begin
                         end
                     end
                     BLK_POST: begin
-                        // post fell through: authored next_pgcn/still/hold
-                        // (the reader's proven Phase-2/3 policy).
-                        vm_adv <= 1'b1;
-                        state <= V_IDLE;
+                        if (usr_edge && next_pgcn != 16'd0) begin
+                            // Title-edge Next whose POST fell through (or had
+                            // none): libdvdnav play_PGC_post continues in
+                            // next_pgc_nr - the reader is streaming, not
+                            // waiting, so the VM issues that link itself.
+                            jump_domain <= DOM_TT;
+                            jump_vts <= cur_vts; jump_pgcn <= next_pgcn;
+                            jump_entry <= 4'd0; jump_ttn <= 7'd0;
+                            jump_pgn <= 8'd0; jump_cell <= 8'd0;
+                            jump_pulse <= 1'b1;
+                            fb <= FB_NONE;
+                            wait_tmr <= 24'd0;
+                            state <= V_WAIT;
+                        end else begin
+                            // post fell through: authored next_pgcn/still/hold
+                            // (the reader's proven Phase-2/3 policy). Masked
+                            // for a title-edge chain (usr_edge): no-op.
+                            vm_adv_q <= 1'b1;
+                            state <= V_IDLE;
+                        end
                     end
                     BLK_CELL: begin
-                        vm_adv <= 1'b1;
+                        vm_adv_q <= 1'b1;
                         state <= V_IDLE;
                     end
                     default: state <= V_IDLE;    // BTN: state updated, done
@@ -2193,6 +2277,8 @@ always @(posedge clk or negedge rst_n) begin
                     ev_cellcmd <= 1'b0;
                     ev_pgcend  <= 1'b0;
                     ev_btn     <= 1'b0;
+                    ev_chedge  <= 1'b0;
+                    usr_edge   <= 1'b0;   // the new PGC's PRE is not the edge chain
                     // A title is playing again -> forget the menu-key toggle state
                     // (see the ev_loaded handler in V_IDLE; a resume/title jump lands
                     // here in V_WAIT, so the clear must happen on this path too).

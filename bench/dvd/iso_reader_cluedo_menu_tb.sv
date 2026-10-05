@@ -134,6 +134,7 @@ module iso_reader_cluedo_menu_tb;
         .cell_count(cell_count_w),
         .next_pgcn(rd_next), .prev_pgcn(rd_prev), .goup_pgcn(rd_goup),
         .key_menu(key_menu), .key_title(key_title), .key_return(key_return), .key_cmenu(1'b0),
+        .key_chedge(1'b0), .key_chedge_dir(1'b0),   // title-edge chapter key (audit item 7)
         .btn_cmd(btn_cmd), .btn_cmd_valid(btn_cmd_valid), .btn_sel(6'd1), .btns_armed(1'b0),
         .btn_force(), .btn_force_val(),
         .jump_pulse(vm_jump_pulse), .jump_domain(vm_jump_domain),

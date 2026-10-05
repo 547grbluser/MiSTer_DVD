@@ -25,8 +25,13 @@
 #     R7 no-sentinel  : pgn 0xFF is not "the last program"   -> I
 #     R8 no-arm       : single-chapter titles never arm      -> J
 #     R9 no-r-emit    : CH_R (no PTT table) never emits      -> K L
-#   VM (dvd_vm_tb, S27 arms; the runner reads ^FAIL S27-Vn):
-#     (listed with the VM mutations below)
+#   VM (dvd_vm_tb, S27 arms; any non-S27 failure reads as X):
+#     N1 natural      : the edge chain is tagged natural     -> V1 V2 V7
+#     N2 no-mask      : the chain's no-op pulses vm_adv      -> V3 V4
+#     N3 no-next      : a fall-through ignores next_pgcn     -> V2 V7
+#     N4 first-pg     : Prev lands on prev_pgcn's FIRST pg   -> V5
+#     N5 in-menu      : the key acts while a menu is up      -> V6
+#     N6 mask-stuck   : usr_edge never clears                -> V8
 #
 # Usage: bench/dvd/run_chap_edge.sh [--red]
 set -u
@@ -104,6 +109,37 @@ if [ $RED -eq 1 ]; then
         "s/ || (vm_mode \&\& cmd_nr_pgm != 8'd0)//"
     mutate R9_no_r_emit   $RD $RTB "$RX" "K L" \
         "s/^                end else if (chap_edge_go) begin/                end else if (1'b0) begin/"
+
+    # VM: dvd_vm_tb prints "FAIL: S27-Vn: ..." for its own arms; any OTHER
+    # failure (another scenario disturbed) reads as X, so a mutation that
+    # leaks outside S27 cannot pass as "exactly its arms".
+    mutate_vm() {
+        local name=$1 want=$2 expr=$3
+        local src="$OUT/$name.sv"
+        sed "$expr" "$VM" > "$src"
+        if cmp -s "$VM" "$src"; then
+            echo "  FAIL $name: the sed matched nothing (mutation is stale)"; fail=1; return
+        fi
+        if ! iverilog -g2012 -o "$OUT/$name" "$src" bench/dvd/dvd_vm_tb.sv 2>"$OUT/$name.build"; then
+            echo "  FAIL $name (build)"; sed 's/^/      /' "$OUT/$name.build" | head; fail=1; return
+        fi
+        timeout 900 vvp "$OUT/$name" > "$OUT/$name.log" 2>&1
+        local got
+        got=$(grep -E '^FAIL:' "$OUT/$name.log" \
+              | sed -E 's/^FAIL: S27-(V[0-9]+):.*/\1/; t; s/.*/X/' \
+              | sort -u | tr '\n' ' ' | sed 's/ $//')
+        if [ "$got" = "$want" ]; then
+            echo "  ok   $name -> fails [$got]"
+        else
+            echo "  FAIL $name: failed [$got], expected [$want]"; fail=1
+        fi
+    }
+    mutate_vm N1_natural    "V1 V2 V7" "s/usr_edge <= 1'b1;/usr_edge <= 1'b1; nat_src <= 1'b1;/"
+    mutate_vm N2_no_mask    "V3 V4"    "s/assign vm_adv = vm_adv_q \&\& !usr_edge;/assign vm_adv = vm_adv_q;/"
+    mutate_vm N3_no_next    "V2 V7"    "s/if (usr_edge \&\& next_pgcn != 16'd0) begin/if (1'b0) begin/"
+    mutate_vm N4_first_pg   "V5"       "s/jump_pgn <= 8'hFF;/jump_pgn <= 8'd0;/"
+    mutate_vm N5_in_menu    "V6"       "s/if (!menu_active) begin/if (1'b1) begin/"
+    mutate_vm N6_mask_stuck "V8"       "s|usr_edge <= 1'b0;   // a chain has ended|// usr_edge never cleared|"
 fi
 
 if [ $fail -eq 0 ]; then echo "RUN_CHAP_EDGE: PASS"; else echo "RUN_CHAP_EDGE: FAIL"; exit 1; fi
