@@ -164,6 +164,12 @@ module dvd_iso_reader #(
     // (vm_jump_prev_pg). Only with Disc Menus on (vm_mode): Auto has no VM.
     output reg        chap_edge,     // pulse: the burst hit the title's edge
     output reg        chap_edge_dir, // 1 = Next (run POST), 0 = Prev (prev_pgcn)
+    // USER STILL OFF (UOP18, audit item 5; docs/dvd_nav.md "Still off"). A pulse
+    // ends the still parked in S_STILL by running the action its timer would have
+    // run at expiry (still_next). It is ignored on a hold that has no defined
+    // continuation (still_act = 0) and while no still is parked. emu sends it only
+    // for a still with no buttons armed or pending.
+    input             still_off,
     output reg        seek_ack,      // pulse: a seek was accepted (drives load_flush)
     output     [7:0]  cur_cell,      // currently-playing cell index (for UI)
     output            cell_ready,    // 1 = cell-mode active (seek available)
@@ -1223,6 +1229,17 @@ reg [15:0] still_secs;                // seconds remaining (16-bit: a duration-
                                       // residual hold can exceed 255 s, Phase 6)
 reg [1:0]  still_next;                // deferred action after the timer/button
 reg        still_last;                // the still cell was the PGC's last cell
+// 1 = still_next/still_last describe this hold, so a user Still off may run them.
+// Set at the four cell-end entries (timed, duration-residual at a cell command,
+// duration-residual at PGC end, indefinite 0xFF), all with Disc Menus on.
+// 0 on the holds with no continuation of their own: the malformed-menu-cell hold,
+// the menus-off menu hold and the POST fall-through hold (a PGC still or no
+// next_pgcn). There the key is a no-op, as it is on a real player at a dead end.
+// ★ still_timed and still_act are cleared on EVERY exit that is not the action
+// (jump_go, seek_jump, mount). Before 2026-10-05 a timed still left by a button
+// jump kept still_timed=1, and a later hold that never set it (the three above)
+// counted down the stale still_secs and fired the stale still_next.
+reg        still_act;
 
 // ---- AUTHORED CELL DURATION (real-player cell timing) --------------------
 // A cell's presentation lasts its authored playback time (C_PBTM); the reader
@@ -2547,6 +2564,7 @@ always @(posedge clk or negedge rst_n) begin
         sel_ret      <= 1'b0;
         nav_ready    <= 1'b0;
         still_pend   <= 1'b0;
+        still_act    <= 1'b0;
         adv_pend     <= 1'b0;
         jttn_l       <= 7'd0;
         jpgn_l       <= 8'd0;
@@ -3021,6 +3039,8 @@ always @(posedge clk or negedge rst_n) begin
             sel_ret         <= 1'b0;
             nav_ready       <= 1'b0;
             still_pend      <= 1'b0;
+            still_timed     <= 1'b0;
+            still_act       <= 1'b0;
             adv_pend        <= 1'b0;
             follow_cnt      <= 2'd0;
             jttn_l          <= 7'd0;
@@ -3035,6 +3055,8 @@ always @(posedge clk or negedge rst_n) begin
             jump_pending <= 1'b0;
             seek_pending <= 1'b0;       // a jump outranks a pending seek
             still_pend   <= 1'b0;
+            still_timed  <= 1'b0;
+            still_act    <= 1'b0;
             adv_pend     <= 1'b0;
             vmw_pgc_pend <= 1'b0;
             jump_ack     <= 1'b1;
@@ -3165,6 +3187,8 @@ always @(posedge clk or negedge rst_n) begin
             // (ps_demux/audio_ring/av_sync) re-anchors on the new cell's PTS.
             strm_done    <= 1'b0;
             still_pend   <= 1'b0;
+            still_timed  <= 1'b0;
+            still_act    <= 1'b0;
             adv_pend     <= 1'b0;
             vmw_pgc_pend <= 1'b0;
             wr_ptr       <= 0;
@@ -4640,6 +4664,7 @@ always @(posedge clk or negedge rst_n) begin
                         if (cell_i + 8'd1 >= cell_count) begin
                             strm_done  <= 1'b1;
                             still_pend <= 1'b1;        // menu end: hold, don't black out
+                            still_act  <= 1'b0;        // no continuation: Still off no-op
                             state      <= S_STREAM;
                         end else begin
                             cell_i     <= cell_i + 8'd1;
@@ -5293,6 +5318,7 @@ always @(posedge clk or negedge rst_n) begin
                                     still_secs  <= cm_rd[32] ? cell_dur_w
                                                              : {8'd0, cm_rd[15:8]};
                                     still_timed <= 1'b1;
+                                    still_act   <= vm_mode;   // menus-off: no Still off
                                     still_last  <= (cell_i + 8'd1 >= cell_count);
                                     still_next  <=
                                         (vm_mode && cm_rd[7:0] != 8'd0) ? STILL_CMD :
@@ -5318,6 +5344,7 @@ always @(posedge clk or negedge rst_n) begin
                                         // jump_go (unchanged).
                                         still_secs  <= dur_resid_w;
                                         still_timed <= 1'b1;
+                                        still_act   <= 1'b1;
                                         still_last  <= (cell_i + 8'd1 >= cell_count);
                                         still_next  <= STILL_CMD;
                                         strm_done   <= 1'b1;
@@ -5355,7 +5382,18 @@ always @(posedge clk or negedge rst_n) begin
                                     // the video playing through and looping. Movies
                                     // never author an in-title 0xFF still, so this is
                                     // safe. Buttons (nav_pci) arm during S_STILL.
+                                    // USER STILL OFF: record the continuation the
+                                    // timer path would take, so the key can run it
+                                    // (libdvdnav dvdnav_still_skip -> vm_get_next_cell:
+                                    // the next cell, or the PGC end and its POST).
+                                    // With vm_mode this arm is reached only with no
+                                    // cell command (the command branch above
+                                    // outranks the still), so STILL_CMD never applies.
                                     still_timed <= 1'b0;
+                                    still_act   <= vm_mode;
+                                    still_last  <= (cell_i + 8'd1 >= cell_count);
+                                    still_next  <= (cell_i + 8'd1 >= cell_count) ?
+                                                   STILL_PGEND : STILL_NEXT;
                                     strm_done  <= 1'b1;
                                     still_pend <= 1'b1;   // drain, then S_STILL
                                 end else if (angle_active) begin
@@ -5387,6 +5425,7 @@ always @(posedge clk or negedge rst_n) begin
                                         // Phase-B tail-drain before POST).
                                         still_secs  <= dur_resid_w;
                                         still_timed <= 1'b1;
+                                        still_act   <= 1'b1;
                                         still_last  <= 1'b1;
                                         still_next  <= STILL_PGEND;
                                         still_pend  <= 1'b1;   // drain, then S_STILL
@@ -5408,8 +5447,10 @@ always @(posedge clk or negedge rst_n) begin
                                             next_pgcn != 16'd0 &&
                                             next_pgcn <= nr_srp_l)
                                             adv_pend   <= 1'b1;
-                                        else
+                                        else begin
                                             still_pend <= 1'b1;
+                                            still_act  <= 1'b0;   // menus off: no Still off
+                                        end
                                     end
                                 end else begin
                                     cell_i     <= cell_i + 8'd1;
@@ -5532,45 +5573,51 @@ always @(posedge clk or negedge rst_n) begin
             // ⚠ Its only live trigger was vbuf_empty (the menu_snap input was
             // hardwired 0 once the Snappy/Smooth toggle went, and is deleted) -- and
             // vbuf_empty means the decoder had already consumed everything.
+            // USER STILL OFF (UOP18, docs/dvd_nav.md "Still off"): the same deferred
+            // action, run on the key instead of the timer. One body, two triggers, so
+            // a skipped still can never continue differently from an expired one.
+            // still_act gates the key: it is 0 on the dead-end holds (see its decl).
             S_STILL: begin
-                if (still_timed && sec_tick) begin
-                    // TIMED hold: count down at 1 Hz, then run the deferred action
-                    // (a menu button that fires a VM jump exits earlier via jump_go).
-                    if (still_secs <= 16'd1) begin
-                        still_timed <= 1'b0;
-                        still_pend  <= 1'b0;
-                        case (still_next)
-                        STILL_CMD: begin
-                            vm_cell_cmd <= 1'b1;
-                            vmw_pgc     <= 1'b0;
-                            vmw_last    <= still_last;
-                            vmw_tmr     <= 24'd0;
-                            state       <= S_VM_WAIT;
-                        end
-                        STILL_PGEND: begin
-                            // Funnel through the S_STREAM PGC-end gate (the
-                            // vmw_last precedent) so a TITLE-domain timed
-                            // still inherits the tail-drain wait before POST
-                            // runs. Cache is already drained, so for menus
-                            // this is the same dispatch one state hop later;
-                            // for a title the gate adds the vbuf_empty wait.
-                            if (vm_mode) begin
-                                vmw_pgc_pend <= 1'b1;
-                                strm_done    <= 1'b1;
-                                state        <= S_STREAM;
-                            end else
-                                state <= S_DONE;
-                        end
-                        default: begin   // STILL_NEXT
-                            cell_i     <= cell_i + 8'd1;
-                            cell_raddr <= cell_i + 8'd1;
-                            strm_done  <= 1'b0;
-                            state      <= S_CELL_LOAD;
-                        end
-                        endcase
-                    end else
-                        still_secs <= still_secs - 16'd1;
-                end
+                if ((still_timed && sec_tick && still_secs <= 16'd1) ||
+                    (still_off && still_act)) begin
+                    // TIMED hold expired, or the user ended the still: run the
+                    // deferred action (a menu button that fires a VM jump exits
+                    // earlier via jump_go).
+                    still_timed <= 1'b0;
+                    still_act   <= 1'b0;
+                    still_pend  <= 1'b0;
+                    case (still_next)
+                    STILL_CMD: begin
+                        vm_cell_cmd <= 1'b1;
+                        vmw_pgc     <= 1'b0;
+                        vmw_last    <= still_last;
+                        vmw_tmr     <= 24'd0;
+                        state       <= S_VM_WAIT;
+                    end
+                    STILL_PGEND: begin
+                        // Funnel through the S_STREAM PGC-end gate (the
+                        // vmw_last precedent) so a TITLE-domain timed
+                        // still inherits the tail-drain wait before POST
+                        // runs. Cache is already drained, so for menus
+                        // this is the same dispatch one state hop later;
+                        // for a title the gate adds the vbuf_empty wait.
+                        if (vm_mode) begin
+                            vmw_pgc_pend <= 1'b1;
+                            strm_done    <= 1'b1;
+                            state        <= S_STREAM;
+                        end else
+                            state <= S_DONE;
+                    end
+                    default: begin   // STILL_NEXT
+                        cell_i     <= cell_i + 8'd1;
+                        cell_raddr <= cell_i + 8'd1;
+                        strm_done  <= 1'b0;
+                        state      <= S_CELL_LOAD;
+                    end
+                    endcase
+                end else if (still_timed && sec_tick)
+                    // TIMED hold: count down at 1 Hz
+                    still_secs <= still_secs - 16'd1;
             end
 
             // ------------------------------------------------------------
@@ -5608,8 +5655,13 @@ always @(posedge clk or negedge rst_n) begin
                             follow_cnt <= 2'd0;
                             cell_mode  <= 1'b0;
                             state      <= S_SRP_FETCH;
-                        end else
-                            state <= menu_dom ? S_STILL : S_DONE;
+                        end else begin
+                            // POST fell through with nothing to follow (a PGC
+                            // still or no next_pgcn): a dead end, so a user
+                            // Still off has nothing to run here.
+                            still_act <= 1'b0;
+                            state     <= menu_dom ? S_STILL : S_DONE;
+                        end
                     end else if (vmw_last) begin
                         // the waited cell was the last: now it's a PGC end
                         strm_done     <= 1'b1;

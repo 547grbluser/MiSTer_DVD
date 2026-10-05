@@ -102,7 +102,7 @@ module iso_reader_lu_tb;
         .lu_lang_pref(lang_pref),
         .aud_drained(1'b1), .vbuf_empty(1'b0), 
         .jump_ttn(7'd0), .jump_pgn(8'd0), .jump_ptt(10'd0),
-        .vm_mode(1'b0), .vm_adv(1'b0), .vm_replay(1'b0),
+        .still_off(1'b0), .vm_mode(1'b0), .vm_adv(1'b0), .vm_replay(1'b0),
         .vm_cell_cmd(), .vm_pgc_end(), .nav_ready_o(), .auto_vts(), .cell_count_o(),
         .pm_we(), .pm_waddr(), .pm_wdata(), .cmd_nr_pgm(),
         .seek_pulse(1'b0), .seek_natural(1'b0), .seek_cell(8'd0), .seek_ack(seek_ack),

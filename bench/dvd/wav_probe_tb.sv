@@ -72,7 +72,7 @@ module wav_probe_tb;
     dvd_iso_reader dut (
         .clk(clk), .rst_n(rst_n), .start(start), .file_size(file_size), .title_sel(4'd0), .vbuf_empty(1'b0), 
         .jump_ttn(7'd0), .jump_pgn(8'd0),
-        .vm_mode(1'b0), .vm_adv(1'b0), .vm_replay(1'b0),
+        .still_off(1'b0), .vm_mode(1'b0), .vm_adv(1'b0), .vm_replay(1'b0),
         .vm_cell_cmd(), .vm_pgc_end(), .nav_ready_o(), .auto_vts(), .cell_count_o(),
         .pm_we(), .pm_waddr(), .pm_wdata(), .cmd_nr_pgm(),
         .seek_rbn_pulse(seek_rbn_pulse), .seek_rbn(seek_rbn_r), .seek_tm_req(1'b0), .seek_tm_secs(17'd0), .seek_ack(seek_ack_w),
