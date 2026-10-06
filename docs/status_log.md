@@ -47,6 +47,10 @@ predate later confirmations; the `CLAUDE.md` index carries the reconciled status
   - **Fit:** `DVD_ditherlatin_20261006_1536.rbf`, SEED 7 unchanged. `dac_dither` 16.1 ALM
     (was 15.2). clk_dec 91.75 / 88.78 MHz, clk_mem 98.8 / 99.98 MHz (100 °C / −40 °C).
     `fmax_check` and `lint_undriven` pass.
+  - **After the rebase onto PR #163:** SEED 7 re-rolled (clk_mem 66.6 MHz, all inside
+    `mem_shim_burst`, a congestion detour). SEED 9 passes: clk_dec 90.59 / 86.11, clk_mem
+    96.58 / 93.76 → `DVD_ditherlatin_20261006_1829.rbf`. The CRT-tested build was the
+    pre-rebase one; the dither logic is identical.
   - **HW A/B (capture, 4 repeats at 480i):** line texture (grey) 0.257 → 0.055. The
     grey staircase is unchanged (0.51 → 0.53), and Off is identical between builds. The ×5
     contrast still shows the control's hatching gone. ⚠ The 480i blue staircase is

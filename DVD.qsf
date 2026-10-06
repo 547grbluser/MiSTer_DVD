@@ -1584,4 +1584,14 @@ set_global_assignment -name PHYSICAL_SYNTHESIS_COMBO_LOGIC OFF
 # SEED 7 pinned: best on BOTH clocks. ~38.7k ALMs (92 %), 519/553 M10K, 87 DSP.
 # -> releases/DVD_stilloff_20261005_2238.rbf. (The sweep wrote SEED 29 here, the last seed it
 # fitted -- the trap recorded above; corrected by hand.)
-set_global_assignment -name SEED 7
+
+# DITHER LATIN (2026-10-06, feature/dither-latin, CORE_VERSION dev-ditherlatin): dac_dither's
+# threshold matrix (+1 ALM), rebased onto main after the .BUP fallback (PR #163). SEED 7 held
+# both clocks on each half alone, but the combined netlist re-rolled it: clk_dec 84.27/87.70,
+# clk_mem 66.59/68.37 -- every worst path inside mem_shim_burst (S_PEEK2 -> fill_to, one 4.97 ns
+# congestion detour between cells two rows apart), none of this change's logic. Sweep, first
+# seed tried (it stops at the first clk_dec PASS), clk_dec / clk_mem @100C / @-40C:
+#   SEED  9: 90.59/86.11 | 96.58/93.76
+# SEED 9 pinned: passes both gates, but clk_dec's cold corner has only +0.11 on 86.0.
+# 40,749 / 41,910 ALMs (97 %). -> releases/DVD_ditherlatin_20261006_1829.rbf.
+set_global_assignment -name SEED 9
