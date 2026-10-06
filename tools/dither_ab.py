@@ -24,7 +24,10 @@ Scores (lower = smoother):
          to the value. Only resolvable at 480i: the RetroTINK halves 480p's height.
 
 Capture: 1920x1080 uncompressed YUYV at 10 fps, full range (the card's MJPEG mode crushes the
-blacks). Capture-card traps (resolve it by name; drop its flat no-signal frames) are
+blacks). Set the RetroTINK's deinterlacer to Weave for these static patterns: under Bob the
+field shown alternates and moves the image a source line, and if the 10 fps grab catches both
+fields the frame average blends two edge positions (seen once as a "softer moon" on one arm
+only; every single frame was sharp, and under Weave On and Off were identical). Capture-card traps (resolve it by name; drop its flat no-signal frames) are
 in .claude/skills/hil-testing. Check nothing (OBS) holds the video node first.
 """
 import os, subprocess, sys, time
