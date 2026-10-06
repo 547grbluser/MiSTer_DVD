@@ -151,6 +151,7 @@ class IsoWalk(object):
         self.vd_lbas = []        # volume descriptor sectors
         self.dir_spans = []      # (lba, nsec) for root + VIDEO_TS
         self.ifo = {}            # NAME -> (lba, length)
+        self.bup = {}            # NAME -> (lba, length): the IFO backups (.BUP)
         self.menu_vob = {}       # vts -> (lba, length); 0 = VIDEO_TS.VOB
         self.title_vob = {}      # vts -> [(lba, length), ...]
         self._walk()
@@ -241,6 +242,11 @@ class IsoWalk(object):
             base = nm.split(b";")[0]
             if base.endswith(b".IFO"):
                 self.ifo[base.decode("latin-1")] = (ext, dl)
+            elif base.endswith(b".BUP"):
+                # nav data like the IFO it backs up: the core falls back to it
+                # when an IFO's header is bad (docs/dvd_nav.md "IFO header gate"),
+                # so a field report must carry it to replay that path
+                self.bup[base.decode("latin-1")] = (ext, dl)
             elif base == b"VIDEO_TS.VOB":
                 self.menu_vob[0] = (ext, dl)
             elif base.startswith(b"VTS_") and base.endswith(b".VOB"):
@@ -272,6 +278,7 @@ class IsoWalk(object):
             "n_vts": len([k for k in self.ifo if k.startswith("VTS_")]),
             "n_titles": n_titles,
             "ifo_files": sorted(self.ifo),
+            "bup_files": sorted(self.bup),
         }
 
     def fingerprint(self):
@@ -384,7 +391,7 @@ def collect(iso, nav_packs=False, nav_scan_mb=512, verbose=True,
     lbas = list(iso.vd_lbas)
     for lba, nsec in iso.dir_spans:
         lbas.extend(range(lba, lba + nsec))
-    for name, (lba, dl) in sorted(iso.ifo.items()):
+    for name, (lba, dl) in sorted(iso.ifo.items()) + sorted(iso.bup.items()):
         lbas.extend(range(lba, lba + (dl + SEC - 1) // SEC))
 
     # ---- the PLAYHEAD WINDOW (issue #81) -----------------------------------
@@ -609,7 +616,7 @@ def cmd_make(args):
     srcs = ([", menu NAV packs"] if args.nav_packs else []) + \
            ([", the NAV packs around the playhead"]
             if (args.nav_window and args.lba is not None) else [])
-    print("disc: ISO9660 directory records, the IFO tables%s," % "".join(srcs))
+    print("disc: ISO9660 directory records, the IFO tables and their .BUP backups%s," % "".join(srcs))
     print("and what you typed above. No video, no audio, no decryption keys, and")
     print("no file paths from this machine. It cannot be used to watch anything.")
     print("Attach it to a GitHub issue.")
@@ -617,7 +624,7 @@ def cmd_make(args):
 
 
 def verify(bundle, original):
-    """Rebuild to a temp sparse image, re-walk it, and compare IFO bytes.
+    """Rebuild to a temp sparse image, re-walk it, and compare IFO + BUP bytes.
 
     A bundle that cannot be walked is worse than no bundle -- the reporter has
     moved on by the time anyone opens it -- so this runs unconditionally.
@@ -629,7 +636,7 @@ def verify(bundle, original):
         unpack_to(bundle, tmp.name)
         a = IsoWalk(tmp.name)
         b = IsoWalk(original)
-        for name, (lba, dl) in sorted(b.ifo.items()):
+        for name, (lba, dl) in sorted(b.ifo.items()) + sorted(b.bup.items()):
             n = (dl + SEC - 1) // SEC
             for i in range(n):
                 if a.sec(lba + i) != b.sec(lba + i):
