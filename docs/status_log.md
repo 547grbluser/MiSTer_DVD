@@ -54,10 +54,10 @@ predate later confirmations; the `CLAUDE.md` index carries the reconciled status
     - Every new axis was checked on a known vehicle, and the `aa_*` axes also on synthetic
       HLIs.
     - **The new order:**
-      1. Title key on a disc with no Title menu: 88 discs. 84 of them replay the boot logos,
-         then land on the main menu, where the book and libdvdnav no-op.
-      2. An indefinite still with a non-loop cell command in a title: 7 discs, mostly
-         games. Unverified; `nav_diff` first.
+      1. Title key on a disc with no Title menu: 88 discs. 84 replay the boot chain to the
+         main menu, 64 of them with logos first, where the book and libdvdnav no-op.
+      2. An indefinite still with a non-loop cell command in a title: 7 discs, 5 of
+         them games. Unverified; `nav_diff` first.
       3. A second Title press resumes: book-only, a user decision.
       4. `auto_action`: 0 visible.
       5. Random playback: ROBOTS_43 only.

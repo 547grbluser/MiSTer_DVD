@@ -611,8 +611,10 @@ in `CONF_STR`. Design: `docs/cdda.md` "`.cue` sheets". ⛔ CHD still not support
 > partial / missing, and against which trusted reference" map now lives in
 > **[`docs/conformance.md`](conformance.md)** (VM, IFO tables, in-stream NAV, plus a
 > reference-suspect list of libdvdnav's own FIXME/HACK regions and a prevalence-ordered gap
-> list). Work the open Phase-6 nav items (exact PTT/chapters, parental, region, UOP, counter
-> GPRMs, menu audio) against that matrix, not disc-by-disc. The method: libdvdnav is a
+> list). Work the open nav items against that matrix, not disc-by-disc. *(The Phase-6 list once
+> named here, exact PTT/chapters, counter GPRMs, menu audio and SPRM20 region, has shipped,
+> and UOP is ⛔ by decision. Parental remains. The current queue is "2026-10-01 spec-audit"
+> below.)* The method: libdvdnav is a
 > *baseline hypothesis*, cross-checked against *DVD Demystified* (`dvd_repos/`) and real-player
 > behavior — see the white-rabbit / seamless-branch ILVU precedent (PR fj#112).
 > **Phase 2 (corpus census + golden-trace oracle) ✅ done 2026-07-13:** `tools/dvd_census.py`
@@ -646,8 +648,9 @@ game discs plus a seeded random 100; numbers and method in
    PGCI_UT exists but has no entry-2 PGC.
    - **What happens.** The reader's entry scan misses and takes SRP[0], which is VMGM
      PGC 1 (`dvd_iso_reader.sv` `S_SRP_EVAL`). On 84 of the 88 discs that PGC is the boot
-     chain. Title therefore replays the opening logos (14 s typical, up to 28 s) and then
-     lands on the main menu.
+     chain, which ends on the main menu. On **64** of them Title first replays the opening
+     logos (14 s typical, up to 28 s). On the other 20, PGC 1 has no cells, so Title acts
+     like Menu.
    - **What should happen.** The book (3rd ed. p. 9-26, quoting the spec: "the transition
      … is not actually executed") and libdvdnav (`get_ID` → `set_PGCN` fails, domain
      restored) make the key a no-op.
@@ -662,7 +665,7 @@ game discs plus a seeded random 100; numbers and method in
    - Vehicles: SPIDER-MAN_2, PANIC_ROOM_SUPERBIT, TOKYO_GODFATHERS (Sony/Columbia
      authoring, VMGM entry ids all 0x00).
 2. **Indefinite still + a non-loop cell command in a title (audit class C residual): 7
-   discs, 6 of them games.** The discs are Thayer's Quest, Deal or No Deal, Tomb Raider,
+   discs, 5 of them games.** The discs are Thayer's Quest, Deal or No Deal, Tomb Raider,
    HP Hogwarts Challenge, Space Pirates, BEAST_MASTER and Land Before Time.
    - **What happens.** The reader runs the cell command first (after serving any unspent
      cell duration). Often that command is `LinkTailPGC`, the "no answer" branch.
