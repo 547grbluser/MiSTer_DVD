@@ -621,7 +621,7 @@ in `CONF_STR`. Design: `docs/cdda.md` "`.cue` sheets". ⛔ CHD still not support
 > **top gap confirmed = exact chapters/PTT (7/7 discs); interactive GPRM-counter/NVTMR promoted
 > above parental on measured prevalence (3/7 game discs).** Phase 3 = close gaps in that order.
 
-### 🔧 .BUP fallback when an IFO is unreadable (2026-10-06, `feature/bup-fallback`; sim + host proven, ⏳ HW — see `docs/dvd_nav.md` "IFO header gate and .BUP fallback")
+### ✅ .BUP fallback when an IFO is unreadable (2026-10-06, `feature/bup-fallback`; fabric ✅ HW-CONFIRMED A/B vs `main`, Main mirror ⏳ HW — see `docs/dvd_nav.md` "IFO header gate and .BUP fallback")
 
 The 3rd-edition audit's item 8. Two layers (user decision, 2026-10-06):
 - **Fabric.** The reader checks the `DVDVIDEO-VMG` / `DVDVIDEO-VTS` magic on each IFO's
@@ -633,8 +633,9 @@ The 3rd-edition audit's item 8. Two layers (user decision, 2026-10-06):
 Fallbacks are visible on telemetry word 14 bits 10–12 and in the logs, with no OSD message.
 Census: the library's only bad IFO headers are on ALADDIN_D2 (VTS_07 zeroed with a good
 BUP; VTS_06 both zeroed). Gates: `bench/dvd/run_bup.sh --red`, `main/tests/run_tests.sh
---red`. **Next:** HW. Run the `main` control arm first, then zeroed-IFO copies, ALADDIN_D2,
-and the Main fault hook.
+--red`. HW (A/B vs `main`): a zeroed VTSI gives back 7 chapters and the menu, and a zeroed
+VMGI boots identically. **Next:** the PR, then the Main mirror on a physical disc using the
+fault hook.
 
 ### ✅ Analog Dither: an ordered dither ahead of the I/O board's 6-bit DAC (2026-10-06; ✅ HW-measured via RGB capture: staircase halved at 480i and 480p, Off = `main`; ✅ HW-CONFIRMED on a CRT (S-Video 480i), ✅ MERGED PR #161 — see `docs/single_raster_analog.md` §8)
 

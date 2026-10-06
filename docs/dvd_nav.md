@@ -4790,7 +4790,7 @@ the in-title PCI/HLI **button highlight** (the white-rabbit *icon* itself; `nav_
 in-title but the subpicture-graphic plumbing in `emu.sv` is menu-gated → renders "white on
 white"), and the transport-HUD-overlaps-subtitle bug (MiB visual commentary).
 
-## IFO header gate and .BUP fallback (audit item 8, 2026-10-06) — 🔧 sim-verified, ⏳ HW (`feature/bup-fallback`)
+## IFO header gate and .BUP fallback (audit item 8, 2026-10-06) — ✅ HW-CONFIRMED A/B vs `main` (`feature/bup-fallback`)
 
 The 2026-10-01 *DVD Demystified* audit, item 8: *"No `.BUP` fallback when an IFO is
 unreadable."* Every IFO has a byte-identical backup, `VIDEO_TS.BUP` / `VTS_nn_0.BUP`
@@ -4872,6 +4872,18 @@ The magic is therefore a safe trigger: every good IFO in the library carries it.
     run**. Its fixture serves no IFO sectors, so the mount now spends a BUP try and a revert
     on VTS_21. It still passes.
   - `iso_reader_atmos_tb` read `gmem` with a hardcoded 118-bit slice; that slice was updated.
+
+**HW (2026-10-06, A/B vs `main`, details in `docs/status_log.md`).** A copy of
+THE_FIRST_EASTER_RABBIT with VTS_01's IFO zeroed:
+- Disc Menus Off: `main` plays linearly with no chapters; the branch shows `CH 1/7` and
+  0:24:42, like the undamaged disc.
+- Disc Menus On: `main` never reaches the menu; the branch follows the undamaged disc's
+  exact PGC/VTS sequence to the same menu (read from the BUP), and Play gives 7 chapters.
+
+With `VIDEO_TS.IFO` zeroed, the boot is identical to the undamaged disc's, with
+`bup_vmg=1`.
+
+Fit: reader +259 ALMs, +1 M10K; SEED 7 closes both clocks at both corners.
 
 **Limitations.**
 - **No `.IFO` record but a `.BUP` record:** not handled. That is directory damage or a

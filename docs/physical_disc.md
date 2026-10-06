@@ -823,7 +823,9 @@ the worker:
 ## An unreadable IFO sector is served from its .BUP (audit item 8, 2026-10-06, `feature/bup-fallback`)
 
 **Status:** host-proven, with `main/tests/run_tests.sh --red` arms [21]–[29] and 10
-mutations, each caught by its own arm. ⏳ HW, which needs the fault hook below.
+mutations, each caught by its own arm. ⏳ HW. On 2026-10-06 the rig had no disc in the
+drive, and the library holds no CSS image; the fabric layer was HW-confirmed that day.
+Next: a physical disc and the fault hook below.
 
 Every IFO has a byte-identical backup (`VIDEO_TS.BUP`, `VTS_nn_0.BUP`), written after the
 title set's VOBs, on the other side of the disc from the IFO, so one scratch rarely takes

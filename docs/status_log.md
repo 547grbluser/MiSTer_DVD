@@ -22,8 +22,8 @@ predate later confirmations; the `CLAUDE.md` index carries the reconciled status
 
 ## Hardware status (THIS fork, verified 2026-06-21)
 
-- 🔧 **.BUP FALLBACK WHEN AN IFO IS UNREADABLE (audit item 8, 2026-10-06,
-  `dev-bupfallback`; sim + host proven, ⏳ HW).** Design: `docs/dvd_nav.md` "IFO header gate
+- ✅ **.BUP FALLBACK WHEN AN IFO IS UNREADABLE (audit item 8, 2026-10-06,
+  `dev-bupfallback`; fabric ✅ HW-CONFIRMED A/B vs `main`, Main mirror host-proven ⏳ HW).** Design: `docs/dvd_nav.md` "IFO header gate
   and .BUP fallback", `docs/physical_disc.md` "An unreadable IFO sector is served from its
   .BUP".
   - **Gap.** The Main zero-fills an unreadable sector and the reader never checked an IFO's
@@ -66,11 +66,34 @@ predate later confirmations; the `CLAUDE.md` index carries the reconciled status
   - **Not built.** A `.BUP` with no `.IFO` record (directory damage or a naming choice). In
     the census that is MILLIONAIRERUS's `VTS_01_1.IFO` naming, which is unplayable anyway.
     Table damage behind a good header is not retried in fabric (libdvdnav parity).
-  - **Next:** HW.
-    - Control arm `main`, then the branch, on copies of an ISO with `VIDEO_TS.IFO` or the
-      feature VTSI zeroed.
-    - ALADDIN_D2 as is.
-    - The fault hook on a CSS image.
+  - **HW (2026-10-06, rig, build `DVD_bupfallback_20261006_1604.rbf`; control arm =
+    `main`'s `DVD_lpcmfull_20261006_1255.rbf` through the same script first).** A copy of
+    THE_FIRST_EASTER_RABBIT on the rig's SD (deleted after), damaged with `dd`:
+    - **VTS_01 IFO zeroed, Disc Menus Off.** `main`: linear, `0:00:00` total, no chapter
+      field. Branch: `CH 1/7`, `0:24:42`, identical to the undamaged disc; Next Chapter
+      lands `CH 2/7`; flags `bup_vts=1`.
+    - **Same copy, Disc Menus On.** `main` never reaches the menu: at 80 s it is playing the
+      feature linearly. Branch, Debug Overlay on: the same PGC/VTS sequence as the
+      undamaged disc, sample for sample (PGC 3 / PGC 2 in VTS 1, PGC 1 in VTS 4, then the
+      VTS 1 menu). The menu came from the BUP (its VTSM UT lives in VTS_01) and looks the
+      same. Play → `CH 1/7`, `0:24:42`.
+    - **`VIDEO_TS.IFO` zeroed, Disc Menus On.** The same boot as the undamaged disc;
+      `bup_vmg=1`.
+    - An undamaged disc on the branch: flags `000`, same HUD as `main`.
+    - Lesson recorded: an early "black screen vs a trailer" difference was two shots taken
+      a few seconds apart across a scene change. The Debug Overlay PGC/VTS sequence settled
+      it, and showed the two runs were identical.
+    - **Not yet on HW: the Main mirror.** There was no disc in the rig's drive and no CSS
+      image in the library (every `.iso` there is decrypted, so stock Main's file path
+      serves it). Its gate is `main/tests` [21]–[29].
+  - **Fit (SEED 7, unchanged):** clk_dec 88.75 / 88.84 MHz (100 °C / −40 °C, gate 86),
+    clk_mem 96.61 / 98.26. Reader entity: +259 ALMs needed (4,389 → 4,648), +154 ALUTs,
+    +188 registers; +1 M10K (`gmem_rtl_0`, still inferred). Device "ALMs needed" reads
+    +1,506, but ALMs placed FELL 40,910 → 40,838; the swing is the fitter's
+    dense-packing estimate (2,625 → 1,064), not logic.
+  - **Next:** push/PR when asked. Then the Main mirror on HW: a physical disc in the drive,
+    with `/media/fat/dvd_fault_lbas` listing IFO sectors (expect the `ifo:` log line and flags
+    `000`) and then IFO + BUP sectors (expect `ifo_nogood`).
 
 - 🔧 **ANALOG DITHER: AN ORDERED DITHER AHEAD OF THE I/O BOARD'S 6-BIT VGA DAC (2026-10-06,
   `dev-dither`; ✅ HW-MEASURED via analog RGB capture, ✅ HW-CONFIRMED on a CRT by the
