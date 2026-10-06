@@ -44,6 +44,9 @@ predate later confirmations; the `CLAUDE.md` index carries the reconciled status
   - **Gates:** `run_dac_dither.sh --red`. New arms: [T7] lines, [T8] columns and [T9]
     adjacent pairs, each failed by its own matrix mutation (the old Bayer, the PWM ramp, a
     cyclic Latin square). 10 module and 7 wiring mutations in all.
+  - **Fit:** `DVD_ditherlatin_20261006_1536.rbf`, SEED 7 unchanged. `dac_dither` 16.1 ALM
+    (was 15.2). clk_dec 91.75 / 88.78 MHz, clk_mem 98.8 / 99.98 MHz (100 °C / −40 °C).
+    `fmax_check` and `lint_undriven` pass.
   - **Next:** a build from `feature/dither-latin`. HW A/B: the paused-ramp capture
     (480i/480p, cubic-residual score) against PR #161's build, then a look on the CRT.
     Expect the score to be no worse and the line texture to go at 5× contrast.
