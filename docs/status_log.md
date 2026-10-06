@@ -55,6 +55,9 @@ predate later confirmations; the `CLAUDE.md` index carries the reconciled status
     - `RR_IVX=-DRR_NO_BUP`: 51/51 arms IDENTICAL to `main`.
     - Gate on: only `iso_reader_real` differs, as predicted (its unserved VTS_21 IFO now
       costs a BUP try and a revert). It still passes.
+    - Found on the way, pre-existing: `iso_reader_atmos_tb` FAILS on `main` ("PGC13 not
+      loaded", cur_pgcn 1). It is bit-identical here, so it is not this branch's, but its
+      verdict line in the regress baseline is a FAIL. ⏳ Investigate separately.
   - **Gates:**
     - `bench/dvd/run_bup.sh --red`: arms A–I, 16 mutations;
     - `tools/check_bup_wiring.py --red`;

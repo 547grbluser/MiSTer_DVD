@@ -8,7 +8,7 @@
 #
 # GREEN: iso_reader_bup_tb (arms A-I) + the reader benches that share the gated
 #        reads: iso_reader_tmap_tb, iso_reader_vmgm_tb, iso_reader_ifo_tb,
-#        iso_reader_vm_tb, iso_reader_atmos_tb (a real VMGI/VTSI with BUPs)
+#        iso_reader_vm_tb
 #        + tools/check_bup_wiring.py --red (the emu.sv / Main telemetry seam)
 # RED  : mutated copies of the reader. Each must fail exactly its own arms.
 #   R1  no-compare     : the magic compare never fires          -> B C D E F G H I
@@ -59,7 +59,9 @@ run tmap  "ISO_READER_TMAP_TB: ALL TESTS PASSED" bench/dvd/iso_reader_tmap_tb.sv
 run vmgm  "ISO_READER_VMGM_TB: ALL TESTS PASSED" bench/dvd/iso_reader_vmgm_tb.sv $RD
 run ifo   "ISO_READER_IFO_TB: ALL TESTS PASSED"  bench/dvd/iso_reader_ifo_tb.sv $RD
 run vm    "ISO_READER_VM_TB: ALL TESTS PASSED"   bench/dvd/iso_reader_vm_tb.sv $RD
-run atmos "ISO_READER_ATMOS_TB: PASSED"          bench/dvd/iso_reader_atmos_tb.sv $RD
+# (iso_reader_atmos_tb, a real VMGI/VTSI with BUPs, is NOT run here: it fails on
+#  main too -- "PGC13 not loaded" -- so it cannot gate this. run_reader_regress.sh
+#  proves this branch leaves its trace bit-identical.)
 # emu.sv has no bench: the reader -> telemetry -> Main seam is read out of the files
 if python3 tools/check_bup_wiring.py --red > "$OUT/wiring.log" 2>&1; then
     echo "  PASS check_bup_wiring (+ its red self-test)"
