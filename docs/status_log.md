@@ -81,7 +81,8 @@ predate later confirmations; the `CLAUDE.md` index carries the reconciled status
   - ⏳ **Not fixed, pre-existing:** HDMI bitstream passthrough declares 96 kHz with
     `hdmi_audio_96k=1` (the Main writes reg 0x15/N from the ini).
   - **Fit (SEED 7):** +405 ALM, +1 M10K, +4 DSP. `clk_dec` 91.8/91.6 MHz; `clk_mem`
-    90.14/90.75 MHz, a thin pass (it runs at 90.0).
+    90.14/90.75 MHz, a thin pass (it runs at 90.0). Rebased onto PR #161: 39,120 ALM,
+    `clk_mem` 96.24/94.61 MHz, so the margin is back.
   - **HW (2026-10-06, `docs/lpcm_full.md` §12).**
     - Captured HDMI audio, control arm `main`: all seven formats pass on this build
       (mono/20, 5.0/24, 5.1/20, 7.1/16, 96k stereo/24, 96k 4.0/16, AC-3 1+1), and every

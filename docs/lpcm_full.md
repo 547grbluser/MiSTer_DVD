@@ -333,6 +333,17 @@ S/PDIF is unaffected. The manual (`audio/passthrough.md`) tells users to leave t
 (PR #157), and this netlist moved it. It passes the gate, so the build is flashable,
 but if the next change touches it, re-sweep the seed before trusting it.
 
+**Rebased onto `main` with Analog Dither (PR #161), 2026-10-06:**
+`releases/DVD_lpcmfull_20261006_1255.rbf`, SEED 7.
+
+| | ALM | M10K | DSP | `clk_dec` 100 °C / −40 °C | `clk_mem` 100 °C / −40 °C |
+|---|---|---|---|---|---|
+| rebased build | 39,120 | 520 | 91 | 92.58 / 89.56 MHz | **96.24 / 94.61 MHz** |
+
+`clk_mem`'s margin is back (4.6 MHz worst corner): the thin pass above was this
+placement, not the design. The hardware results in §12 were taken on the pre-rebase build.
+The dither touches only the analog DAC word in `sys_top`, which is not on the audio path.
+
 ## 12. Hardware (2026-10-06, rig .236, `DVD_lpcmfull_20261006_0207.rbf`)
 
 Method: `tools/lpcm_vob.py` makes the VOBs (FFmpeg's video, our group-aligned LPCM, a
