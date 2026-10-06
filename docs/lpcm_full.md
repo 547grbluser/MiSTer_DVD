@@ -251,9 +251,11 @@ engine.
 - Unchanged and green: `run_mp2`, `run_dts_dec`, `run_cb_copy`, `run_aud_retime`,
   `run_aud_switch`, `run_css`, `run_auddrain`, `run_seek_rf_pts`, `run_subpic`,
   `run_menudrain`, `run_mgl`, `run_disp_sched`, `run_dts`, `run_dts_seq`, `run_mp2_eng`,
-  `run_wav`, `run_vcd`, `run_stc_freerun` (its first run failed once: "dvd/lpcm_hb.sv: No
-  such file" in a build that writes to a shared `/tmp/aud_sim`; the same build by hand,
-  and a full rerun, are green), and all 13 `bench/ac3` suites. `run_front_cosim` now skips the 1+1 stream, which
+  `run_wav`, `run_vcd`, `run_stc_freerun`, and all 13 `bench/ac3` suites.
+  `run_stc_freerun`'s first run failed once ("dvd/lpcm_hb.sv: No such file" in its audio
+  build); the same build by hand, and a full rerun, are green. **Cause not found.** That
+  build writes the fixed path `/tmp/aud_sim`, which another worktree's copy of the
+  runner also writes, so a collision is plausible but unproven. `run_front_cosim` now skips the 1+1 stream, which
   `ac3_front` refuses by design.
 - `run_reader_regress.sh` is not applicable: `dvd_iso_reader` is untouched. Its runner
   only gained `lpcm_hb.sv` in the audio file list.
