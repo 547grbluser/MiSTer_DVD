@@ -327,6 +327,60 @@ if [ "$RED" -eq 1 ]; then
         "s/fcntl(fd, F_SETFD, fl | FD_CLOEXEC) == 0) n++;/1) n++;/" \
         css-lib-fd-inherited
 
+    # ---- dvd_css: an unreadable IFO sector is served from its .BUP (audit 8) ----
+    # No mirror at all: the shipped behaviour, the window fails / zero-fills.
+    red_case dvd_css.cpp dvd_css_test.cpp \
+        "FAIL \[21\] window returned" \
+        "s/if (n <= 0 \&\& pair_overlap(at, want))/if (0)/" \
+        css-no-bup-mirror
+    # The twin at the extent's START, not the same offset: [21] (offset 0) cannot
+    # tell, [22] must.
+    red_case dvd_css.cpp dvd_css_test.cpp \
+        "FAIL \[22\] slot 3 served from BUP+3" \
+        "s/{ \*twin = g_ifo\[i\].bup + (lba - g_ifo\[i\].ifo); \*in_bup = 0; return i; }/{ *twin = g_ifo[i].bup; *in_bup = 0; return i; }/" \
+        css-mirror-offset
+    # Not remembered: every window sends the drive back to the bad sector.
+    red_case dvd_css.cpp dvd_css_test.cpp \
+        "FAIL \[23\] drive commands that reached the bad sector" \
+        "s/\t\t\tmir_add(lba, 0);/\t\t\t;/" \
+        css-mirror-not-sticky
+    # IFO -> BUP only: a bad BUP sector (after the fabric switched to the BUP) is a hole.
+    red_case dvd_css.cpp dvd_css_test.cpp \
+        "FAIL \[24\] slot 5 served from IFO+5" \
+        "s/if (lba >= g_ifo\[i\].bup \&\& lba < g_ifo\[i\].bup + g_ifo\[i\].bup_nsec)/if (0)/" \
+        css-mirror-ifo-only
+    # A sector dead on both sides not remembered: the fabric's IFO -> BUP -> IFO
+    # header-gate sequence would put the drive through each bad copy again.
+    red_case dvd_css.cpp dvd_css_test.cpp \
+        "FAIL \[25b\] drive commands that reached a bad sector" \
+        "s/mir_add(lba, 1);/;/g; s/mir_add(twin, 1);/;/" \
+        css-dead-not-remembered
+    # The both-unreadable case left silent.
+    red_case dvd_css.cpp dvd_css_test.cpp \
+        "FAIL \[25\] the both-unreadable line logged" \
+        "/g_ifo\[slot\].logged |= 2;/d" \
+        css-dead-not-logged
+    # A pair whose lengths differ trusted anyway: the offset arithmetic is wrong.
+    red_case dvd_css.cpp dvd_css_test.cpp \
+        "FAIL \[26\] VTS_01 pair rejected" \
+        "s/if (g_ifo\[i\].ifo_nsec != g_ifo\[i\].bup_nsec || !g_ifo\[i\].ifo_nsec)/if (!g_ifo[i].ifo_nsec)/" \
+        css-mirror-len-unchecked
+    # Every failed window walked sector by sector, VOBs included.
+    red_case dvd_css.cpp dvd_css_test.cpp \
+        "FAIL \[27\] window over a bad VOB sector fails" \
+        "s/if (n <= 0 \&\& pair_overlap(at, want))/if (n <= 0)/" \
+        css-mirror-walks-vobs
+    # The table sized to what is common, not to the spec's 99 title sets.
+    red_case dvd_css.cpp dvd_css_test.cpp \
+        "FAIL \[28\] pairs registered" \
+        "s/#define MAX_IFO_SETS 100/#define MAX_IFO_SETS 64/" \
+        css-ifo-pairs-64
+    # The raw drive's read sent through libdvdcss, which is not there.
+    red_case dvd_css.cpp dvd_css_test.cpp \
+        "FAIL \[29\] window returned" \
+        "/if (raw_fd >= 0) return raw_rd(raw_fd, lba, buf, (int)count);/d" \
+        css-raw-via-dvdcss
+
     # ---- dvd_readahead: the RAM ring between the disc and the core ---------------
     # The drive probe issued while the worker is mid-read: it queues behind that
     # read in the drive and blocks the poll thread, i.e. the ring's own consumer.

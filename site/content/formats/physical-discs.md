@@ -39,6 +39,10 @@ With that in place: open the core with a disc in the drive and it plays; insert 
 the core is open and it plays; eject to stop. Remove the `[DVD]` section, or the binary, and
 the core reverts to image-only playback with the stock Main — nothing else changes.
 
+A scratch over the disc's navigation data is read around: when a sector of a menu or
+chapter file can't be read, the same sector of its backup copy is used instead (see
+[Troubleshooting](../reference/troubleshooting.md#a-scratched-disc-has-no-menus-or-chapters)).
+
 This also plays a physical **[Video CD or Super Video CD](vcd-svcd.md)** from the same
 drive — see the next section, since it needs none of the CSS/libdvdcss steps below.
 

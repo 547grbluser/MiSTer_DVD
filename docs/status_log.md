@@ -22,6 +22,84 @@ predate later confirmations; the `CLAUDE.md` index carries the reconciled status
 
 ## Hardware status (THIS fork, verified 2026-06-21)
 
+- ✅ **.BUP FALLBACK WHEN AN IFO IS UNREADABLE (audit item 8, 2026-10-06,
+  `dev-bupfallback`; fabric ✅ HW-CONFIRMED A/B vs `main`; Main mirror ✅ HW-CONFIRMED on a
+  physical disc; ✅ MERGED (PR #163)).** Design: `docs/dvd_nav.md` "IFO header gate
+  and .BUP fallback", `docs/physical_disc.md` "An unreadable IFO sector is served from its
+  .BUP".
+  - **Gap.** The Main zero-fills an unreadable sector and the reader never checked an IFO's
+    magic. A zeroed VMGI ran the VM's error chain; a zeroed VTSI played the title set
+    linearly with no chapters, menus or attributes. Nothing was reported. libdvdread and
+    libdvdnav re-open the `.BUP` (libdvdnav: header-only, `ifoOpenVMGI` / `ifoOpenVTSI`).
+  - **Decisions (user, 2026-10-06):** both layers; visible as telemetry plus a log line,
+    with no OSD message.
+  - **Fabric:** a header gate on the five IFO sector-0 reads.
+    - On a magic mismatch it re-reads from the BUP, and switches the base only when the BUP
+      passes.
+    - A bad BUP, or none, means the IFO is parsed as before.
+    - `gmem` goes from 118 to 150 bits.
+    - Sticky flags on telemetry word 14: bits 10 (`bup_vmg`), 11 (`bup_vts`) and 12
+      (`ifo_nogood`).
+  - **Main:** on a physical disc or CSS image, an IFO/BUP sector the drive cannot read is
+    served from the same offset of its twin.
+    - Remembered for the mount, including a negative record when both copies are dead.
+    - VOBs never take part.
+    - The no-libdvdcss drive now enumerates too.
+    - A HIL fault hook, `/media/fat/dvd_fault_lbas`, works behind `dvd_hil`.
+  - **Census (`tools/bup_scan.py`, 1,556 images):**
+    - 12,403 pairs, none differ in length.
+    - The only bad IFO headers in the library are on **ALADDIN_D2**, a MakeMKV rip of a
+      damaged disc. VTS_07's IFO is all zeros and its BUP is intact; VTS_06 has both
+      zeroed.
+    - 30 pairs differ in content. All are protected or interactive discs whose IFO is fine.
+  - **Regress proof.**
+    - `RR_IVX=-DRR_NO_BUP`: 51/51 arms IDENTICAL to `main`.
+    - Gate on: only `iso_reader_real` differs, as predicted (its unserved VTS_21 IFO now
+      costs a BUP try and a revert). It still passes.
+    - Found on the way, pre-existing: `iso_reader_atmos_tb` FAILS on `main` ("PGC13 not
+      loaded", cur_pgcn 1). It is bit-identical here, so it is not this branch's, but its
+      verdict line in the regress baseline is a FAIL. ⏳ Investigate separately.
+  - **Gates:**
+    - `bench/dvd/run_bup.sh --red`: arms A–I, 16 mutations;
+    - `tools/check_bup_wiring.py --red`;
+    - `main/tests/run_tests.sh --red`: [21]–[29], 10 mutations;
+    - `check_player_regs_wiring.py`: its word-14 mutation was re-anchored.
+  - **Not built.** A `.BUP` with no `.IFO` record (directory damage or a naming choice). In
+    the census that is MILLIONAIRERUS's `VTS_01_1.IFO` naming, which is unplayable anyway.
+    Table damage behind a good header is not retried in fabric (libdvdnav parity).
+  - **HW (2026-10-06, rig, build `DVD_bupfallback_20261006_1604.rbf`; control arm =
+    `main`'s `DVD_lpcmfull_20261006_1255.rbf` through the same script first).** A copy of
+    THE_FIRST_EASTER_RABBIT on the rig's SD (deleted after), damaged with `dd`:
+    - **VTS_01 IFO zeroed, Disc Menus Off.** `main`: linear, `0:00:00` total, no chapter
+      field. Branch: `CH 1/7`, `0:24:42`, identical to the undamaged disc; Next Chapter
+      lands `CH 2/7`; flags `bup_vts=1`.
+    - **Same copy, Disc Menus On.** `main` never reaches the menu: at 80 s it is playing the
+      feature linearly. Branch, Debug Overlay on: the same PGC/VTS sequence as the
+      undamaged disc, sample for sample (PGC 3 / PGC 2 in VTS 1, PGC 1 in VTS 4, then the
+      VTS 1 menu). The menu came from the BUP (its VTSM UT lives in VTS_01) and looks the
+      same. Play → `CH 1/7`, `0:24:42`.
+    - **`VIDEO_TS.IFO` zeroed, Disc Menus On.** The same boot as the undamaged disc;
+      `bup_vmg=1`.
+    - An undamaged disc on the branch: flags `000`, same HUD as `main`.
+    - Lesson recorded: an early "black screen vs a trailer" difference was two shots taken
+      a few seconds apart across a scene change. The Debug Overlay PGC/VTS sequence settled
+      it, and showed the two runs were identical.
+    - **Not run on HW:** the VTSI *and* its BUP both zeroed (the `ifo_nogood` revert).
+      Bench arms E and F cover it.
+    - **The Main mirror, on a physical disc (THE_FORCE_AWAKENS, via the fault hook).**
+      - Faulting all 43 sectors of the feature's IFO: the BUP served them, with the same
+        `CH 2/51` and 2:17:57 and flags `000`.
+      - Faulting IFO and BUP sector 0: `unreadable in BOTH`, then the gate's
+        IFO → BUP → revert, linear playback, `ifo_nogood=1`.
+      - That pressing has real EIO sectors at sector 0 of three of its BUPs.
+      - Details: `docs/physical_disc.md`.
+  - **Fit (SEED 7, unchanged):** clk_dec 88.75 / 88.84 MHz (100 °C / −40 °C, gate 86),
+    clk_mem 96.61 / 98.26. Reader entity: +259 ALMs needed (4,389 → 4,648), +154 ALUTs,
+    +188 registers; +1 M10K (`gmem_rtl_0`, still inferred). Device "ALMs needed" reads
+    +1,506, but ALMs placed FELL 40,910 → 40,838; the swing is the fitter's
+    dense-packing estimate (2,625 → 1,064), not logic.
+  - **Next:** none for this feature. Optional: a disc whose IFO is the unreadable copy.
+
 - 🔧 **ANALOG DITHER: AN ORDERED DITHER AHEAD OF THE I/O BOARD'S 6-BIT VGA DAC (2026-10-06,
   `dev-dither`; ✅ HW-MEASURED via analog RGB capture, ✅ HW-CONFIRMED on a CRT by the
   maintainer, ✅ MERGED (PR #161)).**

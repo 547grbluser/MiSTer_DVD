@@ -704,7 +704,7 @@ assign CE_PIXEL = interlaced_eff ? ce_pix_q : 1'b1;
 // the branch changes the netlist anyway - and NEVER PER COMMIT. Do not derive
 // either from a git SHA or a timestamp: every compile would become a new
 // netlist. Same-day rebuilds on one branch append a digit ("dev-seekrealign2").
-`define CORE_VERSION "dev-lpcmfull"
+`define CORE_VERSION "dev-bupfallback"
 
 parameter CONF_STR = {
     "DVD;;",
@@ -1241,7 +1241,7 @@ dvd_telem dvd_telem_inst (
     .disp_lag   (av_disp_lag[19:4]),     // clk_sys: displayed PTS - STC (word 11)
     .play_err   (dbg_aud_play_err),      // clk_sys: audio position vs anchor (word 12)
     .av_drift   (av_drift[19:4]),        // clk_sys: dispatched audio PTS - STC (word 13)
-    .sched_flags({6'd0, pr_rmask_allp, core_bob_act, core_sched_flags}),   // [9] = disc prohibits every region (SPRM20 fell back), [8] = progressive bob active   // clk_dec: what the scheduler saw (word 14)
+    .sched_flags({3'd0, ifo_nogood_w, ifo_bup_vts_w, ifo_bup_vmg_w, pr_rmask_allp, core_bob_act, core_sched_flags}),   // [12] = an IFO header was bad with no good .BUP, [11] = a VTSI / [10] = the VMGI is read from its .BUP (audit 8, sticky per mount), [9] = disc prohibits every region (SPRM20 fell back), [8] = progressive bob active   // clk_dec: what the scheduler saw (word 14)
     .sched_dur  (core_sched_dur),             // clk_dec: the duration it applied (word 15)
     // words 16..19, clk_dec: dec_duty's cycle counts /4096 (docs/decode_pacing.md)
     .dec_disp   (core_duty_disp),
@@ -2378,6 +2378,8 @@ reg  [1:0]  dpad_tm_age;            // the window that pairs it with ITS seek pu
 reg         dpad_hold;              // show the fired gesture's own answer (linger)
 reg         dpad_bar_seen;
 wire        tmap_used_w, tmap_fell_w;   // the reader: the last time seek used / skipped the map
+// the reader's IFO header gate (audit 8): sticky per mount, clk_sys levels -> word 14
+wire        ifo_bup_vmg_w, ifo_bup_vts_w, ifo_nogood_w;
 // ...and a HELD scrub's time (dvd/scrub_ctrl.sv): the preview, and on release in
 // a DVD title the time the reader seeks to (seek_rbn stays its fallback).
 wire        scrub_tm_req;           // pulses WITH scrub_seek_pulse
@@ -3666,6 +3668,9 @@ dvd_iso_reader dvd_iso_reader_inst (
     .seek_tm_secs   (dpad_tm_v ? dpad_tm_s : scrub_tgt_secs),
     .tmap_used      (tmap_used_w),
     .tmap_fell      (tmap_fell_w),
+    .ifo_bup_vmg    (ifo_bup_vmg_w),
+    .ifo_bup_vts    (ifo_bup_vts_w),
+    .ifo_nogood     (ifo_nogood_w),
     .chap_pulse     (chap_pulse),         // gamepad chapter skip (B2/B3)
     .chap_dir       (chap_dir),
     .chap_mag       (chap_mag),           // debounced burst magnitude (# chapters)

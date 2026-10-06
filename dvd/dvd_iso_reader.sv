@@ -81,7 +81,12 @@ module dvd_iso_reader #(
     // so bound at 60 s. This only ever fires when vbuf_empty never arrives (a
     // wedged decoder); normal transitions still exit early on vbuf_empty and are
     // unchanged. See docs/disc_sweep.md.
-    parameter DRAIN_WD = 31'd1_620_000_000
+    parameter DRAIN_WD = 31'd1_620_000_000,
+    // IFO header gate + .BUP fallback (audit 8, docs/dvd_nav.md "IFO header gate").
+    // 0 disables only the magic compare, so the gate never fires: used by
+    // bench/dvd/run_reader_regress.sh (RR_NO_BUP) to prove everything else is
+    // bit-identical to a reader without it. Always 1 in the core.
+    parameter BUP_EN = 1
 ) (
     input             clk,
     input             rst_n,
@@ -143,6 +148,12 @@ module dvd_iso_reader #(
     input      [16:0] seek_tm_secs,
     output reg        tmap_used,      // the last time seek landed through the map
     output reg        tmap_fell,      // ...or fell back to seek_rbn
+    // IFO header gate (audit 8). Sticky per mount (cleared on start), clk domain.
+    // An IFO whose sector 0 lacks its "DVDVIDEO-VMG"/"DVDVIDEO-VTS" magic is
+    // re-read from its .BUP; these say it happened (telemetry word 14 bits 10-12).
+    output reg        ifo_bup_vmg,    // VIDEO_TS.IFO header bad -> VIDEO_TS.BUP in use
+    output reg        ifo_bup_vts,    // a VTS_xx_0.IFO header bad -> its .BUP in use
+    output reg        ifo_nogood,     // a header bad and no good .BUP: parsed as before
     // Chapter (PTT) skip (Phase 8): jump to the previous/next chapter boundary.
     // Resolved in-fabric from the PGC program_map (chapter -> entry cell) against
     // the current cell, then executed via the seek_cell primitive. Title only.
@@ -709,8 +720,10 @@ localparam MAXGRP = 100;  // was 32 (see MAXEXT note): hold up to 99 VTS
 // wait state (S_LAT). Replaces four 32-entry async register files. Runs
 // once per mount, so 2 cycles/step is free. Phase-2 widened the row with the
 // per-VTS menu VOB extent (VTS_xx_0.VOB = VTSM_VOBS: ISO LBA + 2048-sectors).
-localparam GMEM_W = 8 + 7 + 7 + 32 + 32 + 32;   // 118
-reg [GMEM_W-1:0] gmem [0:MAXGRP-1];   // {vts, base, cnt, ifo_lba, menu_lba, menu_blk}
+// Audit 8 (2026-10-06) appended the VTS_xx_0.BUP LBA (the VTSI backup; 0 = none)
+// for the IFO header gate's fallback (docs/dvd_nav.md "IFO header gate").
+localparam GMEM_W = 8 + 7 + 7 + 32 + 32 + 32 + 32;   // 150
+reg [GMEM_W-1:0] gmem [0:MAXGRP-1];   // {vts, base, cnt, ifo_lba, menu_lba, menu_blk, bup_lba}
 reg [GMEM_W-1:0] gmem_q;              // registered read of gmem[sel_i]
 reg [6:0]  grp_count;   // widened for MAXGRP=100
 
@@ -730,6 +743,14 @@ reg [7:0]  best_vtsn;        // VTS number of the largest-VTS group
 reg [31:0] best_mnu_blk;     // largest menu VOB seen (2048-sectors)
 reg [7:0]  best_mnu_vts;     // its VTS number (0 = none)
 reg [31:0] sel_ifo_lba;      // VTSI LBA of the IFO-selected group
+// VTS_xx_0.BUP (VTSI backup) LBAs, alongside each *_ifo_lba above (0 = no BUP).
+// The BUP name-sorts before its IFO, so it is held pending exactly the same way.
+reg [31:0] pending_bup_lba;
+reg [7:0]  pending_bup_vts;
+reg [31:0] grp_bup_lba;
+reg [31:0] best_bup_lba;
+reg [31:0] sel_bup_lba;
+reg [31:0] jmp_bup_lba;      // the VTSM jump's group (S_SELECT sel_ret=1)
 
 // VMG menu VOB (VIDEO_TS.VOB = VMGM_VOBS) extent, captured in the walk.
 reg [31:0] vmgm_vob_lba;     // ISO LBA (0 = absent)
@@ -738,6 +759,7 @@ reg [31:0] vmgm_vob_blk;     // length in 2048-sectors
 // IFO (VMGI / TT_SRPT) navigation + selection
 reg [31:0] vmgi_lba;      // ISO LBA of VIDEO_TS.IFO (the VMGI)
 reg        vmgi_found;    // VIDEO_TS.IFO record seen during the VIDEO_TS walk
+reg [31:0] vmgi_bup_lba;  // ISO LBA of VIDEO_TS.BUP (0 = none, or already in use)
 reg [7:0]  target_vtsn;   // VTS number holding title 1 (from TT_SRPT)
 reg [6:0]  sel_base;      // IFO-selected group's extent base
 reg [6:0]  sel_cnt;       // IFO-selected group's extent count
@@ -748,6 +770,7 @@ reg [6:0]  sel_i;         // group-scan cursor (widened for MAXGRP=100)
 wire [6:0]  eff_base    = sel_valid ? sel_base    : best_base;
 wire [6:0]  eff_cnt     = sel_valid ? sel_cnt     : best_cnt;
 wire [31:0] eff_ifo_lba = sel_valid ? sel_ifo_lba : best_ifo_lba;
+wire [31:0] eff_bup_lba = sel_valid ? sel_bup_lba : best_bup_lba;
 
 // =========================================================================
 // PGC / cell timeline (Phase 7). After the title VTS is chosen we parse its
@@ -1586,6 +1609,43 @@ reg [5:0]  fi_save;     // fi latched at the straddle point (restored after the 
 reg [31:0] sec_base, sec_off;
 wire [31:0] sec_sum_w = sec_base + sec_off;
 reg        ld_pit, ld_pgc, ld_ptt, ld_tm;
+
+// IFO header gate (audit 8, docs/dvd_nav.md "IFO header gate and .BUP fallback").
+// The five reads of an IFO's sector 0 (First Play / VMGM / JumpTT on the VMGI,
+// S_PGC_BEGIN on the title VTSI, S_SELECT's VTSM branch) arm hdr_chk with the
+// kind of IFO they expect. While that read streams in, bytes 0..11 are compared
+// against "DVDVIDEO-VMG" / "DVDVIDEO-VTS" (zero cycles: the compare rides the
+// parse_buf write). At the read's completion a mismatch re-issues the same read
+// from the file's .BUP; the owning base register only moves to the BUP once the
+// BUP has passed the same check, so every later read of that IFO (tables, TMAP,
+// PTT reloads, UT walk) follows it. BUP bad too, or no BUP: re-read the IFO and
+// parse it exactly as a reader without the gate would. Why the magic: the Main
+// zero-fills a sector it cannot read (no error reaches the fabric), and this is
+// libdvdnav's ifoOpenVMGI/ifoOpenVTSI rule. Table damage BEHIND a good header is
+// not retried here (nor in libdvdnav); the Main mirrors IFO<->BUP sectors on a
+// read failure for physical discs (docs/physical_disc.md).
+localparam [1:0] HC_NONE = 2'd0, HC_VMG = 2'd1, HC_TT = 2'd2, HC_MNU = 2'd3;
+reg [1:0]  hdr_chk;     // this S_SECREAD is an IFO sector-0 read of this kind
+reg        hdr_try;     // ...and is the .BUP retry
+reg        hdr_bad;     // a magic byte mismatched during the current read
+wire [3:0] hdr_ba  = sd_buff_addr[3:0];
+wire       hdr_vmg = (hdr_chk == HC_VMG);
+wire [7:0] hdr_exp = (hdr_ba == 4'd0) ? "D" : (hdr_ba == 4'd1) ? "V" :
+                     (hdr_ba == 4'd2) ? "D" : (hdr_ba == 4'd3) ? "V" :
+                     (hdr_ba == 4'd4) ? "I" : (hdr_ba == 4'd5) ? "D" :
+                     (hdr_ba == 4'd6) ? "E" : (hdr_ba == 4'd7) ? "O" :
+                     (hdr_ba == 4'd8) ? "-" : (hdr_ba == 4'd9) ? "V" :
+                     (hdr_ba == 4'd10) ? (hdr_vmg ? "M" : "T")
+                                       : (hdr_vmg ? "G" : "S");
+wire       hdr_byte_bad = (BUP_EN != 0) && (hdr_chk != HC_NONE) &&
+                          state == S_SECREAD && sd_buff_wr &&
+                          sd_buff_addr[13:4] == 10'd0 && hdr_ba < 4'd12 &&
+                          sd_buff_dout != hdr_exp;
+// The fallback for the armed kind, and the IFO it stands in for (revert target).
+wire [31:0] hdr_bup = hdr_vmg ? vmgi_bup_lba :
+                      (hdr_chk == HC_TT) ? eff_bup_lba : jmp_bup_lba;
+wire [31:0] hdr_own = hdr_vmg ? vmgi_lba :
+                      (hdr_chk == HC_TT) ? eff_ifo_lba : jmp_ifo_lba;
 // Transport/VM seek executes at a block boundary. Phase-B additions: a
 // NATURAL seek (snat_l) also waits for the stream to be delivered (nat_drained,
 // bounded by DRAIN_WD); and ~jump_pending makes the "jump outranks seek" rule
@@ -1792,12 +1852,13 @@ always @(posedge clk) begin
     ext_blocks_q <= ext_mem[strm_idx][31:0];
     gmem_q       <= gmem[sel_i];
 end
-wire [7:0]  gq_vts     = gmem_q[117:110];
-wire [6:0]  gq_base    = gmem_q[109:103];
-wire [6:0]  gq_cnt     = gmem_q[102:96];
-wire [31:0] gq_ifo_lba = gmem_q[95:64];
-wire [31:0] gq_mnu_lba = gmem_q[63:32];
-wire [31:0] gq_mnu_blk = gmem_q[31:0];
+wire [7:0]  gq_vts     = gmem_q[149:142];
+wire [6:0]  gq_base    = gmem_q[141:135];
+wire [6:0]  gq_cnt     = gmem_q[134:128];
+wire [31:0] gq_ifo_lba = gmem_q[127:96];
+wire [31:0] gq_mnu_lba = gmem_q[95:64];
+wire [31:0] gq_mnu_blk = gmem_q[63:32];
+wire [31:0] gq_bup_lba = gmem_q[31:0];
 
 // -------------------------------------------------------------------------
 // Field taps - all read the 45-byte shadow (cheap async), NOT parse_buf
@@ -1848,7 +1909,8 @@ wire name_is_videots =
       rbuf[37]=="O" && rbuf[38]=="_" && rbuf[39]=="T" && rbuf[40]=="S";
 
 // VIDEO_TS.IFO (the VMGI) file record - latched to find the TT_SRPT.
-// "VIDEO_TS.IFO" = rbuf[33..44]; .BUP differs at [42..44] so this is exact.
+// "VIDEO_TS.IFO" = rbuf[33..44]; .BUP differs at [42..44] so this is exact
+// (and VIDEO_TS.BUP, the VMGI backup, is matched on its own below).
 wire name_is_vmgi_pfx =
       !is_dir &&
       rbuf[33]=="V" && rbuf[34]=="I" && rbuf[35]=="D" && rbuf[36]=="E" &&
@@ -1859,6 +1921,9 @@ wire name_is_vmgi_ifo =
 // VIDEO_TS.VOB = VMGM_VOBS, the VMG menu VOB (Phase-2 disc menus).
 wire name_is_vmgm_vob =
       name_is_vmgi_pfx && rbuf[42]=="V" && rbuf[43]=="O" && rbuf[44]=="B";
+// VIDEO_TS.BUP = the VMGI backup (audit 8: the IFO header gate's fallback).
+wire name_is_vmgi_bup =
+      name_is_vmgi_pfx && rbuf[42]=="B" && rbuf[43]=="U" && rbuf[44]=="P";
 
 // NAV-pack (NV_PCK / VOBU-first pack) signature, checked in the sector's
 // shadow (rbuf @fetch_base=0): pack start 00 00 01 BA @0 (every PS
@@ -1946,6 +2011,11 @@ wire name_is_vts_ifo =
       (rec_namelen>=8'd12) && !is_dir && pfx_vts &&
       rbuf[39]=="_" && rbuf[40]=="0" && rbuf[41]=="." &&
       rbuf[42]=="I" && rbuf[43]=="F" && rbuf[44]=="O";
+// VTS_xx_0.BUP, the VTSI backup (audit 8). Same shape as the IFO matcher.
+wire name_is_vts_bup =
+      (rec_namelen>=8'd12) && !is_dir && pfx_vts &&
+      rbuf[39]=="_" && rbuf[40]=="0" && rbuf[41]=="." &&
+      rbuf[42]=="B" && rbuf[43]=="U" && rbuf[44]=="P";
 wire [7:0]  vts_num    = (rbuf[37]-8'h30)*8'd10 + (rbuf[38]-8'h30);
 wire [7:0]  part_num   = rbuf[40]-8'h30;
 
@@ -2425,6 +2495,16 @@ always @(posedge clk or negedge rst_n) begin
         best_ifo_lba <= 32'd0;
         sel_ifo_lba  <= 32'd0;
         grp_ifo_lba  <= 32'd0;
+        best_bup_lba <= 32'd0;
+        sel_bup_lba  <= 32'd0;
+        grp_bup_lba  <= 32'd0;
+        vmgi_bup_lba <= 32'd0;
+        pending_bup_vts <= 8'hFF;
+        hdr_chk      <= HC_NONE;
+        hdr_try      <= 1'b0;
+        ifo_bup_vmg  <= 1'b0;
+        ifo_bup_vts  <= 1'b0;
+        ifo_nogood   <= 1'b0;
         // Phase-10: default to unconstrained (8) so pre-parse / linear playback
         // behaves exactly as before; the S_ATTR sweep tightens it per title.
         // Title-level state: reset ONLY here (rst_n), never on a per-seek pipe
@@ -2981,6 +3061,9 @@ always @(posedge clk or negedge rst_n) begin
         if (ld_tm)  tm_sec       <= sec_sum_w;
         {ld_pit, ld_pgc, ld_ptt, ld_tm} <= 4'b0000;
 
+        // IFO header gate: accumulate a magic mismatch while the read streams.
+        if (hdr_byte_bad) hdr_bad <= 1'b1;
+
         if (start) begin
             state      <= S_INIT;
             tm_v       <= 1'b0;            // a new disc: no cached time map
@@ -3012,6 +3095,16 @@ always @(posedge clk or negedge rst_n) begin
             best_ifo_lba    <= 32'd0;
             sel_ifo_lba     <= 32'd0;
             grp_ifo_lba     <= 32'd0;
+            best_bup_lba    <= 32'd0;
+            sel_bup_lba     <= 32'd0;
+            grp_bup_lba     <= 32'd0;
+            vmgi_bup_lba    <= 32'd0;
+            pending_bup_vts <= 8'hFF;
+            hdr_chk         <= HC_NONE;
+            hdr_try         <= 1'b0;
+            ifo_bup_vmg     <= 1'b0;   // sticky per mount (telemetry word 14)
+            ifo_bup_vts     <= 1'b0;
+            ifo_nogood      <= 1'b0;
             grp_mnu_lba     <= 32'd0;
             grp_mnu_blk     <= 32'd0;
             pending_ifo_vts <= 8'hFF;
@@ -3054,6 +3147,8 @@ always @(posedge clk or negedge rst_n) begin
             // and re-run the generalized parse for the requested domain/PGC.
             jump_pending <= 1'b0;
             seek_pending <= 1'b0;       // a jump outranks a pending seek
+            hdr_chk      <= HC_NONE;    // a pre-empted gated read never completes
+            hdr_try      <= 1'b0;
             still_pend   <= 1'b0;
             still_timed  <= 1'b0;
             still_act    <= 1'b0;
@@ -3095,6 +3190,7 @@ always @(posedge clk or negedge rst_n) begin
                     fetch_base  <= 11'd32;
                     vmgcat_base <= 11'd132;
                     fetch_ret   <= S_VMG_CAT;
+                    hdr_chk     <= HC_VMG;      // VMGI sector 0: header gate
                     state      <= S_SECREAD;
                 end else begin
                     pgc_error  <= 1'b1;
@@ -3125,6 +3221,7 @@ always @(posedge clk or negedge rst_n) begin
                     fetch_base  <= 11'd32;
                     vmgcat_base <= 11'd200;
                     fetch_ret   <= S_VMG_CAT;
+                    hdr_chk     <= HC_VMG;      // VMGI sector 0: header gate
                     state      <= S_SECREAD;
                 end else begin
                     pgc_error  <= 1'b1;
@@ -3157,6 +3254,7 @@ always @(posedge clk or negedge rst_n) begin
                         sec_off  <= 32'd0;
                         fetch_base <= 11'd196;      // VMGI.tt_srpt ptr
                         fetch_ret  <= S_TT_RES;
+                        hdr_chk    <= HC_VMG;       // VMGI sector 0: header gate
                         state      <= S_SECREAD;
                     end else begin
                         pgc_error  <= 1'b1;         // no VMGI: cannot resolve
@@ -3186,6 +3284,8 @@ always @(posedge clk or negedge rst_n) begin
             // load_flush off seek_ack in parallel so the downstream pipe
             // (ps_demux/audio_ring/av_sync) re-anchors on the new cell's PTS.
             strm_done    <= 1'b0;
+            hdr_chk      <= HC_NONE;    // a pre-empted gated read never completes
+            hdr_try      <= 1'b0;
             still_pend   <= 1'b0;
             still_timed  <= 1'b0;
             still_act    <= 1'b0;
@@ -3398,9 +3498,40 @@ always @(posedge clk or negedge rst_n) begin
                     sd_lba       <= sec_sum_w;
                     sd_rd        <= 1'b1;
                     blk_inflight <= 1'b1;
+                    hdr_bad      <= 1'b0;
                 end else begin
                     if (sd_ack) sd_rd <= 1'b0;
-                    if (sd_ack_d && !sd_ack) begin
+                    if (sd_ack_d && !sd_ack && hdr_bad && !hdr_try &&
+                        hdr_bup != 32'd0 && hdr_bup != sec_base) begin
+                        // IFO header gate: the IFO's sector 0 lacks its magic and
+                        // a .BUP exists -> read the same sector of the BUP instead
+                        // (hdr_bad is only ever set while hdr_chk is armed).
+                        blk_inflight <= 1'b0;
+                        hdr_try      <= 1'b1;
+                        sec_base     <= hdr_bup;
+                    end else if (sd_ack_d && !sd_ack && hdr_bad && hdr_try) begin
+                        // ...and the BUP is no better: re-read the IFO and parse it
+                        // exactly as before the gate existed.
+                        blk_inflight <= 1'b0;
+                        hdr_try      <= 1'b0;
+                        hdr_chk      <= HC_NONE;
+                        sec_base     <= hdr_own;
+                        ifo_nogood   <= 1'b1;
+                    end else if (sd_ack_d && !sd_ack) begin
+                        // The BUP passed: every later read of this IFO uses it.
+                        if (hdr_try) begin
+                            case (hdr_chk)
+                            HC_VMG: vmgi_lba    <= sec_base;
+                            HC_MNU: jmp_ifo_lba <= sec_base;
+                            default: if (sel_valid) sel_ifo_lba  <= sec_base;
+                                     else           best_ifo_lba <= sec_base;
+                            endcase
+                            if (hdr_vmg) ifo_bup_vmg <= 1'b1;
+                            else         ifo_bup_vts <= 1'b1;
+                        end else if (hdr_bad)
+                            ifo_nogood <= 1'b1;       // header bad, no .BUP to try
+                        hdr_chk      <= HC_NONE;
+                        hdr_try      <= 1'b0;
                         blk_inflight <= 1'b0;
                         // Every read is a whole sector now, so even a NAV-align
                         // probe (fetch_ret==S_NAV_CHK) leaves a fully-resident
@@ -3545,6 +3676,9 @@ always @(posedge clk or negedge rst_n) begin
                         vmgm_vob_lba <= rec_extlba;
                         vmgm_vob_blk <= rec_blocks;
                     end
+                    // VIDEO_TS.BUP: the VMGI backup the header gate falls back to.
+                    if (name_is_vmgi_bup)
+                        vmgi_bup_lba <= rec_extlba;
                     // Latch a VTS_xx_0.IFO (VTSI) LBA; it name-sorts just before
                     // its group's title VOBs, so hold it "pending" until the group
                     // opens (below) and commit it to that group. Same for
@@ -3552,6 +3686,11 @@ always @(posedge clk or negedge rst_n) begin
                     if (name_is_vts_ifo) begin
                         pending_ifo_lba <= rec_extlba;
                         pending_ifo_vts <= vts_num;
+                    end
+                    // VTS_xx_0.BUP sorts just before its _0.IFO: same pending slot.
+                    if (name_is_vts_bup) begin
+                        pending_bup_lba <= rec_extlba;
+                        pending_bup_vts <= vts_num;
                     end
                     if (is_vts_vob && part_num==8'd0) begin
                         pending_mnu_lba <= rec_extlba;
@@ -3565,6 +3704,7 @@ always @(posedge clk or negedge rst_n) begin
                                 best_base    <= grp_base;
                                 best_cnt     <= all_n - grp_base;
                                 best_ifo_lba <= grp_ifo_lba;
+                                best_bup_lba <= grp_bup_lba;
                                 best_vtsn    <= grp_vts;
                             end
                             // Record the closing group in the selection table
@@ -3572,7 +3712,8 @@ always @(posedge clk or negedge rst_n) begin
                             if (grp_valid && grp_count < MAXGRP) begin
                                 gmem[grp_count] <= {grp_vts, grp_base,
                                                     (all_n - grp_base), grp_ifo_lba,
-                                                    grp_mnu_lba, grp_mnu_blk};
+                                                    grp_mnu_lba, grp_mnu_blk,
+                                                    grp_bup_lba};
                                 grp_count       <= grp_count + 7'd1;
                             end
                             if (grp_valid && grp_mnu_blk > best_mnu_blk) begin
@@ -3585,6 +3726,7 @@ always @(posedge clk or negedge rst_n) begin
                             grp_valid <= 1'b1;
                             // Commit the pending VTSI / menu-VOB records to this group.
                             grp_ifo_lba <= (pending_ifo_vts == vts_num) ? pending_ifo_lba : 32'd0;
+                            grp_bup_lba <= (pending_bup_vts == vts_num) ? pending_bup_lba : 32'd0;
                             grp_mnu_lba <= (pending_mnu_vts == vts_num) ? pending_mnu_lba : 32'd0;
                             grp_mnu_blk <= (pending_mnu_vts == vts_num) ? pending_mnu_blk : 32'd0;
                         end else begin
@@ -3624,13 +3766,15 @@ always @(posedge clk or negedge rst_n) begin
                     best_base    <= grp_base;
                     best_cnt     <= all_n - grp_base;
                     best_ifo_lba <= grp_ifo_lba;
+                    best_bup_lba <= grp_bup_lba;
                     best_vtsn    <= grp_vts;
                 end
                 // Record the final open group in the selection table.
                 if (grp_valid && grp_count < MAXGRP) begin
                     gmem[grp_count] <= {grp_vts, grp_base,
                                         (all_n - grp_base), grp_ifo_lba,
-                                        grp_mnu_lba, grp_mnu_blk};
+                                        grp_mnu_lba, grp_mnu_blk,
+                                        grp_bup_lba};
                     grp_count       <= grp_count + 7'd1;
                 end
                 if (grp_valid && grp_mnu_blk > best_mnu_blk) begin
@@ -3730,12 +3874,14 @@ always @(posedge clk or negedge rst_n) begin
                         // as a command stub the VM runs; see DOM_VMGM).
                         if (gq_ifo_lba != 32'd0) begin
                             jmp_ifo_lba   <= gq_ifo_lba;
+                            jmp_bup_lba   <= gq_bup_lba;
                             menu_base_blk <= gq_mnu_lba;
                             menu_blocks   <= gq_mnu_blk;   // 0 if no VTSM VOB
                             sec_base <= gq_ifo_lba;
                             sec_off  <= 32'd0;
                             fetch_base <= 11'd208;     // VTSI_MAT.vtsm_pgci_ut @208
                             fetch_ret  <= S_JMP_VTSM;
+                            hdr_chk    <= HC_MNU;      // VTSI sector 0: header gate
                             state      <= S_SECREAD;
                         end else begin
                             pgc_error <= 1'b1;         // no VTSI / no menu VOB
@@ -3745,6 +3891,7 @@ always @(posedge clk or negedge rst_n) begin
                         sel_base    <= gq_base;
                         sel_cnt     <= gq_cnt;
                         sel_ifo_lba <= gq_ifo_lba;
+                        sel_bup_lba <= gq_bup_lba;
                         sel_valid   <= 1'b1;
                         state       <= S_PGC_BEGIN;
                     end
@@ -3787,6 +3934,7 @@ always @(posedge clk or negedge rst_n) begin
                     attr_vatr  <= 1'b1;
                     attr_addr  <= 11'd512;             // VTS_V_ATTR @0x200 (high byte)
                     attr_idx   <= 5'd0; attr_j <= 3'd0;
+                    hdr_chk    <= HC_TT;               // VTSI sector 0: header gate
                     state      <= S_SECREAD;
                 end else begin
                     state <= S_FINAL2;                 // no VTSI -> linear

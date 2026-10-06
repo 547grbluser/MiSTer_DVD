@@ -33,6 +33,10 @@
 #           --only REGEX    run only the arms whose label matches (awk ERE on the label)
 #           -j N            parallel arms (default: nproc)
 # Env:      RR_TIMEOUT      per-arm vvp timeout in seconds (default 1800)
+#           RR_IVX          extra iverilog args for EVERY arm. -DRR_NO_BUP turns
+#                           off the reader's IFO header gate (BUP_EN=0, via
+#                           reader_trace.sv), which proves the gate is the only
+#                           thing that moved: docs/dvd_nav.md "IFO header gate".
 set -uo pipefail
 
 HERE="$(cd "$(dirname "$0")" && pwd)"
@@ -122,7 +126,7 @@ run_arm() {
     local d="$OUT/$label"
     rm -rf "$d"; mkdir -p "$d"
     # shellcheck disable=SC2086
-    if ! iverilog -g2012 -I rtl/mpeg2 -y dvd -Y .sv $ivx \
+    if ! iverilog -g2012 -I rtl/mpeg2 -y dvd -Y .sv $ivx ${RR_IVX:-} \
             -DRTRACE_DUT="$tb.$inst" -o "$d/sim" \
             dvd/dvd_iso_reader.sv $extra "bench/dvd/$tb.sv" "$TRACE_SV" \
             > "$d/build.log" 2>&1; then

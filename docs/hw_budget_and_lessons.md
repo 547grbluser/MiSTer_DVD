@@ -191,6 +191,15 @@ free, 8 %)**, 519/553 M10K (34 free), 87/112 DSP (25 free). The table above is t
 2026-10-01 figure, kept for the trend. As before, read the newest `releases/*.rbf.json`
 rather than either.
 
+**2026-10-06 (`dev-bupfallback`, SEED 7, after PR #162 + the .BUP fallback):**
+- 40,626 ALMs "needed" (97 %), 521/553 M10K (32 free), 91/112 DSP.
+- ⚠ Read "ALMs needed" with care. From `main`'s 39,120 it rose by 1,506 while the ALMs
+  actually **placed** fell (40,910 → 40,838). The swing is the fitter's "recoverable by
+  dense packing" estimate (2,625 → 1,064), not logic.
+- The feature's own cost is in the per-entity table: the reader +259 ALMs, +154 ALUTs and
+  +188 registers, plus 1 M10K.
+- Compare entities, or ALMs placed, never "needed", across two fits.
+
 The table this replaced came from the abandoned Stage B build (39,033 ALM, ~2,900 spare)
 and called itself "a pessimistic floor"; features merged since have made it the opposite.
 Re-read the newest `releases/*.rbf.json` `fit` block before estimating, rather than

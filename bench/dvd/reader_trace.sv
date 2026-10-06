@@ -27,6 +27,11 @@
 `endif
 
 module reader_trace;
+`ifdef RR_NO_BUP
+    // The IFO header gate off (run_reader_regress.sh RR_IVX=-DRR_NO_BUP): with it,
+    // every arm must be bit-identical to a reader that predates the gate.
+    defparam `RTRACE_DUT.BUP_EN = 0;
+`endif
     wire [1023:0] vec = {
         `RTRACE_DUT.tmap_used,        `RTRACE_DUT.tmap_fell,
         `RTRACE_DUT.seek_ack,         `RTRACE_DUT.cur_cell,

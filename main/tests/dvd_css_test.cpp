@@ -58,6 +58,11 @@
 // score what reaches the core -- scrambled sectors, and sectors decrypted to noise
 // by a wrong key -- never a signal the fix names.
 //
+// [21]-[29] are audit item 8: an IFO sector the drive cannot read is served from
+// the same offset of its .BUP, and the reverse (docs/physical_disc.md). The fake
+// drive fails a WHOLE command that covers a listed sector, as a raw READ(10) does,
+// and every arm scores which LBA each slot of the window really came from.
+//
 // Host-side: build with main/tests/run_tests.sh. The module is #included so the
 // dlopen'd libdvdcss entry points can be replaced with recording stubs.
 
@@ -213,10 +218,23 @@ static int fake_seek(dvdcss_t, int block, int flags)
 static int fail_read_from = -1;
 static int nreadcalls, readcall_count[MAXCALLS];
 
+// Unreadable sectors for the IFO/BUP mirror arms ([21]-[29]). A command that
+// covers one fails WHOLE (-1), as a raw READ(10) does -- the harsher model, since
+// it says nothing about which sector was bad. bad_hits counts the commands that
+// reached one: what a scratched disc costs in drive time.
+static uint32_t bad_lba[16];
+static int nbad, bad_hits;
+static int covers_bad(uint32_t lo, int n)
+{
+    for (int i = 0; i < nbad; i++) if (bad_lba[i] >= lo && bad_lba[i] < lo + (uint32_t)n) return 1;
+    return 0;
+}
+
 static int fake_read(dvdcss_t, void *buf, int count, int flags)
 {
     if (nreadcalls < MAXCALLS) readcall_count[nreadcalls] = count;
     nreadcalls++;
+    if (covers_bad((uint32_t)cur_block, count)) { bad_hits++; return -1; }
     if (flags & DVDCSS_READ_DECRYPT) reads_decrypt++; else reads_raw++;
     last_count = count;
     if (fail_read_from >= 0 && cur_block + count > fail_read_from)
@@ -319,6 +337,7 @@ static void setup(void)
     nseeks = 0; reads_decrypt = reads_raw = 0; last_count = 0;
     key_acquisitions = 0; fail_key_at = -1;
     fail_read_from = -1; nreadcalls = 0;
+    nbad = 0; bad_hits = 0; raw_rd = raw_read10;
 
     // What crack_title_keys() leaves behind at mount: one key per VOB, at its start.
     nprimed = 0;
@@ -423,6 +442,50 @@ static void hitch_layout(int with_menu, int part1_uncrackable)
     }
 }
 static void poison(uint32_t b) { primed[nprimed] = (int)b; primed_key[nprimed] = 0; nprimed++; }
+
+// ---- the IFO/BUP mirror (audit 8) ---------------------------------------------
+// VIDEO_TS.IFO 300..302 / .BUP 400..402; VTS_01_0.IFO 500..509 / .BUP 900..909
+// (with VTS_01_0.VOB at 510 and VTS_01_1.VOB at 600, as on a disc: the BUP sits
+// after the title set's VOBs); VTS_02_0.IFO 1000..1003 with NO BUP.
+#define IFO1 500u
+#define BUP1 900u
+static void bup_mount(int bup_nsec)
+{
+    setup();
+    iso_begin();
+    dir_add("VIDEO_TS.BUP;1", 400u, 3u * 2048u, 0);
+    dir_add("VIDEO_TS.IFO;1", 300u, 3u * 2048u, 0);
+    vob("VIDEO_TS.VOB;1", 303u, 50u);
+    dir_add("VTS_01_0.BUP;1", BUP1, (uint32_t)bup_nsec * 2048u, 0);
+    dir_add("VTS_01_0.IFO;1", IFO1, 10u * 2048u, 0);
+    vob("VTS_01_0.VOB;1", 510u, 90u);
+    vob("VTS_01_1.VOB;1", 600u, 300u);
+    dir_add("VTS_02_0.IFO;1", 1000u, 4u * 2048u, 0);
+    vob("VTS_02_1.VOB;1", 1004u, 100u);
+    iso_end();
+    enumerate_vobs();
+    nprimed = 0;
+    for (int i = 0; i < g_nvobs; i++) { primed_key[nprimed] = 1; primed[nprimed++] = (int)g_vobs[i].start; }
+    nreadcalls = 0; bad_hits = 0;
+}
+static void bad(uint32_t a) { bad_lba[nbad++] = a; }
+// slot i of a window came from LBA `want` (0 = a zero-filled hole)
+static int from(const uint8_t *w, int i, uint32_t want)
+{
+    const uint8_t *q = w + (size_t)i * 2048;
+    if (want == 0) { for (int j = 0; j < 2048; j++) if (q[j]) return 0; return 1; }
+    return get_lba(q) == want;
+}
+// [29]: with no libdvdcss every dvdcss_* call must be dead, or a read that wrongly
+// went through it would pass on the same fake
+static int dead_seek(dvdcss_t, int, int) { return -1; }
+static int dead_read(dvdcss_t, void *, int, int) { return -1; }
+// the raw drive (no libdvdcss) through the same fake
+static int fake_raw_rd(int, uint32_t lba, void *buf, int count)
+{
+    cur_block = (int)lba;
+    return fake_read(0, buf, count, 0);
+}
 
 int main(void)
 {
@@ -827,6 +890,110 @@ int main(void)
     }
     check("[20b] sectors reaching the core scrambled", bad_n, 0);
     check("[20b] sectors decrypted with a wrong key", noise_n, 0);
+
+    // ---- [21]-[29] the IFO/BUP mirror (audit 8, docs/physical_disc.md) ----------
+    // A sector of an IFO the drive cannot read is served from the same offset of
+    // its BUP (and the reverse); a pair that cannot be trusted is left alone; a VOB
+    // never takes part. Scored on WHICH LBA each slot of the window came from.
+    {
+        static uint8_t w[8 * 2048];
+        printf("[21] the first IFO sector of a window is unreadable\n");
+        bup_mount(10);
+        check("[21] IFO/BUP pairs found", g_ifo_pairs, 2);
+        bad(IFO1);
+        check("[21] window returned", dvd_css_read(w, IFO1, 8), 8);
+        check("[21] slot 0 served from the BUP", from(w, 0, BUP1), 1);
+        int own = 0; for (int i = 1; i < 8; i++) own += from(w, i, IFO1 + i);
+        check("[21] slots 1..7 are the IFO's own", own, 7);
+
+        printf("[22] a sector mid-window is unreadable\n");
+        bup_mount(10);
+        bad(IFO1 + 3);
+        check("[22] window returned", dvd_css_read(w, IFO1, 8), 8);
+        check("[22] slot 3 served from BUP+3", from(w, 3, BUP1 + 3), 1);
+        own = 0; for (int i = 0; i < 8; i++) if (i != 3) own += from(w, i, IFO1 + i);
+        check("[22] the other slots are the IFO's own", own, 7);
+
+        printf("[23] the bad sector is remembered for the mount\n");
+        int hits = bad_hits;
+        check("[23] window returned again", dvd_css_read(w, IFO1, 8), 8);
+        check("[23] slot 3 still from BUP+3", from(w, 3, BUP1 + 3), 1);
+        check("[23] drive commands that reached the bad sector", bad_hits - hits, 0);
+
+        printf("[24] a BUP sector is unreadable\n");
+        bup_mount(10);
+        bad(BUP1 + 5);
+        check("[24] window returned", dvd_css_read(w, BUP1, 8), 8);
+        check("[24] slot 5 served from IFO+5", from(w, 5, IFO1 + 5), 1);
+
+        printf("[25] both copies of a sector are unreadable\n");
+        bup_mount(10);
+        bad(IFO1 + 2); bad(BUP1 + 2);
+        check("[25] window returned (as before: hole zero-filled)", dvd_css_read(w, IFO1, 8), 8);
+        check("[25] slots 0..1 the IFO's own", from(w, 0, IFO1) + from(w, 1, IFO1 + 1), 2);
+        int zero = 0; for (int i = 2; i < 8; i++) zero += from(w, i, 0);
+        check("[25] slots 2..7 zero-filled (as before)", zero, 6);
+        check("[25] a window STARTING on it fails (as before)", dvd_css_read(w, IFO1 + 2, 4), -1);
+        check("[25] the both-unreadable line logged", (g_ifo[1].logged & 2) != 0, 1);
+
+        printf("[25b] a sector known unreadable on both sides costs no drive read\n");
+        hits = bad_hits;
+        check("[25b] re-read still fails", dvd_css_read(w, IFO1 + 2, 1), -1);
+        check("[25b] BUP side still fails", dvd_css_read(w, BUP1 + 2, 1), -1);
+        check("[25b] drive commands that reached a bad sector", bad_hits - hits, 0);
+
+        printf("[26] a pair that cannot be trusted is not mirrored\n");
+        bup_mount(9);                                      // the BUP is one sector short
+        check("[26] VTS_01 pair rejected", g_ifo[1].ok, 0);
+        check("[26] VTS_02 (no BUP) not a pair", g_ifo[2].ok, 0);
+        check("[26] pairs found (VMG only)", g_ifo_pairs, 1);
+        bad(IFO1);
+        check("[26] unreadable IFO head fails (as before)", dvd_css_read(w, IFO1, 8), -1);
+
+        printf("[27] a VOB sector is never mirrored\n");
+        bup_mount(10);
+        bad(650u);
+        nreadcalls = 0; nseeks = 0;
+        // (the fake fails a whole command, so a VOB window over a bad sector fails
+        //  outright -- exactly as it did before the mirror existed)
+        check("[27] window over a bad VOB sector fails (as before)", dvd_css_read(w, 648u, 4), -1);
+        int pairseek = 0;
+        for (int i = 0; i < nseeks && i < MAXCALLS; i++)
+            if ((seeks[i].block >= (int)IFO1 && seeks[i].block < (int)IFO1 + 10) ||
+                (seeks[i].block >= (int)BUP1 && seeks[i].block < (int)BUP1 + 10)) pairseek++;
+        check("[27] reads sent into an IFO/BUP", pairseek, 0);
+
+        printf("[28] the spec maximum: VMG + 99 title sets, any case, with or without ;1\n");
+        setup();
+        iso_begin();
+        for (int t = 0; t <= 99; t++)
+        {
+            char a[24], b[24];
+            if (t == 0) { snprintf(a, sizeof a, "VIDEO_TS.IFO;1"); snprintf(b, sizeof b, "video_ts.bup"); }
+            else { snprintf(a, sizeof a, "VTS_%02d_0.IFO;1", t); snprintf(b, sizeof b, t & 1 ? "vts_%02d_0.bup" : "VTS_%02d_0.BUP;1", t); }
+            dir_add(a, 2000u + (uint32_t)t * 40u, 4u * 2048u, 0);
+            dir_add(b, 2020u + (uint32_t)t * 40u, 4u * 2048u, 0);
+        }
+        iso_end();
+        enumerate_vobs();
+        check("[28] pairs registered", g_ifo_pairs, 100);
+        check("[28] VTS_99's BUP", (long)g_ifo[99].bup, 2020 + 99 * 40);
+
+        printf("[29] the raw drive (no libdvdcss) mirrors too\n");
+        setup();
+        css = 0; raw_fd = 3; raw_rd = fake_raw_rd; p_seek = dead_seek; p_read = dead_read;
+        iso_begin();
+        dir_add("VTS_01_0.BUP;1", BUP1, 10u * 2048u, 0);
+        dir_add("VTS_01_0.IFO;1", IFO1, 10u * 2048u, 0);
+        vob("VTS_01_1.VOB;1", 600u, 300u);
+        iso_end();
+        enumerate_vobs();
+        check("[29] pair found through the raw drive", g_ifo_pairs, 1);
+        bad(IFO1 + 1);
+        check("[29] window returned", dvd_css_read(w, IFO1, 8), 8);
+        check("[29] slot 1 served from BUP+1", from(w, 1, BUP1 + 1), 1);
+        raw_fd = -1; raw_rd = raw_read10; css = (dvdcss_t)1; p_seek = fake_seek; p_read = fake_read;
+    }
 
     printf("\ndvd_css_test: %s (%d error%s)\n", errs ? "FAIL" : "PASS", errs, errs == 1 ? "" : "s");
     return errs ? 1 : 0;

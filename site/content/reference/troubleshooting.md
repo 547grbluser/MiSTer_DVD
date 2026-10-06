@@ -688,6 +688,22 @@ feature.
 You pressed **Menu** to skip the intro, and that disc puts its randomisation setup in the
 boot sequence. Let the intro play. A real player behaves the same way.
 
+### A scratched disc has no menus or chapters
+
+A DVD keeps its menus, chapters and track lists in small navigation files (`.IFO`), with
+a backup copy of each one (`.BUP`) written elsewhere on the disc. When the main copy
+can't be read, the core switches to the backup by itself, so a scratch over the
+navigation data usually goes unnoticed. This works with a disc in a drive and with an
+`.iso`, including one ripped from a damaged disc that left gaps where the drive failed.
+
+When **both** copies of a file are damaged, that part of the disc plays as it would with
+no navigation data: the title plays straight through, with no chapters and no menus.
+
+With a physical disc or an encrypted `.iso`, `/tmp/dvdcss.log` records each switch, with a
+line like `ifo: VTS_03_0.IFO sector 2 unreadable -- served from VTS_03_0.BUP`. A
+`... unreadable in BOTH .IFO and .BUP` line means neither copy could be read. Clean the
+disc, try another drive, or include the log in a bug report.
+
 ### The wrong title plays with Disc Menus off
 
 The auto-selection picks the largest title set, which is not always right. `Title VTS Tens`

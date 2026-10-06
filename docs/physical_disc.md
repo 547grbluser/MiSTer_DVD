@@ -820,6 +820,79 @@ the worker:
 - DDR3 contention from a full-speed refill after a seek is unmeasured. Check the
   `lates`/`drops` telemetry on the rig.
 
+## An unreadable IFO sector is served from its .BUP (audit item 8, 2026-10-06, ✅ MERGED PR #163)
+
+**Status:** ✅ HW-CONFIRMED 2026-10-06 on a physical disc (below), and host-proven:
+`main/tests/run_tests.sh --red` arms [21]–[29], 10 mutations each caught by its own arm.
+
+**HW (2026-10-06, rig, physical THE_FORCE_AWAKENS, a dual-layer Disney disc, build
+`DVD_bupfallback_20261006_1604.rbf` + this branch's Main, Disc Menus Off):**
+- **Baseline, no faults:** `CH 2/51`, 2:17:57, flags `000`.
+- **All 43 sectors of `VTS_05_0.IFO` (the feature) listed in `dvd_fault_lbas`:**
+  `ifo: VTS_05_0.IFO sector 0 unreadable -- served from VTS_05_0.BUP`. The HUD is identical
+  (`CH 2/51`, 2:17:57) and the flags are `000`, so the core never saw the hole. Every IFO
+  sector was faulted, so the 51-chapter table could only have come from the BUP. The seek
+  trace shows the single jump to `4011684` and then a sequential walk.
+- **IFO sector 0 *and* its BUP twin listed:**
+  1. `unreadable in BOTH`, and the read-ahead zero-fills 139309.
+  2. The core's header gate tries the BUP; 4011684 is zero-filled.
+  3. It reverts; 139309 is zero-filled again.
+  4. Linear playback, 0:00:00, no chapters, as before the feature.
+  5. `ifo_nogood=1`, and `dvd_report.log` says `an IFO header bad and no good .BUP -- parsed
+     as is`.
+
+  The two layers compose as designed.
+- **Found in passing:** this pressing has REAL unreadable sectors. Sector 0 of the BUPs of
+  VTS_02, VTS_06 and VTS_07 returns EIO from `/dev/sr0` (fast, not a 30 s timeout), while
+  every IFO reads. Whether that is wear or Disney's structure protection is unknown. Either
+  way it is the "one copy readable" case the mirror exists for. Here the IFOs are the good
+  copies, so playback never touches the bad ones.
+
+
+Every IFO has a byte-identical backup (`VIDEO_TS.BUP`, `VTS_nn_0.BUP`), written after the
+title set's VOBs, on the other side of the disc from the IFO, so one scratch rarely takes
+both. libdvdread re-opens the BUP when an IFO will not parse. The Main knows more than
+libdvdread: it knows *the read failed*, and which sector. So:
+
+- **Pair table.** `enumerate_vobs()` also records each IFO/BUP extent pair in `g_ifo[100]`:
+  the VMG plus the spec's 99 title sets, any case, `;1` tolerated. A pair whose lengths
+  differ, or whose two names alias one LBA, is logged and **not** mirrored, because the
+  offset arithmetic would be wrong.
+- **Walk on failure.** When a read touching a pair fails, `css_src_read` walks it a sector at
+  a time. A bad sector is served from **the same offset of its twin**, IFO→BUP or BUP→IFO,
+  and a `css_log` line says so once per pair.
+- **Remembered for the mount** (`g_mir`, 256 entries):
+  - A mirrored sector reads its twin first from then on, and windows stop short of it
+    (`mir_clamp`), so the drive never goes back to it.
+  - A sector dead on **both** sides is recorded on both sides and returns at once. Without
+    that, the fabric's header gate (IFO → BUP → revert to IFO, `docs/dvd_nav.md`) would put
+    the drive through each bad copy again: up to six slow reads, each with the read-ahead's
+    retries.
+  - A full table just re-probes, and logs that it did.
+- **Unchanged cases.** VOB sectors never take part. A both-dead sector behaves exactly as
+  before: the head of a window fails (the read-ahead retries it, then zero-fills), and a
+  later sector zero-fills the tail.
+- **No-libdvdcss drive.** It enumerates too now, because `css_raw_read` and `src_chunk`
+  dispatch through a `raw_rd` seam, so an unencrypted disc on a Main without libdvdcss
+  mirrors as well. ⚠ That path now issues READ(10)s at mount (the ISO9660 walk) that it
+  never issued before. It is host-tested only (arm [29]) and has not been run on a real
+  drive without libdvdcss.
+- **Not reached by this layer:** a plain decrypted `.iso` takes stock Main's file path, so
+  this layer never sees it. That case is the fabric gate's.
+
+**Census** (`tools/bup_scan.py`): of 12,403 IFO/BUP pairs, none differ in length. 30 differ
+in content, all on copy-protected or interactive discs (BUPs with a deliberately bad magic).
+Their IFOs read fine, and the mirror only acts when an IFO sector does **not** read. In the
+worst case it would hand over a protected BUP's sector where the alternative was a hole of
+zeros.
+
+**HIL fault hook**, never active on a normal install. With `/media/fat/dvd_hil` present,
+`/media/fat/dvd_fault_lbas` (decimal LBAs, whitespace-separated, at most 64) is read at
+mount, and any command covering a listed LBA fails as a drive error would. This proves the
+mirror on a sound disc:
+- list IFO sectors → the log line, and telemetry flags 000;
+- list an IFO sector **and** its BUP twin → `ifo_nogood` and the old behaviour.
+
 ## Drive region tool (`main/Scripts/set_dvd_region.sh`)
 
 A drive with **no region set** refuses the CSS title-key ioctl, so libdvdcss cracks every

@@ -54,8 +54,8 @@ python3 dvd_report.py MY_DISC.iso --nav-packs
 
 !!! note "What is in the bundle, and what is not"
     Only the disc's **unencrypted navigation structures**: the directory records, the
-    `.IFO` navigation tables, optionally the data describing menu buttons, and your
-    answers. **No video, no audio, and no decryption keys.** It is not a copy of the film
+    `.IFO` navigation tables and their `.BUP` backups, optionally the data describing menu
+    buttons, and your answers. **No video, no audio, and no decryption keys.** It is not a copy of the film
     and cannot be used to watch anything.
 
     That is enforced, not just intended — the tool checks every sector it has gathered and

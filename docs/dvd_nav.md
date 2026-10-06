@@ -4790,6 +4790,110 @@ the in-title PCI/HLI **button highlight** (the white-rabbit *icon* itself; `nav_
 in-title but the subpicture-graphic plumbing in `emu.sv` is menu-gated → renders "white on
 white"), and the transport-HUD-overlaps-subtitle bug (MiB visual commentary).
 
+## IFO header gate and .BUP fallback (audit item 8, 2026-10-06) — ✅ HW-CONFIRMED A/B vs `main`; the Main mirror ✅ HW on a physical disc; ✅ MERGED (PR #163)
+
+The 2026-10-01 *DVD Demystified* audit, item 8: *"No `.BUP` fallback when an IFO is
+unreadable."* Every IFO has a byte-identical backup, `VIDEO_TS.BUP` / `VTS_nn_0.BUP`
+(3rd ed. p. 9-2: "back-up copies in .BUP files"), written after the title set's VOBs, on
+the far side of the disc from the IFO. The book says only that BUPs exist; the **rule** is
+libdvdnav's: `ifoOpenVMGI` / `ifoOpenVTSI` re-open from the BUP when the IFO cannot be
+opened or its **header** fails (`"DVDVIDEO-VMG"` / `"DVDVIDEO-VTS"` at byte 0). That
+fallback is header-only; table damage behind a good header is fatal in libdvdnav too.
+
+**Before.** The Main zero-fills a sector it cannot read and the fabric has no read-error
+input, so an unreadable IFO arrived as zeros. Nothing checked the magic. A zeroed VMGI
+gave `pgc_error`, which ran the VM's fallback chain. A zeroed VTSI made every pointer 0, so
+the title set streamed linearly, with no chapters, menus or attributes. Neither was
+reported.
+
+**The gate** (`dvd/dvd_iso_reader.sv`, "IFO header gate").
+- **Which reads are checked.** There are five reads of an IFO's sector 0, and each arms
+  `hdr_chk` with the kind it expects:
+  - First Play, VMGM and JumpTT on the VMGI;
+  - `S_PGC_BEGIN` on the title VTSI;
+  - `S_SELECT`'s VTSM branch.
+- **The compare costs no cycles.** Bytes 0..11 are compared as the sector streams into
+  `parse_buf`.
+- **On a mismatch:**
+  1. The completion re-issues the same read from the file's BUP. The walk latches the BUP
+     LBAs: `VIDEO_TS.BUP` directly, and a `VTS_nn_0.BUP` in a pending slot like the IFO's,
+     since it name-sorts just before it. `gmem` grows from 118 to 150 bits.
+  2. Only when **the BUP passes the same check** does the owning base register move:
+     - `vmgi_lba`, which is sticky for the mount;
+     - `sel_ifo_lba` / `best_ifo_lba`;
+     - `jmp_ifo_lba`.
+  3. Every later read of that IFO is computed from the base, so it follows: tables, TMAP,
+     PTT reloads, the UT walk.
+- **A bad BUP, or none.** The IFO is re-read and parsed exactly as before the gate existed.
+  So an IFO whose magic is legitimately absent can never be made worse.
+- **Kind is checked** (a VTSI carrying the VMG magic is bad), and so are all 12 bytes.
+- **Cost on a damaged disc.** The title VTSI and VTSM bases are re-loaded from `gmem` on
+  every jump, so each jump to a damaged VTS pays one extra sector read (it swaps again).
+  The VMGI and the Auto-mode title stay swapped.
+- **Visible, never silent.** Three sticky outputs, cleared at mount, go to telemetry word
+  14:
+  - bit 10 `ifo_bup_vmg`;
+  - bit 11 `ifo_bup_vts`;
+  - bit 12 `ifo_nogood` (a bad header with no good BUP).
+
+  `dvd_ctl.cpp` publishes them as `flags.bup_vmg` / `bup_vts` / `ifo_nogood` and logs each
+  rising edge to `dvd_report.log`. There is no OSD message (user decision): playback
+  succeeds.
+
+**The second layer is in the Main** (`docs/physical_disc.md` "An unreadable IFO sector is
+served from its .BUP"). On a physical disc or a CSS image, the Main knows which sector
+failed, so it serves that sector from the same offset of the twin file, for any sector and
+not just the header. The fabric then never sees the hole. The fabric gate covers what the
+Main cannot: stock Main, and an image that already holds zeros where a ripper failed.
+
+**Census** (`tools/bup_scan.py` over the local library, 1,556 images / 1,530 DVD-Video):
+- 12,403 IFO/BUP pairs; none differ in length.
+- **2 IFOs with a bad header, both on one disc (ALADDIN_D2, a MakeMKV rip of a damaged
+  pressing).**
+  - Its VTS_07 IFO is all zeros and its BUP is intact: exactly this case, in the wild.
+  - Its VTS_06 has both copies zeroed (the `ifo_nogood` path).
+- 30 pairs differ in content. All are copy-protected or interactive discs (24 DVD Board
+  Game, Scourge of Worlds, MP2FLAG) whose **IFO** is fine, so the gate never fires on them.
+- 1 image (MILLIONAIRERUS) names its IFOs non-standardly (`VIDEO_T1.IFO`, `VTS_01_1.IFO`).
+  That is a different, unplayable authoring, not a BUP case.
+
+The magic is therefore a safe trigger: every good IFO in the library carries it.
+
+**Gates.**
+- `bench/dvd/run_bup.sh --red`:
+  - bench arms A–I;
+  - 16 mutations, each failing exactly its arms;
+  - the neighbouring reader benches;
+  - `tools/check_bup_wiring.py --red`.
+- **Regress proof** (`run_reader_regress.sh`):
+  - With `RR_IVX=-DRR_NO_BUP`, which sets the reader's `BUP_EN=0` and turns off only the
+    compare, all 51 arms are **IDENTICAL** to `main`.
+  - With the gate on, the only differing arm is `iso_reader_real`, as **predicted before the
+    run**. Its fixture serves no IFO sectors, so the mount now spends a BUP try and a revert
+    on VTS_21. It still passes.
+  - `iso_reader_atmos_tb` read `gmem` with a hardcoded 118-bit slice; that slice was updated.
+
+**HW (2026-10-06, A/B vs `main`, details in `docs/status_log.md`).** A copy of
+THE_FIRST_EASTER_RABBIT with VTS_01's IFO zeroed:
+- Disc Menus Off: `main` plays linearly with no chapters; the branch shows `CH 1/7` and
+  0:24:42, like the undamaged disc.
+- Disc Menus On: `main` never reaches the menu; the branch follows the undamaged disc's
+  exact PGC/VTS sequence to the same menu (read from the BUP), and Play gives 7 chapters.
+
+With `VIDEO_TS.IFO` zeroed, the boot is identical to the undamaged disc's, with
+`bup_vmg=1`.
+
+Fit: reader +259 ALMs, +1 M10K; SEED 7 closes both clocks at both corners.
+
+**Limitations.**
+- **No `.IFO` record but a `.BUP` record:** not handled. That is directory damage or a
+  naming choice, not an unreadable IFO.
+- **Table damage behind a good header** is not retried in fabric, as in libdvdnav. On a
+  decrypted `.iso` it plays as before. On a physical disc or CSS image the Main mirror covers
+  it.
+- **A VTS with no title VOB** has no `gmem` row, so it has neither an IFO nor a BUP LBA. This
+  limitation already existed.
+
 ## Known limitations / later phases
 
 - **UDF-only images** land on the flat-file fallback today (which would play
@@ -4815,6 +4919,9 @@ white"), and the transport-HUD-overlaps-subtitle bug (MiB visual commentary).
   *always* the main feature (rare authoring, e.g. Big Buck Bunny) — a manual OSD title picker
   remains a follow-up. The PGC timeline fixes ordering *within* the chosen title, not the
   choice of title.
+- **`.BUP` fallback is header-only in fabric** (audit 8, see "IFO header gate and .BUP
+  fallback" above): a damaged table behind a good IFO header plays as before unless the
+  Main's sector mirror (physical discs, CSS images) caught the read error.
 - **Multi-extent ISO9660 files / extended attribute records** are not handled; DVD
   VOBs don't use them (verified on the real discs above), but a non-standard image
   could trip the parser.

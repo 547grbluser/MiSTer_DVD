@@ -158,7 +158,12 @@ static void telem_read()
 		// (docs/field_blend.md "Bob"; word 14 bit 8, 0 on a core without it).
 		// flags.rgn_allp = the disc's VMGI prohibits EVERY region, so SPRM20 fell
 		// back to region 1 (docs/dvd_vm.md "Player parameters"; word 14 bit 9).
-		"\"still\":%u,\"menu\":%u,\"blend\":%u,\"tmap\":%u,\"tmap_fb\":%u,\"bob\":%u,\"rgn_allp\":%u}}\n",
+		// flags.bup_vmg / bup_vts = the VMGI / a VTSI header was bad and the
+		// reader now reads its .BUP; flags.ifo_nogood = a header was bad with no
+		// good .BUP (docs/dvd_nav.md "IFO header gate"; word 14 bits 10/11/12,
+		// sticky per mount, 0 on a core without the feature).
+		"\"still\":%u,\"menu\":%u,\"blend\":%u,\"tmap\":%u,\"tmap_fb\":%u,\"bob\":%u,\"rgn_allp\":%u,"
+		"\"bup_vmg\":%u,\"bup_vts\":%u,\"ifo_nogood\":%u}}\n",
 		t, duty, w[1], w[2], w[3], w[4],
 		(int)(int16_t)w[5],                       // vid_err is SIGNED
 		(int)((w[6] >> 11) & 0x1F) - (((w[6] >> 15) & 1) ? 32 : 0),
@@ -175,8 +180,19 @@ static void telem_read()
 		(unsigned)((w[7] >> 2) & 1), (unsigned)((w[7] >> 3) & 1),
 		(unsigned)((w[7] >> 4) & 1), (unsigned)((w[7] >> 5) & 1),
 		(unsigned)((w[7] >> 6) & 1), (unsigned)((w[7] >> 7) & 1),
-		(unsigned)((w[14] >> 8) & 1), (unsigned)((w[14] >> 9) & 1));
+		(unsigned)((w[14] >> 8) & 1), (unsigned)((w[14] >> 9) & 1),
+		(unsigned)((w[14] >> 10) & 1), (unsigned)((w[14] >> 11) & 1),
+		(unsigned)((w[14] >> 12) & 1));
 	if (len <= 0 || len >= (int)sizeof(line)) return;
+
+	// The IFO header gate's flags are sticky per mount: log each one's rising edge
+	// once, so a fallback shows up in dvd_report.log, not only in the JSON.
+	static unsigned ifo_seen = 0;
+	unsigned ifo_now = (w[14] >> 10) & 7;
+	if (ifo_now & ~ifo_seen & 1) ctl_log("DVD_CTL: VIDEO_TS.IFO header bad -- reading VIDEO_TS.BUP");
+	if (ifo_now & ~ifo_seen & 2) ctl_log("DVD_CTL: a VTS_xx_0.IFO header bad -- reading its .BUP");
+	if (ifo_now & ~ifo_seen & 4) ctl_log("DVD_CTL: an IFO header bad and no good .BUP -- parsed as is");
+	ifo_seen = ifo_now;
 
 	// Write via a temp file and rename, so a reader never sees a half-written
 	// object. The cost is one extra tmpfs metadata op per sample.

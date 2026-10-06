@@ -57,6 +57,10 @@ reads as zero. Consequences, all of which are the point:
 3. **Every `.IFO` file, whole.** Not a computed subset of tables — taking them
    entire costs tens of KB and removes any chance of a bundle that is missing
    the one table the bug turns on.
+   **And every `.BUP`, whole** (since 2026-10-06, audit item 8): the core reads
+   an IFO's backup when the IFO's header is bad (`docs/dvd_nav.md` "IFO header
+   gate"), so a report from a damaged disc must carry the BUP to replay that
+   path. The same size again as the IFOs; `verify()` compares both.
 4. With `--nav-packs`: NAV packs (PCI/HLI — the button rectangles) from the menu
    VOBs, for menu-highlight bugs. Off by default; it is the only part that scans
    VOB payload, and it is bounded by `--nav-scan-mb` (default 512).
