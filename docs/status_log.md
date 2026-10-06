@@ -22,7 +22,7 @@ predate later confirmations; the `CLAUDE.md` index carries the reconciled status
 
 ## Hardware status (THIS fork, verified 2026-06-21)
 
-- 🔧 **ANALOG DITHER MATRIX: A LATIN SQUARE, EXACT ON EVERY LINE (2026-10-06,
+- ✅ **ANALOG DITHER MATRIX: A LATIN SQUARE, EXACT ON EVERY LINE (2026-10-06,
   `dev-ditherlatin`, `feature/dither-latin`; ✅ HW-measured via capture, ✅ HW-CONFIRMED on a CRT).**
   - **Trigger.** Reviewing the PWM cores (`Jokippo/MiSTer_PWM_Cores`) as a replacement for
     PR #161's dither, together with a forum critique of them. The critic wants a pattern
