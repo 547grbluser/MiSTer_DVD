@@ -645,6 +645,10 @@ analog word only. It is behind the OSD option `Analog Dither` (`O[8]`), Off by d
 HDMI stays bit-exact. Gate: `bench/dvd/run_dac_dither.sh --red`.
 The maintainer judged it on the CRT: gradients look better with it on. Merged as PR #161.
 Composite and a 31 kHz monitor are unchecked.
+⏳ **Next: HW A/B of the Latin-square matrix (`feature/dither-latin`).** The shipped matrix
+is exact per 4×4 cell but not per line, which shows as a line texture; the replacement makes
+every line and column exact (§8 "The matrix"). Run the paused-ramp capture against PR #161's
+build, then look on the CRT.
 
 ### ✅ Full DVD-Video audio: every LPCM form and AC-3 dual mono (2026-10-05; ✅ HW-CONFIRMED 2026-10-06, ✅ MERGED PR #162 — see `docs/lpcm_full.md`)
 

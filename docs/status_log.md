@@ -22,6 +22,31 @@ predate later confirmations; the `CLAUDE.md` index carries the reconciled status
 
 ## Hardware status (THIS fork, verified 2026-06-21)
 
+- 🔧 **ANALOG DITHER MATRIX: A LATIN SQUARE, EXACT ON EVERY LINE (2026-10-06,
+  `dev-ditherlatin`, `feature/dither-latin`; sim-verified, ⏳ HW A/B pending).**
+  - **Trigger.** Reviewing the PWM cores (`Jokippo/MiSTer_PWM_Cores`) as a replacement for
+    PR #161's dither, together with a forum critique of them. The critic wants a pattern
+    with "the same sum of values per line". Ours did not have that.
+  - **Root cause.** `dac_dither` took `bf[3:2]` of a 4×4 Bayer, which is the 2×2
+    `{0 2; 3 1}` tiled. It is exact per 4×4 cell, but line by line `v % 4 = 1` averages
+    0 / ½ DAC step (ideal ¼) and `v % 4 = 3` averages ½ / 1 (ideal ¾). At 480i (2 clocks per
+    pixel) whole lines are lit or unlit: a line texture on a CRT, very likely the "fine line
+    texture" in PR #161's 480i capture.
+  - **Fix.** The Latin square `{3 0 2 1; 2 1 3 0; 0 3 1 2; 1 2 0 3}`: every line and
+    column exact, high and low thresholds alternating every clock (480i pixels exact at
+    `v % 4 = 2` at either DE phase), and the 3s stepping between pixel halves (a pixel
+    checkerboard at `v % 4 = 1/3` on 480i). Field inversion is `3 - t`.
+  - **PWM verdict: rejected.** `vga_pwm.sv` works out to the same thing as an ordered dither
+    with thresholds 3, 2, 1, 0 along the line, reset at hsync. It only acts as PWM when
+    `clk_vid` is far faster than the dot clock (the N64 runs 4–8 clocks per pixel). At our
+    27 MHz it would draw vertical lines, so it is weaker than `dac_dither`. Details and the
+    faster-clock cost are in §8 "Rejected".
+  - **Gates:** `run_dac_dither.sh --red`. New arms: [T7] lines, [T8] columns and [T9]
+    adjacent pairs, each failed by its own matrix mutation (the old Bayer, the PWM ramp, a
+    cyclic Latin square). 10 module and 7 wiring mutations in all.
+  - **Next:** a build from `feature/dither-latin`. HW A/B: the paused-ramp capture
+    (480i/480p, cubic-residual score) against PR #161's build, then a look on the CRT.
+    Expect the score to be no worse and the line texture to go at 5× contrast.
 - ✅ **.BUP FALLBACK WHEN AN IFO IS UNREADABLE (audit item 8, 2026-10-06,
   `dev-bupfallback`; fabric ✅ HW-CONFIRMED A/B vs `main`; Main mirror ✅ HW-CONFIRMED on a
   physical disc; ✅ MERGED (PR #163)).** Design: `docs/dvd_nav.md` "IFO header gate
