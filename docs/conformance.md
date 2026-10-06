@@ -202,7 +202,7 @@ Detailed in `docs/fabric_audio.md`, `docs/iec61937.md`, `docs/subpicture.md`. Qu
 |---|---|---|
 | AC-3 decode (HDMI stereo downmix) | ✅ | in-fabric `dvd/ac3/*` |
 | LPCM 16-bit/48k | ✅ | `dvd/lpcm_unpack.sv` |
-| LPCM 24-bit / 96 kHz, 1–8 channels | 🔧 | every DVD-Video form decodes (multichannel downmixed, 96 kHz decimated or native on a 96 kHz link), gated by synthetic streams; ⏳ HW. `docs/lpcm_full.md` |
+| LPCM 24-bit / 96 kHz, 1–8 channels | ✅ HW | every DVD-Video form decodes (multichannel downmixed, 96 kHz decimated or native on a 96 kHz link); synthetic streams on the rig, A/B vs `main`. `docs/lpcm_full.md` §12 |
 | DTS | ✅ passthrough only | IEC 61937 S/PDIF (PR fj#109); **no in-fabric DTS decode** |
 | Menu audio | ✅ | plays. (Past bug: an audio-track switch could disable menu audio — resolved.) |
 | Subpicture / subtitle (disc palette, RLE) | ✅ | `dvd/spu_decode.sv` + `subpic_blend`; CRT-480i mapped (PR fj#108) |

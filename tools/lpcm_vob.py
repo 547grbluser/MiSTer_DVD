@@ -140,6 +140,12 @@ def lpcm_packs(data, quant, nch, fs, pts0):
 
 def make(path, fs, nch, bits, secs):
     quant = {16: 0, 20: 1, 24: 2}[bits]
+    # never shorter than the walk plus 2 s of reference: a walk cut by the end of the
+    # file reads its last channel low on hardware (the capture runs on in silence)
+    need = segments(fs, nch)[-1][0] + 2.0
+    if secs < need:
+        print(f'note: {secs} s is shorter than the walk; making {need:.1f} s')
+        secs = need
     if not L.legal(quant, fs, nch):
         print(f'note: {nch} ch x {fs} Hz x {bits} bit is over DVD-Video\'s 6.144 Mbit/s')
     s = signal(fs, nch, bits, secs)

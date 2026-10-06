@@ -723,7 +723,7 @@ picture and sound together, since backpressure stalls the shared demux and video
 ## Open follow-ups
 - DTS in-fabric + IEC 61937 bitstream → Digital I/O board (Toslink).
 - LPCM: 20/24-bit @ 48 kHz stereo ✅ HW-CONFIRMED (PR fj#133, top-16 truncation for HDMI;
-  see the LPCM section above). 96 kHz and multichannel: built, gated, ⏳ HW
+  see the LPCM section above). 96 kHz and multichannel: ✅ HW-CONFIRMED 2026-10-06
   (`docs/lpcm_full.md`). Still open: the bit-perfect 24-bit-over-S/PDIF path
   (`docs/iec61937.md`).
 - PTS-driven A/V sync correction (ps_demux `aud_pts`).

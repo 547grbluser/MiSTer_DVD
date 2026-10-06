@@ -1,6 +1,6 @@
 # Full DVD-Video audio: every legal LPCM format, and AC-3 dual mono
 
-**Status (2026-10-05): 🔧 built and gated (§11); ⏳ fit and HW. Decided (§10): dedicated RTL, the `sys_top` tap,
+**Status (2026-10-06): ✅ HW-CONFIRMED on the rig (§12), A/B against `main`; ⏳ PR. Decided (§10): dedicated RTL, the `sys_top` tap,
 FFmpeg's channel order.** Branch `feature/lpcm-full`,
 `CORE_VERSION "dev-lpcmfull"`.
 
@@ -248,10 +248,13 @@ engine.
   decode the stream as 1+1 with 440 Hz left and 1 kHz right, and the core's arithmetic
   (`ac3_model` → `imdct_model`) correlates **1.00000** with a52dec per channel and
   0.000 across.
-- Unchanged and green: `run_wav`, `run_mp2`, `run_vcd`, `run_dts_dec`, `run_cb_copy`,
-  `run_aud_retime`, `run_aud_switch`, `run_css`, `run_auddrain`, `run_seek_rf_pts`,
-  `run_subpic`, `run_menudrain`, `run_mgl`, `run_dts`, `run_dts_seq`, `run_ac3`,
-  `run_mp2_eng`.
+- Unchanged and green: `run_mp2`, `run_dts_dec`, `run_cb_copy`, `run_aud_retime`,
+  `run_aud_switch`, `run_css`, `run_auddrain`, `run_seek_rf_pts`, `run_subpic`,
+  `run_menudrain`, `run_mgl`, `run_disp_sched`, `run_dts`, `run_dts_seq`, `run_mp2_eng`,
+  and all 13 `bench/ac3` suites. `run_front_cosim` now skips the 1+1 stream, which
+  `ac3_front` refuses by design.
+- `run_reader_regress.sh` is not applicable: `dvd_iso_reader` is untouched. Its runner
+  only gained `lpcm_hb.sv` in the audio file list.
 
 ### Findings, so they are not rediscovered
 
@@ -326,8 +329,53 @@ S/PDIF is unaffected. The manual (`audio/passthrough.md`) tells users to leave t
 (PR #157), and this netlist moved it. It passes the gate, so the build is flashable,
 but if the next change touches it, re-sweep the seed before trusting it.
 
+## 12. Hardware (2026-10-06, rig .236, `DVD_lpcmfull_20261006_0207.rbf`)
+
+Method: `tools/lpcm_vob.py` makes the VOBs (FFmpeg's video, our group-aligned LPCM, a
+speaker walk), and `tools/lpcm_hil.py` plays each one while capturing the HDMI audio. It
+scores where every channel lands, its level against the downmix gain (±1.5 dB), and the
+30 kHz alias. **Control arm first:** `main`'s build (`DVD_stilloff_20261005_2238.rbf`).
+
+| | control (`main`) | this build |
+|---|---|---|
+| 96 kHz stereo 24-bit | FAIL (no tones) | ✅ L/R exact; 30 kHz image ≤ −125 dB |
+| 48 kHz 5.1 20-bit | FAIL (channels mis-paired) | ✅ every channel where the downmix puts it, LFE silent |
+| 48 kHz 5.0 24-bit | | ✅ |
+| 48 kHz mono 20-bit | FAIL | ✅ both sides −12.3 dB |
+| 96 kHz 4.0 16-bit | | ✅; 30 kHz image −104 dB |
+| 48 kHz 7.1 16-bit | | ✅ (first run's last channel read low: the file was shorter than its walk, now fixed in `lpcm_vob.py`) |
+| AC-3 1+1 | FAIL (silent) | ✅ 440 Hz left, 1 kHz right, ≥ 87 dB separation |
+
+Levels land 0.3 dB under the model's on every arm, the same offset on every channel: the
+capture path's.
+
+Unchanged paths, this build:
+- `tools/audio_check.py`: *Three Tenors* (16-bit LPCM), *Roger Waters* (20-bit LPCM) and
+  *Almost Famous* (AC-3 + DTS in `Decode PCM`): every track audible. DTS audible means the
+  codebook init in `lpcm_unpack`'s FIFO survived the write-port change. The map report
+  shows both halves still carry `cb_host_lpcm.mem`.
+- `clk_mem` smoke (PR #157's recipe: THE_OFFICE, Disc Menus Off, Progressive, 120 s
+  telemetry):
+
+  | | lates | drops | longest picture | over a frame period |
+  |---|---|---|---|---|
+  | control | 1 | 0 | 20.8 ms | 0 of 2,978 |
+  | this build | 1 | 0 | 20.9 ms | 0 of 2,971 |
+
+  The 0.14 MHz margin costs nothing measurable here.
+
+**96 kHz link** (`hdmi_audio_96k=1`, set by the maintainer; stock Main):
+- Both 96 kHz VOBs play at correct pitch with every channel in place.
+- The core's measured audio rate is **96,000.2 Hz** while the 96 kHz track plays, with 0
+  drain-gate closures and 0 lates. So the NCO really runs native: the `sys_top` tap
+  reached the core, and on stock Main.
+- A 48 kHz 5.1 file and the AC-3 1+1 file also play correctly on the 96 kHz link.
+
+⏳ **Not checked on hardware:** HDMI bitstream passthrough on a 96 kHz link (§11, no
+receiver on the rig).
+
 ### Next
 
-Fit done (above). Then by ear on the rig: synthetic VOBs from our packer (mono, 5.1/24,
+Open the PR when asked. Then by ear on the rig: synthetic VOBs from our packer (mono, 5.1/24,
 7.1/16, 96/24 stereo, 96/16 4.0), with the current `main` build as the control.
 `hdmi_audio_96k=1` needs an ini change and a reboot on the shared rig: ask first.

@@ -49,8 +49,8 @@ predate later confirmations; the `CLAUDE.md` index carries the reconciled status
   - **The plan as originally written (§8):** control arm first, Off identical, On judged by
     the maintainer on the 18-bit-board CRT, HDMI bit-identical between On and Off.
 
-- 🔧 **FULL DVD-VIDEO AUDIO: EVERY LPCM FORM, AND AC-3 1+1 DUAL MONO (audit item 4,
-  2026-10-05, `dev-lpcmfull`; sim-verified, ⏳ fit and HW).** Design, measurements and gates:
+- ✅ **FULL DVD-VIDEO AUDIO: EVERY LPCM FORM, AND AC-3 1+1 DUAL MONO (audit item 4,
+  2026-10-05, `dev-lpcmfull`; ✅ HW-CONFIRMED 2026-10-06 A/B against `main`; ⏳ PR).** Design, measurements and gates:
   `docs/lpcm_full.md`.
   - **Gap.** LPCM was 48 kHz stereo only. A 96 kHz track played at half speed, mono at
     double speed, and 3–8 channels mis-paired, all with no message. AC-3 acmod 0 was
@@ -82,7 +82,15 @@ predate later confirmations; the `CLAUDE.md` index carries the reconciled status
     `hdmi_audio_96k=1` (the Main writes reg 0x15/N from the ini).
   - **Fit (SEED 7):** +405 ALM, +1 M10K, +4 DSP. `clk_dec` 91.8/91.6 MHz; `clk_mem`
     90.14/90.75 MHz, a thin pass (it runs at 90.0).
-  - **Next:** by ear and by capture on the rig (`tools/lpcm_hil.py`).
+  - **HW (2026-10-06, `docs/lpcm_full.md` §12).**
+    - Captured HDMI audio, control arm `main`: all seven formats pass on this build
+      (mono/20, 5.0/24, 5.1/20, 7.1/16, 96k stereo/24, 96k 4.0/16, AC-3 1+1), and every
+      one tried fails on `main`.
+    - On an `hdmi_audio_96k=1` link the core measures 96,000.2 Hz: native, through the
+      `sys_top` tap, on stock Main.
+    - Legacy LPCM and DTS discs play every track. The `clk_mem` smoke equals `main`'s
+      (1 late, 0 drops).
+  - **Next:** the PR.
 
 - ✅ **USER STILL OFF: PLAY/PAUSE OR SELECT ENDS A STILL WITH NO BUTTONS (audit item 5,
   2026-10-05, `dev-stilloff`; sim-verified, ✅ HW-CONFIRMED on
