@@ -226,6 +226,10 @@ def score(wav, fs, nch, link96, t0=None):
             print(f'{"ok  " if all(res) else "FAIL"} ch {c} ({hz} Hz): L {dl:6.1f} dB R {dr:6.1f} dB, '
                   f'want L {"silent" if exp[0] is None else f"{exp[0]:.1f}"} '
                   f'R {"silent" if exp[1] is None else f"{exp[1]:.1f}"}')
+        elif link96:
+            # no half-band on a 96 kHz link, and the 48 kHz capture's own resampler
+            # removes 30 kHz: this check would pass vacuously, so it is not scored
+            print('skip 30 kHz segment: on a 96 kHz link the capture cannot see it')
         else:
             worst = -180.0
             for img in (HF_HZ, 48000 - HF_HZ):         # the tone, or its alias at 18 kHz
