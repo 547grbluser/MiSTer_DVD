@@ -127,7 +127,7 @@ DTS/MP2 `ser_*` serialiser). But:
 - **The constant ROM has 27 words free.** Eight downmix layouts plus the FIR taps do not
   fit, so B needs a new coefficient ROM, or `li`/`st` at RESET (~256 program words).
 - **Program ROM:** ~150–250 of the 483 free words. That is a third to a half of what
-  `docs/engine_candidates.md` §10 wanted for future reclaim.
+  `docs/logic_reclaim.md` §10 wants for future reclaim.
 - **Cycle budget unproven:** at 96 kHz × 4 channels the scalar get/skip/issue loop has
   ~70 cycles per sample, so it would have to be proved with the `CYC` model.
 - **Process:** house style for an engine program is a Python model, an emulator
