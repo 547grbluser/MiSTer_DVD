@@ -97,6 +97,10 @@ A disc's own checks get honest answers about the player:
 - **Audio.** Discs are told which audio formats the core can actually play (Dolby Digital,
   MPEG audio, and DTS).
 
+**Damaged navigation files.** Every DVD carries a backup copy of each navigation file
+(`.BUP`). When a disc's main copy can't be read, the core uses the backup, as set-top
+players do. See [Troubleshooting](troubleshooting.md#a-scratched-disc-has-no-menus-or-chapters).
+
 Not implemented: **parental-control enforcement** and **UOP enforcement** (the flags a disc
 uses to forbid skipping something). In practice this means the core lets you skip things a
 set-top player would not.

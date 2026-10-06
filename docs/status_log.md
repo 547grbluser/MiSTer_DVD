@@ -22,6 +22,53 @@ predate later confirmations; the `CLAUDE.md` index carries the reconciled status
 
 ## Hardware status (THIS fork, verified 2026-06-21)
 
+- 🔧 **.BUP FALLBACK WHEN AN IFO IS UNREADABLE (audit item 8, 2026-10-06,
+  `dev-bupfallback`; sim + host proven, ⏳ HW).** Design: `docs/dvd_nav.md` "IFO header gate
+  and .BUP fallback", `docs/physical_disc.md` "An unreadable IFO sector is served from its
+  .BUP".
+  - **Gap.** The Main zero-fills an unreadable sector and the reader never checked an IFO's
+    magic. A zeroed VMGI ran the VM's error chain; a zeroed VTSI played the title set
+    linearly with no chapters, menus or attributes. Nothing was reported. libdvdread and
+    libdvdnav re-open the `.BUP` (libdvdnav: header-only, `ifoOpenVMGI` / `ifoOpenVTSI`).
+  - **Decisions (user, 2026-10-06):** both layers; visible as telemetry plus a log line,
+    with no OSD message.
+  - **Fabric:** a header gate on the five IFO sector-0 reads.
+    - On a magic mismatch it re-reads from the BUP, and switches the base only when the BUP
+      passes.
+    - A bad BUP, or none, means the IFO is parsed as before.
+    - `gmem` goes from 118 to 150 bits.
+    - Sticky flags on telemetry word 14: bits 10 (`bup_vmg`), 11 (`bup_vts`) and 12
+      (`ifo_nogood`).
+  - **Main:** on a physical disc or CSS image, an IFO/BUP sector the drive cannot read is
+    served from the same offset of its twin.
+    - Remembered for the mount, including a negative record when both copies are dead.
+    - VOBs never take part.
+    - The no-libdvdcss drive now enumerates too.
+    - A HIL fault hook, `/media/fat/dvd_fault_lbas`, works behind `dvd_hil`.
+  - **Census (`tools/bup_scan.py`, 1,556 images):**
+    - 12,403 pairs, none differ in length.
+    - The only bad IFO headers in the library are on **ALADDIN_D2**, a MakeMKV rip of a
+      damaged disc. VTS_07's IFO is all zeros and its BUP is intact; VTS_06 has both
+      zeroed.
+    - 30 pairs differ in content. All are protected or interactive discs whose IFO is fine.
+  - **Regress proof.**
+    - `RR_IVX=-DRR_NO_BUP`: 51/51 arms IDENTICAL to `main`.
+    - Gate on: only `iso_reader_real` differs, as predicted (its unserved VTS_21 IFO now
+      costs a BUP try and a revert). It still passes.
+  - **Gates:**
+    - `bench/dvd/run_bup.sh --red`: arms A–I, 16 mutations;
+    - `tools/check_bup_wiring.py --red`;
+    - `main/tests/run_tests.sh --red`: [21]–[29], 10 mutations;
+    - `check_player_regs_wiring.py`: its word-14 mutation was re-anchored.
+  - **Not built.** A `.BUP` with no `.IFO` record (directory damage or a naming choice). In
+    the census that is MILLIONAIRERUS's `VTS_01_1.IFO` naming, which is unplayable anyway.
+    Table damage behind a good header is not retried in fabric (libdvdnav parity).
+  - **Next:** HW.
+    - Control arm `main`, then the branch, on copies of an ISO with `VIDEO_TS.IFO` or the
+      feature VTSI zeroed.
+    - ALADDIN_D2 as is.
+    - The fault hook on a CSS image.
+
 - 🔧 **ANALOG DITHER: AN ORDERED DITHER AHEAD OF THE I/O BOARD'S 6-BIT VGA DAC (2026-10-06,
   `dev-dither`; ✅ HW-MEASURED via analog RGB capture, ✅ HW-CONFIRMED on a CRT by the
   maintainer, ✅ MERGED (PR #161)).**
