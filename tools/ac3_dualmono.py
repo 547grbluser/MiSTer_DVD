@@ -19,7 +19,7 @@ tone) and Ch2 the original right (1 kHz). The field positions come from
 tools/ac3_model.py's own parse (a logging BitReader), so the rewrite cannot disagree
 with the model about where a field is.
 
-  python3 tools/ac3_dualmono.py [out.ac3]     # default tools/streams/dualmono_440_1k_48k_192k.ac3
+  python3 tools/ac3_dualmono.py [out.ac3] [--secs S]   # default tools/streams/dualmono_440_1k_48k_192k.ac3, 0.5 s
   python3 tools/ac3_dualmono.py --check FILE  # a52dec and FFmpeg (CRC-checked) decode it as
                                               # 1+1 with 440 Hz left and 1 kHz right
 """
@@ -250,6 +250,11 @@ def check(path):
 if __name__ == '__main__':
     if '--check' in sys.argv:
         sys.exit(0 if check(sys.argv[sys.argv.index('--check') + 1]) else 1)
+    secs = '0.5'
+    if '--secs' in sys.argv:                    # e.g. 8 for a hardware-check VOB
+        k = sys.argv.index('--secs')
+        secs = sys.argv[k + 1]
+        del sys.argv[k:k + 2]
     out = sys.argv[1] if len(sys.argv) > 1 else os.path.join(HERE, 'streams', 'dualmono_440_1k_48k_192k.ac3')
-    make(out)
+    make(out, secs)
     sys.exit(0 if check(out) else 1)
