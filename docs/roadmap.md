@@ -621,14 +621,14 @@ in `CONF_STR`. Design: `docs/cdda.md` "`.cue` sheets". ⛔ CHD still not support
 > **top gap confirmed = exact chapters/PTT (7/7 discs); interactive GPRM-counter/NVTMR promoted
 > above parental on measured prevalence (3/7 game discs).** Phase 3 = close gaps in that order.
 
-### 🔧 Analog Dither: an ordered dither ahead of the I/O board's 6-bit DAC (2026-10-06; ✅ HW-measured via RGB capture: staircase halved at 480i and 480p, Off = `main`; ⏳ CRT by eye — see `docs/single_raster_analog.md` §8)
+### 🔧 Analog Dither: an ordered dither ahead of the I/O board's 6-bit DAC (2026-10-06; ✅ HW-measured via RGB capture: staircase halved at 480i and 480p, Off = `main`; ✅ HW-CONFIRMED on a CRT (S-Video 480i) — see `docs/single_raster_analog.md` §8)
 
 The classic DE10-Nano I/O board's VGA DAC shows 64 levels per channel, so dark gradients band
 on a CRT. `dvd/dac_dither.sv` in sys_top adds a 4×4 ordered dither, inverted every other vs, to the
 analog word only. It is behind the OSD option `Analog Dither` (`O[8]`), Off by default, and
 HDMI stays bit-exact. Gate: `bench/dvd/run_dac_dither.sh --red`.
-**Next:** the texture by eye on a CRT. At 27 MHz (per-pixel on Progressive) that verdict
-decides whether it ships.
+The maintainer judged it on the CRT: gradients look better with it on. **Next:** a PR when
+asked. Composite and a 31 kHz monitor are unchecked.
 
 ### ✅ User Still off: Play/Pause or Select ends a still with no buttons (2026-10-05; ✅ HW-CONFIRMED on timed stills, A/B vs `main`, ✅ MERGED PR #159 — see `docs/dvd_nav.md` "Still off")
 

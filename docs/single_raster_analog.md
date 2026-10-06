@@ -1077,7 +1077,7 @@ exactly what sent the fix to the vld:** the class is shared, so the fix should b
 - Progressive 480p on the analog pins keeps the dot-0 vsync reference (no field
   ambiguity there); anchoring it too is a one-line follow-up if a 31 kHz display objects.
 
-## 8. Analog Dither: the I/O board's 6-bit DAC (2026-10-06, ✅ HW-measured via capture, ⏳ CRT by eye)
+## 8. Analog Dither: the I/O board's 6-bit DAC (2026-10-06, ✅ HW-measured via capture, ✅ HW-CONFIRMED on a CRT)
 
 **The problem.** sys_top drives the DE10-Nano I/O board's VGA DAC from the top 6 bits of
 each channel (`VGA_R = vga_o[23:18]`). The low two bits (`vga_r/g/b`) go only to the SDIO
@@ -1186,11 +1186,15 @@ ramp, scored on the blue channel. Method:
 - On 480p the 6X CE scales the picture to half height. That is the converter, not the core;
   the regions were moved to match.
 
-⏳ **Not yet judged:** the texture by eye on a CRT (the go/no-go), composite/S-Video, and a
-24-bit DAC. The capture chain resamples and compresses, so it can show that the bands go,
-but not how visible the texture is on a tube.
+✅ **Judged on a CRT (2026-10-06, the maintainer):** the same paused ramp at 480i over S-Video,
+behind the 18-bit I/O board, toggled live from the OSD: *"gradients look better on the CRT
+with dither."* This settles the go/no-go: the 27 MHz pattern is acceptable as built, so
+the faster-clock fallback is not needed. The fixed-per-field Interlaced pattern is kept as
+built, and the per-frame alternative stays recorded above.
+⏳ **Not checked:** composite (`vga_mode=cvbs`), 480p on a 31 kHz monitor, and a 24-bit
+DAC (Off by default there, expected no change).
 
-**Remaining HW plan:**
+**The HW plan as run** (composite and the 24-bit rig not yet):
 - Control arm first: the previous build on the HIL rig with the 18-bit I/O board (CRT,
   S-Video) shows the bands.
 - New build: Off must look identical to the control. On should remove the bands. Judge the
