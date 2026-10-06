@@ -16,6 +16,15 @@
 //                  the pattern inverts per vs. This raster is PROGRESSIVE (one vs per
 //                  frame), so T6 is the Progressive claim; on Interlaced the two inverting
 //                  fields are the frame's two fields (see dvd/dac_dither.sv)
+//   [T7] lines     v <= 252: every 4 consecutive clocks of a line average to v / 4 EXACTLY.
+//                  A CRT blurs along the line, so a line whose own mean is off reads as a
+//                  stripe (the shipped Bayer-top-bits matrix: v % 4 = 1 or 3 put alternate
+//                  lines half a DAC step apart)
+//   [T8] columns   v <= 252: every 4 consecutive lines of a column average to v / 4 EXACTLY
+//                  (a column whose mean is off is a vertical line: the PWM cores' pattern)
+//   [T9] pixels    v % 4 == 2: every two adjacent clocks of a line average to v / 4 EXACTLY,
+//                  so a 480i / 240p pixel (two clocks) shows its value at either phase
+//                  against DE
 //
 // All comparisons use !== so an X on dout fails rather than passing vacuously.
 
@@ -45,7 +54,10 @@ module dac_dither_tb;
     dac_dither dut (.clk(clk), .en(en), .hs(hs), .vs(vs), .de(de), .din(din), .dout(dout));
 
     // ------------------------------------------------------------------ scoring
-    integer f1 = 0, f2 = 0, f3 = 0, f4 = 0, f5 = 0, f6 = 0;
+    integer f1 = 0, f2 = 0, f3 = 0, f4 = 0, f5 = 0, f6 = 0, f7 = 0, f8 = 0, f9 = 0;
+    integer lsum [0:2][0:VAL-1][0:HAW/4-1];       // 6-bit code sums: 4 clocks of a line
+    integer csum [0:2][0:VAL/4-1][0:HAW-1];       //                  4 lines of a column
+    reg [5:0] prev_c [0:2];                       // the previous clock's code, this line
     integer sum_r = 0, sum_g = 0, sum_b = 0;
     reg [1:0] prev_d [0:2][0:VAL-1][0:HAW-1];     // field n's offset, per channel and position
     reg       prev_ok = 1'b0;                     // prev_d holds the previous field, same levels
@@ -79,6 +91,49 @@ module dac_dither_tb;
         end
     endtask
 
+    // T7/T8 accumulate here and are scored at the field's end; T9 is scored per clock.
+    task automatic geo(input integer ch, input [7:0] v, input [7:0] o, input integer y,
+                       input integer x);
+        begin
+            lsum[ch][y][x / 4] = lsum[ch][y][x / 4] + o[7:2];
+            csum[ch][y / 4][x] = csum[ch][y / 4][x] + o[7:2];
+            if (v <= 8'd252 && v[1:0] == 2'd2 && x > 0
+                && ({26'd0, prev_c[ch]} + o[7:2] !== 2 * v[7:2] + 1)) begin
+                if (f9 < 4) $display("FAIL [T9] ch%0d v=%0d at (%0d,%0d): clocks %0d + %0d, want %0d", ch, v, y, x, prev_c[ch], o[7:2], 2 * v[7:2] + 1);
+                f9 = f9 + 1;
+            end
+            prev_c[ch] = o[7:2];
+        end
+    endtask
+
+    task automatic geo_check(input integer ch, input [7:0] v);
+        integer y, x;
+        if (v <= 8'd252) begin
+            for (y = 0; y < VAL; y = y + 1)
+                for (x = 0; x < HAW / 4; x = x + 1)
+                    if (lsum[ch][y][x] !== v) begin
+                        if (f7 < 4) $display("FAIL [T7] ch%0d v=%0d line %0d clocks %0d..%0d: code sum %0d, want %0d", ch, v, y, 4 * x, 4 * x + 3, lsum[ch][y][x], v);
+                        f7 = f7 + 1;
+                    end
+            for (y = 0; y < VAL / 4; y = y + 1)
+                for (x = 0; x < HAW; x = x + 1)
+                    if (csum[ch][y][x] !== v) begin
+                        if (f8 < 4) $display("FAIL [T8] ch%0d v=%0d column %0d lines %0d..%0d: code sum %0d, want %0d", ch, v, x, 4 * y, 4 * y + 3, csum[ch][y][x], v);
+                        f8 = f8 + 1;
+                    end
+        end
+    endtask
+
+    task automatic geo_clear;
+        integer ch, y, x;
+        for (ch = 0; ch < 3; ch = ch + 1) begin
+            for (y = 0; y < VAL; y = y + 1)
+                for (x = 0; x < HAW / 4; x = x + 1) lsum[ch][y][x] = 0;
+            for (y = 0; y < VAL / 4; y = y + 1)
+                for (x = 0; x < HAW; x = x + 1) csum[ch][y][x] = 0;
+        end
+    endtask
+
     always @(negedge clk) if (scoring) begin
         if (!en) begin
             if (dout !== din) begin
@@ -94,6 +149,9 @@ module dac_dither_tb;
             chan(0, lr, dout[23:16], vc - VA0, hc - HA0);
             chan(1, lg, dout[15:8],  vc - VA0, hc - HA0);
             chan(2, lb, dout[7:0],   vc - VA0, hc - HA0);
+            geo(0, lr, dout[23:16], vc - VA0, hc - HA0);
+            geo(1, lg, dout[15:8],  vc - VA0, hc - HA0);
+            geo(2, lb, dout[7:0],   vc - VA0, hc - HA0);
             sum_r = sum_r + dout[23:18];
             sum_g = sum_g + dout[15:10];
             sum_b = sum_b + dout[7:2];
@@ -114,6 +172,7 @@ module dac_dither_tb;
         begin
             lr = r; lg = g; lb = b;
             sum_r = 0; sum_g = 0; sum_b = 0;
+            geo_clear;
             if (!pair) prev_ok = 1'b0;
             scoring = score;
             repeat (HT * VT) begin
@@ -124,6 +183,7 @@ module dac_dither_tb;
             @(negedge clk);
             if (score && en) begin
                 avg_check(0, r, sum_r); avg_check(1, g, sum_g); avg_check(2, b, sum_b);
+                geo_check(0, r); geo_check(1, g); geo_check(2, b);
                 prev_ok = 1'b1;
             end
             scoring = 1'b0;
@@ -147,9 +207,9 @@ module dac_dither_tb;
         for (v = 0; v < 256; v = v + 37)
             field(v[7:0], 8'd255 - v[7:0], v[7:0] ^ 8'h55, 1'b1, 1'b0);
 
-        $display("dac_dither_tb: T1 %0d  T2 %0d  T3 %0d  T4 %0d  T5 %0d  T6 %0d failure(s)",
-                 f1, f2, f3, f4, f5, f6);
-        if (f1 + f2 + f3 + f4 + f5 + f6 != 0) $fatal(1, "FAIL dac_dither_tb");
+        $display("dac_dither_tb: T1 %0d  T2 %0d  T3 %0d  T4 %0d  T5 %0d  T6 %0d  T7 %0d  T8 %0d  T9 %0d failure(s)",
+                 f1, f2, f3, f4, f5, f6, f7, f8, f9);
+        if (f1 + f2 + f3 + f4 + f5 + f6 + f7 + f8 + f9 != 0) $fatal(1, "FAIL dac_dither_tb");
         $display("PASS dac_dither_tb");
         $finish;
     end

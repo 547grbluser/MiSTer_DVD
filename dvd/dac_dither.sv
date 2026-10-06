@@ -9,14 +9,19 @@
  * few for film: dark gradients contour into visible bands on a CRT. A Y 16 -> 64 ramp is
  * RGB 0 -> 56 after the BT.601 matrix, i.e. 14 steps of 4 at the DAC.
  *
- * This adds a 4 x 4 ordered (Bayer) threshold t of 0..3 LSB to every channel before the
- * truncation. Over the pattern each t occurs four times, and by Hermite's identity
+ * This adds a 4 x 4 ordered threshold t of 0..3 LSB to every channel before the
+ * truncation. The matrix is a Latin square: every line and every column of it holds each
+ * t once, and by Hermite's identity
  *
  *     sum_{t=0..3} floor((v + t) / 4) = v
  *
  * so the DAC's output averages to the 8-bit value exactly (v <= 252; above that the sum
- * saturates at 255): in every field, every 4-clock x 4-line cell. The matrix is inverted
- * (15 - b) on every other vs:
+ * saturates at 255) over every 4 clocks of a line and every 4 lines of a column, in every
+ * field. The per-LINE mean matters most: a CRT blurs along the line far more than across
+ * it. (The first version used the top two bits of a 4 x 4 Bayer matrix, which reduce to a
+ * 2 x 2 {0 2; 3 1}: exact over a 4 x 4 cell but not per line, so v % 4 = 1 or 3 showed as
+ * alternate lines half a DAC step apart. docs/single_raster_analog.md §8.)
+ * The matrix is inverted (3 - t) on every other vs:
  *   Progressive  one vs per frame, so consecutive frames invert and a still picture's
  *                pattern cancels over two frames (30 Hz) instead of standing still.
  *   Interlaced   two vs per frame, so the top field always gets one pattern and the
@@ -80,17 +85,22 @@ module dac_dither (
         end
     end
 
-    // 4 x 4 Bayer matrix (0..15); the threshold is its top two bits.
-    reg [3:0] b;
+    // The threshold matrix, a 4 x 4 Latin square: every line (row) and every column holds
+    // 0..3 exactly once, so each line and each column averages to v / 4 on its own.
+    // High (2, 3) and low (0, 1) thresholds alternate clock by clock on every line, so any
+    // two adjacent clocks (a 480i / 240p pixel, whatever its phase against DE) hold one of
+    // each. The 3s step between pixel halves line to line ({0, 2, 1, 3}), which makes
+    // v % 4 = 1 or 3 a pixel checkerboard on 480i rather than vertical pixel pairs.
+    // The row comments are anchors for bench/dvd/run_dac_dither.sh's matrix mutations.
+    reg [1:0] t0;
     always @(*)
         case ({row, col})
-            4'h0: b = 4'd0;  4'h1: b = 4'd8;  4'h2: b = 4'd2;  4'h3: b = 4'd10;
-            4'h4: b = 4'd12; 4'h5: b = 4'd4;  4'h6: b = 4'd14; 4'h7: b = 4'd6;
-            4'h8: b = 4'd3;  4'h9: b = 4'd11; 4'hA: b = 4'd1;  4'hB: b = 4'd9;
-            4'hC: b = 4'd15; 4'hD: b = 4'd7;  4'hE: b = 4'd13; default: b = 4'd5;
+            4'h0: t0 = 2'd3; 4'h1: t0 = 2'd0; 4'h2: t0 = 2'd2; 4'h3: t0 = 2'd1;    // row 0
+            4'h4: t0 = 2'd2; 4'h5: t0 = 2'd1; 4'h6: t0 = 2'd3; 4'h7: t0 = 2'd0;    // row 1
+            4'h8: t0 = 2'd0; 4'h9: t0 = 2'd3; 4'hA: t0 = 2'd1; 4'hB: t0 = 2'd2;    // row 2
+            4'hC: t0 = 2'd1; 4'hD: t0 = 2'd2; 4'hE: t0 = 2'd0; default: t0 = 2'd3; // row 3
         endcase
-    wire [3:0] bf = fld ? (4'd15 - b) : b;
-    wire [1:0] t  = bf[3:2];
+    wire [1:0] t  = fld ? (2'd3 - t0) : t0;
 
     wire [8:0] s2 = {1'b0, din[23:16]} + {7'd0, t};
     wire [8:0] s1 = {1'b0, din[15:8]}  + {7'd0, t};
