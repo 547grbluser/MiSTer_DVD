@@ -1297,7 +1297,7 @@ Levers, cheapest/lowest-risk first:
   logic, the MPEG-2 decoder included. In suggested order: `idct1d_col`'s `mult22x16`
   Virtex-II workaround (277 ALMs measured, exact, no extra DSP); the AC-3 IMDCT onto the
   audio engine (−1,200 … −1,600 ALMs estimated; decided 2026-10-05: bit-identical to
-  `imdct_512`, next step an exact cycle count); then a measurement-only split of `dvd_iso_reader`'s states, which
+  `imdct_512`; costed: worst AC-3 frame 52.8 % raw / 59.0 % under the gate's ×1.25); then a measurement-only split of `dvd_iso_reader`'s states, which
   decides whether a navigation sequencer for the reader, VM and `nav_pci` (6,234 ALMs) and
   a shared transport arithmetic unit (~3,300 ALMs) are worth a branch.
 

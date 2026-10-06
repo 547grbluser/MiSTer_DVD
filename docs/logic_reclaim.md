@@ -439,15 +439,13 @@ second, 2.3–2.7× one multiplier". ⚠ **That premise describes an algorithm w
 `imdct_512` is liba52's FFT form (pre-twiddle, 128-point split-radix IFFT, post-twiddle and
 window, overlap-add), driven by a flat butterfly schedule in `dvd/ac3/ac3_imdct_tables.svh`.
 
-**Multiply count, from that schedule (long block, one channel):** 82 `OP_BFULL` × 8 + 11
-`OP_BHALF` × 4 = 700 for the IFFT (`OP_BZERO`/`OP_IFFT2`/`OP_IFFT4` multiply nothing),
-plus about 512 each for the pre-twiddle, the post-twiddle and the window: **about 2,240**.
-A 5.1 frame is 5 channels × 6 blocks, about 67K multiplies, **8 % of the 864K-cycle frame**
-at one a cycle. Adds and addressing about double that (DTS's half IMDCT is 597 terms for
-288 multiplies), so about 16 %. The worst AC-3 frame is 323K cycles (37.3 %) with
-`imdct_512`'s 81K in series, so the engine's parse is about 242K. **With the IMDCT on the
-engine: about 377K, 44 %, under the 60 % bar.** Short blocks (134 butterflies, two 64-point
-IFFTs) cost less.
+**Cost on the engine, measured on the model (2026-10-05, below):** a 5.1 frame of IMDCT
+is **24.7 % of real time** (213K cycles) in one pass, not the 8–16 % first estimated
+here. That estimate counted multiplies; the FFT's adds outnumber them (3,584 of a long
+block's 6,120 terms per channel only add). It is still far from the direct form's
+2.3–2.7× of one multiplier, so the premise above stays wrong, but the margin is thinner
+than first claimed. Worst frame, parse included: **52.8 % raw, 59.0 % under the budget
+gate's ×1.25 convention**, against the 60 % bar.
 
 Why it fits the pattern: the engine already runs a transform as a ROM program
 (`tools/dts_vecrom.py`, the half IMDCT). It also runs MP2's synthesis. AC-3 and DTS are never
@@ -469,17 +467,65 @@ decoded together, so the IMDCT's `bufmem`, `delay_mem` and `pcm_mem` could share
   - **What is already there:** `dts_vec.sv` has a floor mode (`trunc`). MP2's window
     (`V_MWIN`, `vlo27`/`vhi27`) already multiplies a 32-bit operand as two 16-bit halves
     into the 56-bit accumulator and stays bit-identical to `mp2_decode`.
-  - **The open part: operand width.** Mid-transform samples reach about ±17 in Q8.23,
-    about 29 bits, which is wider than the 27×27 multiplier. Two ways:
-    1. two-pass multiplies, as MP2 does: no new DSP; the worst frame rises from about
-       44 % to roughly 50–56 % of real time (soft estimate), near the 60 % bar;
-    2. widen the engine's multiplier using one of the ~9 DSPs the move frees: one pass,
-       about 44 %.
-  - **★ Next step:** an exact cycle count. Run `imdct_sched_pk`'s schedule (plus the pre,
-    post and window loops) through a Python executor that charges two passes for every
-    operand that can exceed 27 bits. Under about 50 %: two passes. Near 60 %: widen the
-    multiplier. `imdct_512` measures about 1,666 Q8.23 LSB from liba52 (`run_imdct.sh`,
-    tolerance 3,000); that bound is unchanged because the arithmetic is unchanged.
+  - ⚠ The cycle figures given when this was decided (44 % for either option) rested on
+    the same undercount. Option B's IMDCT has the same FFT add structure, so it would
+    also land near 53 %: its cycle advantage was illusory, and the decision stands.
+
+**The cycle count (2026-10-05): `tools/imdct_model.py` + `bench/ac3/run_imdct_xcheck.sh`.**
+- **The model is `imdct_512`, bit for bit.** `run_imdct_xcheck.sh` runs one `imdct_512`
+  through 24 consecutive blocks of each of 15 streams (2/0, 1/0, 3/0, 2/1, 3/1, 2/2, 3/2,
+  short blocks, live DRC; 360 blocks) and compares all six `pcm_mem` slots with `!==`
+  after every block: identical. `--red` (one product rounded instead of floored) is
+  caught on **all 15**. A window with fewer than 256 nonzero words fails as vacuous, and
+  a silent one is SKIPped by name (The Residents' gate window is silent for 20 frames).
+  ⚠ The bench zeroes `pcm_mem`/`delay_mem` first, as the M10K does at power-up: a 3/0
+  fold multiplies an unwritten surround slot by `slev = 0`, and x × 0 = x in simulation.
+- **The program it costs** (`imdct_model.py cost`): every product its own term (imdct_512
+  floors each product before adding), one RAM operand read per term, temporaries written
+  once and re-read, 2 bubble cycles per butterfly and per PRE/POST element. A long block
+  is 6,120 terms a channel, a short one 5,440. **This is a program shape, not RTL**: the
+  parse side of the budget is the RTL-calibrated `ac3_isa` emulator, the IMDCT side is
+  this count.
+- **Results, all 29 gate streams that decode (24 frames each):**
+
+  | worst frame (`noise_5p1_48k_640k`) | raw | gate convention (×1.25 on the IMDCT) |
+  |---|---|---|
+  | parse alone | 28.1 % | — |
+  | + IMDCT, one pass | **52.8 %** | **59.0 %** |
+  | + IMDCT, split only wide operands | 52.8 % | 59.0 % |
+  | + IMDCT, every product split | 61.4 % | 69.8 % |
+
+  Stall sensitivity, one pass: 0 bubbles 50.4 %, 4 bubbles 55.2 %. The real discs sit
+  lower (MATRIX RELOADED 50.1 %, DARK PASSENGERS 49.8 % raw).
+- **Operand widths.** Of 15.4M products on the gate streams, **none is wider than 27
+  bits**; the widest is 24 (POST). ⚠ **That is a sweep, not a bound.** Legal extreme
+  input, full-scale coefficients in every bin, reaches 28–32 bits with no DRC, and with
+  the maximum DRC boost (`dynrng = 0x7F`, ×15.75) about 90 % of products are wider than 27
+  bits (32 = `imdct_512`'s own words wrapping, which an exact copy must reproduce). So a
+  27-bit multiplier with no split is **ruled out**: it would silently differ on legal
+  input.
+- **What separates the two remaining options is only the pathological case.** On every
+  measured stream, "split only when wide" costs exactly what a widened multiplier costs.
+  - **Split when wide (recommended):** the operand's top bits decide per product whether
+    MP2's two-pass split runs. Exact for every value, no new DSP, real streams at one-pass
+    speed; worst case bounded by "every product split", 61.4 % raw, still inside real time
+    (100 %) though over the 60 % design bar. Per the spec-maximum rule it must count its
+    wide products in telemetry, so a stream that pays the slow path is visible.
+    `--mul-bits 20` exercises the path: one 52.8 < split-when-wide 54.3 < every 61.4 %.
+  - **Widen the multiplier:** 52.8 % flat for any input, at a DSP and an adder in the
+    engine's 27×27 datapath, which DTS shares.
+- **The margin lever, if 59.0 % is too close:** 3,584 of a long block's 6,120 terms only
+  add two words. A term that reads two operands through the scratch's second port
+  (`imdct_512`'s `bufmem` is already true dual-port) saves about 1,800 terms a channel-block,
+  about 6 points raw on the worst frame.
+- **Program size rules out unrolling.** 6,120 terms × ~24 bits per block type is ~15 M10K,
+  and 34 are free. The program must be PRE/POST loops plus a butterfly op that walks the
+  existing 291-entry `imdct_sched_pk` with a fixed term template per op code.
+- **★ Next step:** replace `tools/test_ac3_isa.py`'s measured `IMDCT_BLOCK` constant with
+  the engine IMDCT charge (this model's per-frame terms), so the budget gate scores the
+  real plan, then design the executor (`dts_vec` states, the width check, the counter).
+  `imdct_512`'s error against liba52 (1,666 Q8.23 LSB, `run_imdct.sh`) is unchanged, since
+  the arithmetic is.
 - **Gates that exist:** `run_ac3_ab.sh` (block for block against the hardwired path),
   `bench/ac3/run_imdct.sh`, `run_ac3.sh --red`, then a by-ear HIL round on 5.1 and
   short-block material (`bbb_short_5p1`).
@@ -569,6 +615,7 @@ the census since F1 + F2, `decode_pacing.md`) is the hardest-won property in the
 ### 10f. Suggested order
 
 1. **`mult22x16`** (10d): small, exact, an afternoon plus a fit.
-2. **The IMDCT on the engine** (10a), once the exactness question is decided.
+2. **The IMDCT on the engine** (10a): exactness decided, cycles measured; next, the
+   budget gate's `IMDCT_BLOCK` and the executor design.
 3. **The reader state split** (10b, measurement only), which decides whether 10b and 10c
    are worth a branch.

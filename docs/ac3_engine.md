@@ -35,9 +35,10 @@ stands until a fit says otherwise.
 ## The contract: what the parse hands the IMDCT
 
 `imdct_512` stays hardwired (§4: a direct-form 5.1 transform needs 2.3–2.7× one
-multiplier). ⚠ (2026-10-05) `imdct_512` is not direct-form: it is liba52's FFT form, about
-2,240 multiplies per channel-block, so on the engine a 5.1 frame is about 8–16 % of real
-time. Moving it is `logic_reclaim.md` §10a's first candidate. The engine replaces everything upstream of it: `sync_crc`, `bsi_parse`,
+multiplier). ⚠ (2026-10-05) `imdct_512` is not direct-form: it is liba52's FFT form. Costed on
+the engine (`tools/imdct_model.py`), a 5.1 frame of IMDCT is 24.7 % of real time and the
+worst AC-3 frame 52.8 % (59.0 % under the ×1.25 convention). Moving it is
+`logic_reclaim.md` §10a's first candidate. The engine replaces everything upstream of it: `sync_crc`, `bsi_parse`,
 `audblk_parse`, `exponent_decode`, `bit_allocation`, `mantissa_dequant` and both bit
 readers. Per block it must produce exactly what `imdct_512` reads from `ac3_parse`:
 

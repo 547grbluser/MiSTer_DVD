@@ -476,8 +476,8 @@ in telemetry, never wrong audio.
   parse move is needed for DTS to fit, so it is not optional. AC-3's IMDCT stays
   hardwired: a direct-form transform for 5.1 needs 61–74M multiply-accumulates a second,
   2.3–2.7× one multiplier at 27 MHz. ⚠ (2026-10-05) That is the direct form; `imdct_512`
-  runs the FFT form, about 8–16 % of real time for 5.1 on one multiplier, so this reason
-  does not hold. See `logic_reclaim.md` §10a. Each move is gated trace-identical
+  runs the FFT form, measured at 24.7 % of real time for 5.1 on one multiplier
+  (`tools/imdct_model.py`), so this reason does not hold. See `logic_reclaim.md` §10a. Each move is gated trace-identical
   (`logic_reclaim.md` method) and the AC-3 path bit-exact against `bench/ac3`.
 
 ## 8. Open questions
