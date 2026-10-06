@@ -22,6 +22,51 @@ predate later confirmations; the `CLAUDE.md` index carries the reconciled status
 
 ## Hardware status (THIS fork, verified 2026-06-21)
 
+- ✅ **ANALOG DITHER MATRIX: A LATIN SQUARE, EXACT ON EVERY LINE (2026-10-06,
+  `dev-ditherlatin`; ✅ HW-measured via capture, ✅ HW-CONFIRMED on a CRT, ✅ MERGED (PR #164)).**
+  - **Trigger.** Reviewing the PWM cores (`Jokippo/MiSTer_PWM_Cores`) as a replacement for
+    PR #161's dither, together with a forum critique of them. The critic wants a pattern
+    with "the same sum of values per line". Ours did not have that.
+  - **Root cause.** `dac_dither` took `bf[3:2]` of a 4×4 Bayer, which is the 2×2
+    `{0 2; 3 1}` tiled. It is exact per 4×4 cell, but line by line `v % 4 = 1` averages
+    0 / ½ DAC step (ideal ¼) and `v % 4 = 3` averages ½ / 1 (ideal ¾). At 480i (2 clocks per
+    pixel) whole lines are lit or unlit: a line texture on a CRT, very likely the "fine line
+    texture" in PR #161's 480i capture.
+  - **Fix.** The Latin square `{3 0 2 1; 2 1 3 0; 0 3 1 2; 1 2 0 3}`: every line and
+    column exact, high and low thresholds alternating every clock (480i pixels exact at
+    `v % 4 = 2` at either DE phase), and the 3s stepping between pixel halves (a pixel
+    checkerboard at `v % 4 = 1/3` on 480i). Field inversion is `3 - t`.
+  - **PWM verdict: rejected.** `vga_pwm.sv` works out to the same thing as an ordered dither
+    with thresholds 3, 2, 1, 0 along the line, reset at hsync. It only acts as PWM when
+    `clk_vid` is far faster than the dot clock (the N64 runs 4–8 clocks per pixel). At our
+    27 MHz it would draw vertical lines, so it is weaker than `dac_dither`. Details and the
+    faster-clock cost are in §8 "Rejected".
+  - **Gates:** `run_dac_dither.sh --red`. New arms: [T7] lines, [T8] columns and [T9]
+    adjacent pairs, each failed by its own matrix mutation (the old Bayer, the PWM ramp, a
+    cyclic Latin square). 10 module and 7 wiring mutations in all.
+  - **Fit:** `DVD_ditherlatin_20261006_1536.rbf`, SEED 7 unchanged. `dac_dither` 16.1 ALM
+    (was 15.2). clk_dec 91.75 / 88.78 MHz, clk_mem 98.8 / 99.98 MHz (100 °C / −40 °C).
+    `fmax_check` and `lint_undriven` pass.
+  - **After the rebase onto PR #163:** SEED 7 re-rolled (clk_mem 66.6 MHz, all inside
+    `mem_shim_burst`, a congestion detour). SEED 9 passes: clk_dec 90.59 / 86.11, clk_mem
+    96.58 / 93.76 → `DVD_ditherlatin_20261006_1829.rbf`. The CRT-tested build was the
+    pre-rebase one; the dither logic is identical.
+    HIL smoke on the SEED 9 build (480i, a static showcase clip): 0 lates and 0 drops over
+    20 s, 2.000 refreshes per pickup, and the HDMI-side shot decodes correctly. A 24-bit DAC
+    (the second rig) shows no visible change with the dither On.
+  - **HW A/B (capture, 4 repeats at 480i):** line texture (grey) 0.257 → 0.055. The
+    grey staircase is unchanged (0.51 → 0.53), and Off is identical between builds. The ×5
+    contrast still shows the control's hatching gone. ⚠ The 480i blue staircase is
+    repeatably worse (0.536 → 0.650), while 480p blue is better (0.73 → 0.66). It sits in
+    one stretch of the ramp at long period, and grey R also differs from G/B. Both patterns
+    are mean-exact in sim, so this reads as an analog/RetroTINK-sampling interaction with
+    the pattern's spectrum, not a mean error. Table and reasoning: §8 "The matrix".
+    Tool: `tools/dither_ab.py`.
+  - **CRT (the maintainer, 480i S-Video, A/B against PR #161's build twice):** "blue does
+    not look noticeably worse on the latin-square version, and the whole image is improved
+    with less of that crosshatching." The capture's blue reading is an instrument effect.
+  - **Still unchecked,** as for PR #161: composite and a 31 kHz
+    monitor.
 - ✅ **.BUP FALLBACK WHEN AN IFO IS UNREADABLE (audit item 8, 2026-10-06,
   `dev-bupfallback`; fabric ✅ HW-CONFIRMED A/B vs `main`; Main mirror ✅ HW-CONFIRMED on a
   physical disc; ✅ MERGED (PR #163)).** Design: `docs/dvd_nav.md` "IFO header gate

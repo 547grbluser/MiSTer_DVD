@@ -48,11 +48,12 @@ if [ "${1:-}" = "--red" ]; then
     fi
   }
 
-  # T1: the threshold loses its low bit (t in {0, 2}): the mean is biased low.
+  # T1: the threshold loses its low bit on red (t in {0, 2}): the mean is biased low.
   red_case "half: threshold 0/2 only" T1 \
-           's/wire \[1:0\] t  = bf\[3:2\];/wire [1:0] t  = {bf[3], 1'"'"'b0};/'
-  # T1: the row counter never advances: one Bayer row, thresholds 0 2 0 2.
-  red_case "norow: the line never steps the row" T1 \
+           's/{1.b0, din\[23:16\]} + {7.d0, t}/{1'"'"'b0, din[23:16]} + {7'"'"'d0, t[1], 1'"'"'b0}/'
+  # T8: the row counter never advances: every line is row 0, the same offset in every
+  # column on every line -- vertical lines (each line's own mean is still exact).
+  red_case "norow: the line never steps the row" T8 \
            's/if (hs \&\& !hs_q) row <= row + 2.d1;//'
   # T2: the threshold doubled (0..6): a multiple of 4 crosses a 6-bit code.
   red_case "wide: threshold 0..6" T2 \
@@ -68,7 +69,49 @@ if [ "${1:-}" = "--red" ]; then
            's/if (!en_s2 || !de) dout = din;/if (!de) dout = din;/'
   # T6: no field inversion: a static crosshatch on flat areas.
   red_case "static: the pattern never inverts" T6 \
-           's/wire \[3:0\] bf = fld ? (4.d15 - b) : b;/wire [3:0] bf = b;/'
+           's/wire \[1:0\] t  = fld ? (2.d3 - t0) : t0;/wire [1:0] t  = t0;/'
+
+  # Matrix mutations: the four "// row N" lines of the case rewritten with another
+  # matrix (rows top to bottom, columns left to right).
+  red_matrix() {   # $1 = label, $2 = arm, $3 = "r0c0 r0c1 ... r3c3"
+    echo "== RED [$1] (expects $2) =="
+    python3 - "$SRC" "$mut" "$3" <<'PYEOF'
+import re, sys
+src, dst, vals = sys.argv[1], sys.argv[2], [int(v) for v in sys.argv[3].split()]
+out = []
+for line in open(src):
+    m = re.match(r'(\s*)4.h[0-9A-F]: t0 = .*// row ([0-3])\s*$', line)
+    if m:
+        r = int(m.group(2))
+        cells = []
+        for c in range(4):
+            sel = "4'h%X" % (4 * r + c) if (r, c) != (3, 3) else "default"
+            cells.append("%s: t0 = 2'd%d;" % (sel, vals[4 * r + c]))
+        line = m.group(1) + ' '.join(cells) + '  // row %d\n' % r
+    out.append(line)
+open(dst, 'w').writelines(out)
+PYEOF
+    if cmp -s "$mut" "$SRC"; then
+      echo "  FAIL: the matrix mutation did not apply to $SRC"; fails=$((fails+1)); return
+    fi
+    build "$mut"
+    if vvp "$SIM" > "$LOG" 2>&1; then
+      echo "  FAIL: the RED arm PASSED — the bench cannot detect this defect"; fails=$((fails+1))
+    elif ! grep -q "^FAIL \[$2\]" "$LOG"; then
+      echo "  FAIL: the bench failed, but not on $2:"; grep -E "^FAIL" "$LOG" | head -3 | sed 's/^/    /'
+      fails=$((fails+1))
+    else
+      echo "  failed as required:"; grep -E "^FAIL \[$2\]" "$LOG" | head -2 | sed 's/^/    /'
+    fi
+  }
+  # T7: the first shipped matrix, a 4 x 4 Bayer's top two bits = 2 x 2 {0 2; 3 1}: exact
+  # per 4 x 4 cell, but alternate lines are half a DAC step apart for v % 4 = 1 or 3.
+  red_matrix "bayer: the Bayer top-bits matrix" T7 "0 2 0 2  3 1 3 1  0 2 0 2  3 1 3 1"
+  # T8: the PWM cores' pattern (vga_pwm.sv: phase 0..3 from hsync, identical every line).
+  red_matrix "pwm: the same ramp on every line" T8 "3 2 1 0  3 2 1 0  3 2 1 0  3 2 1 0"
+  # T9: a Latin square (lines and columns exact) whose high and low thresholds do not
+  # alternate: a 480i pixel at {0, 1} or {2, 3} is off by a quarter step.
+  red_matrix "cyclic: Latin, but pixels unbalanced" T9 "0 1 2 3  1 2 3 0  2 3 0 1  3 0 1 2"
 
   # Wiring arms: tools/check_dac_dither_wiring.py on mutated copies of emu.sv / sys_top.v /
   # DVD.qsf (in a temp dir, never the tree). Each must fail with its own message.
