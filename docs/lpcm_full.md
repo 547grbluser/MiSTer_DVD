@@ -341,8 +341,16 @@ but if the next change touches it, re-sweep the seed before trusting it.
 | rebased build | 39,120 | 520 | 91 | 92.58 / 89.56 MHz | **96.24 / 94.61 MHz** |
 
 `clk_mem`'s margin is back (4.6 MHz worst corner): the thin pass above was this
-placement, not the design. The hardware results in §12 were taken on the pre-rebase build.
-The dither touches only the analog DAC word in `sys_top`, which is not on the audio path.
+placement, not the design.
+
+**Rebased build on the rig (2026-10-06, .236, 48 kHz link):**
+- All seven test VOBs pass, as in §12. The 30 kHz image is −99 and −102 dB, and 1+1 is
+  440 Hz left / 1 kHz right with ≥ 120 dB of separation.
+- *Almost Famous* (AC-3 + DTS) and *Roger Waters* (20-bit LPCM): every track audible.
+- THE_OFFICE Progressive: 1 late, 0 drops, longest picture 20.8 ms, 0 of 2,977 over a frame
+  period. That equals `main`'s control in §12.
+- The 96 kHz-link arm was not repeated: neither the merge nor the dither touches that
+  path.
 
 ## 12. Hardware (2026-10-06, rig .236, `DVD_lpcmfull_20261006_0207.rbf`)
 
