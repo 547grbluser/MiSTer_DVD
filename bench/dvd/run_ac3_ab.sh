@@ -4,8 +4,9 @@
 # PCM (imdct_512's pcm_mem, what pcm_out drains), lvl_q and acmod, identical, on every
 # stream of tools/test_ac3_model.py's set. docs/ac3_engine.md "W1".
 #   FRAMES=N frames a stream (default 6); a *refuse* window runs with +refuse (ac3_front
-#   halts there; the engine must match it up to the halt and go on). So does a 1+1
-#   *dualmono* stream: ac3_front refuses dual mono, the engine decodes it.
+#   halts there; the engine must match it up to the halt and go on). A 1+1 stream
+#   (*dualmono*, *acmod0*) runs with +halt: ac3_front refuses dual mono and halts, the
+#   engine must decode past it.
 #   D1: tone 5.1 with a 4,000-cycle drain (the engine runs ahead of a slow pcm_out)
 set -u
 cd "$(dirname "$0")/../.."
@@ -46,8 +47,9 @@ ARMS=()
 for s in "${STREAMS[@]}"; do
   st=$(basename "$s" .ac3)
   # ac3_front refuses 1+1 dual mono, which the engine decodes (docs/lpcm_full.md §7):
-  # compared up to ac3_front's halt, as a refusal window
-  case "$s" in *refuse*|*dualmono*) ARMS+=("$st|$st|+refuse");; *) ARMS+=("$st|$st|");; esac
+  # +halt -- ac3_front must halt, the engine must decode past it
+  case "$s" in *acmod0*|*dualmono*) ARMS+=("$st|$st|+halt");;
+               *refuse*) ARMS+=("$st|$st|+refuse");; *) ARMS+=("$st|$st|");; esac
 done
 ARMS+=("D1|tone_5p1_48k_192k|+drain=4000")
 n=0

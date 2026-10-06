@@ -18,6 +18,9 @@
 //           read (X in simulation, whatever the ROM returns in silicon); the engine
 //           refuses that frame and goes on (docs/ac3_engine.md, "invalid codes
 //           refused and counted").
+//           With +halt (a 1+1 dual-mono stream): ac3_front refuses acmod 0 and halts,
+//           the engine decodes it (docs/lpcm_full.md §7). ac3_front must halt, the
+//           engine must decode past that point, and the blocks before it are compared.
 //   [hang]  no block for 2M cycles while input remains
 // STEM.bytes / STEM.frames / STEM.meta ("bytes frames"): bench/dvd/run_ac3_ab.sh.
 
@@ -29,7 +32,7 @@ module ac3_ab_tb;
     always #5 clk = ~clk;
 
     string stem;
-    int drain, refuse, n_bytes, n_frames;
+    int drain, refuse, halt, n_bytes, n_frames;
     logic [7:0]  bytes [0:65535];           // a fixed array: icarus cannot read a dynamic one in a port
     logic [15:0] flen [];
     initial begin
@@ -38,6 +41,7 @@ module ac3_ab_tb;
         if (!$value$plusargs("stem=%s", stem)) $fatal(1, "FAIL [setup] no +stem");
         if (!$value$plusargs("drain=%d", drain)) drain = 600;
         refuse = $test$plusargs("refuse");
+        halt   = $test$plusargs("halt");
         fd = $fopen({stem, ".meta"}, "r");
         if (fd == 0) $fatal(1, "FAIL [setup] no %s.meta", stem);
         r = $fscanf(fd, "%d %d", n_bytes, n_frames);
@@ -180,9 +184,16 @@ module ac3_ab_tb;
                 int n, bad;
                 if (oi < n_bytes && !o_err) $fatal(1, "FAIL [hang] ac3_front took %0d of %0d bytes", oi, n_bytes);
                 if (bi < n_bytes) $fatal(1, "FAIL [hang] the engine took %0d of %0d bytes", bi, n_bytes);
-                if (!refuse && nb[0] != nb[1])
+                if (!refuse && !halt && nb[0] != nb[1])
                     $fatal(1, "FAIL [count] ac3_front %0d blocks, the engine %0d", nb[0], nb[1]);
                 n = nb[0];
+                if (halt) begin
+                    if (!o_err) $fatal(1, "FAIL [count] +halt, but ac3_front did not halt");
+                    if (nb[1] <= nb[0])
+                        $fatal(1, "FAIL [count] +halt: the engine decoded %0d blocks, not past ac3_front's %0d",
+                               nb[1], nb[0]);
+                    n = nb[0];
+                end
                 if (refuse) begin
                     if (first_ref < 0) $fatal(1, "FAIL [count] +refuse, but the engine refused nothing");
                     if (nb[0] < first_ref || nb[1] < first_ref)
@@ -201,7 +212,7 @@ module ac3_ab_tb;
                 end
                 $display("ac3_ab_tb: %0d frames, %0d blocks identical (ac3_front %0d, halted %0d; the engine %0d, %0d frames refused, the first after block %0d)",
                          n_frames, n, nb[0], o_err, nb[1], nref, first_ref);
-                if (n == 0 && !(refuse && nref > 0)) $fatal(1, "FAIL [count] no block decoded");
+                if (n == 0 && !(refuse && nref > 0) && !(halt && nb[1] > 0)) $fatal(1, "FAIL [count] no block decoded");
                 $display("PASS: ac3_ab_tb");
                 $finish;
             end
