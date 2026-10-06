@@ -262,3 +262,68 @@ Q12.4 bounce FSM, reuse of the subpic_blend priority stage, `!media_seen` idle g
 original artwork) plus a user-replaceable bitmap via the `boot.rom` convention. The
 fabric-budget precondition was met by the same branch's reclaim pass (dead mpeg2 OSD
 tie-off + dvd_vm mux sharing).
+
+---
+
+## PWM on the 6-bit analog DAC (the "PWM cores" method)
+
+**Idea:** replace or extend `Analog Dither` with the method used by the community PWM builds
+of the N64, PSX and Saturn cores (`Jokippo/MiSTer_PWM_Cores`; binaries only, the source is in
+the author's N64 fork as `sys/vga_pwm.sv`; forum thread "PWM on 18-bit DAC to get 24-bit
+Color", misterfpga.org t=7565). Groovy_MiSTer ships it as standard.
+
+**How it works.** About 20 lines in sys_top. A 2-bit `phase` counts on `clk_vid` and is
+cleared during hsync (or csync). Each channel outputs `din[7:2] + (phase < din[1:0])`, held
+at 63. Over four clocks the DAC shows the top six bits, plus one for `din[1:0]` of those four
+clocks, so the time-average equals the 8-bit value. Algebraically this is **an ordered
+dither with thresholds 3, 2, 1, 0 along the line**. It has no line term and no frame term:
+every line gets the same ramp.
+
+**Why it works in those cores.** Their `clk_vid` is far faster than the dot clock: the N64
+runs 48.68 MHz, 4–8 clocks per pixel. So the whole 4-phase cycle sits inside one pixel, the
+modulation lands at ≥12 MHz, and the display's low-pass averages it away. No spatial pattern
+is left. That is what earns the name PWM.
+
+**Why it does not transfer here (evaluated 2026-10-06, ruled out at our clock).**
+- `CLK_VIDEO` is 27 MHz, 1 clock per pixel on 480p and 2 on 480i/240p. Dropped in as is,
+  the method becomes a 4-pixel (480p) or 2-pixel (480i) pattern with the same offset in the
+  same columns on every line and every frame, i.e. vertical lines on flat colour.
+  `dvd/dac_dither.sv` already does better, with a line term and per-field inversion.
+- A forum critic of the PWM builds made the same two points: the hsync-reset counter gives
+  vertical lines on solid colours, and a clock that is not a multiple of 4 pixel clocks
+  gives errors. The second does not apply to us (27 MHz is exactly 1× or 2× the dot rate);
+  the first does.
+- **Copying it as is would also skew colour against sync.** `vga_pwm` delays the data by 3–4
+  register stages and `VGA_HS` by 1. That is a fraction of a pixel at the N64's clock and
+  about 4 pixels on 480p here.
+- The critic's real point, a dither whose every line sums to the same value, was taken. It
+  exposed that our own 4×4 Bayer matrix's top two bits were a 2×2 pattern that was not exact
+  per line. The fix is a Latin-square matrix, HW-confirmed on a CRT: less crosshatching
+  (`feature/dither-latin`, `docs/single_raster_analog.md` §8 "The matrix").
+
+**What genuine sub-pixel PWM would take (the open maybe).** A clock faster than the dot
+clock, on the DAC word only:
+- **54 MHz** divides cleanly from `sys_pll`'s 810 MHz VCO (phase-locked to the 27). That
+  gives 4 phases per 480i pixel, the PSX/N64 640-wide condition, but only 2 per 480p pixel.
+- **108 MHz** does not divide from 810 MHz. Retuning the VCO moves `clk_dec`/`clk_mem` and
+  means a seed re-sweep.
+- **A faster `CLK_VIDEO` itself** touches every `clk_vid` consumer in sys_top, including the
+  composite subcarrier NCO, whose `PhaseInc` Main derives from the reported pixel clock.
+  `dvd/emu.sv` (~6073) records metastability from the last time `CLK_VIDEO` ran at 108 MHz.
+- Either way: a new clock domain, a CDC for the 24-bit word, an SDC entry, and fabric at
+  ~97 % ALM. It can be combined with the Latin-square dither, which stays as the
+  spatial/temporal term.
+
+**Risk / cost:**
+- **Unmeasurable with the current rig.** The RetroTINK samples at the dot rate, so
+  sub-pixel modulation is invisible to `tools/dither_ab.py`, and only a CRT by eye can judge
+  it. Upscalers on the analog port would also need re-clocking to see it (the critic's
+  p.s.).
+- **54 MHz edges on the resistor-ladder DAC.** Proven at ~50–60 MHz by the PWM builds on
+  the same I/O boards, but not at 108 MHz.
+- **Little left to gain.** The maintainer judged the 27 MHz Latin-square dither an
+  improvement on the CRT.
+
+**Status:** evaluated 2026-10-06. The as-is port was ruled out (weaker than `dac_dither`).
+The faster-clock variant is not scheduled; revisit only if the CRT still shows dither
+texture worth removing.
