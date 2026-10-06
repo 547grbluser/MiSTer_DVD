@@ -1077,7 +1077,7 @@ exactly what sent the fix to the vld:** the class is shared, so the fix should b
 - Progressive 480p on the analog pins keeps the dot-0 vsync reference (no field
   ambiguity there); anchoring it too is a one-line follow-up if a 31 kHz display objects.
 
-## 8. Analog Dither: the I/O board's 6-bit DAC (2026-10-06, ✅ HW-measured via capture, ✅ HW-CONFIRMED on a CRT)
+## 8. Analog Dither: the I/O board's 6-bit DAC (2026-10-06, ✅ HW-measured via capture, ✅ HW-CONFIRMED on a CRT, ✅ MERGED PR #161)
 
 **The problem.** sys_top drives the DE10-Nano I/O board's VGA DAC from the top 6 bits of
 each channel (`VGA_R = vga_o[23:18]`). The low two bits (`vga_r/g/b`) go only to the SDIO
