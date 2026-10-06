@@ -196,6 +196,13 @@ loop to handle both cadences cleanly.
 - Common on older DVD releases, some region-specific discs, and music DVDs
 
 ### Implementation
+> ⚠ **Historical (HPS/ALSA era; that path is retired).** The header layout below is
+> wrong. After the substream id, DVD LPCM carries a 6-byte private header: frame
+> count, first-access-unit pointer, emphasis/mute/frame number,
+> quantisation/rate/channels, and a dynamic-range byte. The fabric path is
+> `dvd/ps_demux.sv` + `dvd/lpcm_unpack.sv`, which decode every DVD-Video form
+> (`docs/lpcm_full.md`).
+
 No decode library needed. Read LPCM PES payload, strip the 3-byte audio header
 (that precedes actual sample data in DVD LPCM streams), and write directly to ALSA.
 Handle byte-order: DVD LPCM is big-endian, ALSA expects little-endian.

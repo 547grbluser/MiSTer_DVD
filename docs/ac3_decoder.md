@@ -115,8 +115,10 @@ only gate on absolute output level; it compares against a52dec (an independent
 decoder, so it cannot agree with our arithmetic by construction) and carries a
 RED arm that forces the pre-fix scalar and requires the measured ratio to change.
 
-⚠ **`dialnorm` is still parsed and not applied** (`bsi_parse.sv:230` →
-`dvd_audio_decode.sv:544`, unconnected). That matches liba52/a52dec and is a
+⚠ **`dialnorm` is still parsed and not applied.** Since 2026-10-03 the shipping
+parse is the audio engine's `dvd/dts/ac3.uasm`, which reads the field and discards
+it (as it does `dsurmod`). The `dvd/ac3/bsi_parse.sv` reference latches it on a port
+nothing connects. That matches liba52/a52dec and is a
 separate decision from the level convention; applying it would only ever
 attenuate.
 

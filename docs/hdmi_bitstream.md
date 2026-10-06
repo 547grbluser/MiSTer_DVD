@@ -687,8 +687,9 @@ preamble table before anything else.
   workaround either: 6 ch/48/16 is 4.608 Mbit/s against 1.536, and IEC 61937
   carries no LPCM burst type.
 - **DTS-HD / TrueHD (HBR)** would need 4 data lines and 8x the bandwidth.
-- **MP2 and LPCM tracks are silent in Passthru**, as before — and now under a
-  permanent non-PCM flag, so an AVR may report no signal rather than silence.
+- ~~**MP2 and LPCM tracks are silent in Passthru**~~. *Superseded 2026-09-10 (PR #79,
+  HW-confirmed): LPCM and MP2 are decoded and sent as PCM in Passthru. See
+  `docs/iec61937.md` status.*
 - **Simultaneous decoded-PCM-on-HDMI + bitstream-on-S/PDIF is deferred.** It
   needs two consumers of the single `audio_ring` read side. Measured cost of the
   clean fix (a second ring) is **34 M10K** against 47 free — RAM 92% → 97.6% on

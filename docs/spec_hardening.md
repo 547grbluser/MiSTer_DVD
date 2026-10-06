@@ -21,7 +21,9 @@ Phase 6 cell-duration clamp ✅ HW-CONFIRMED + MERGED (PR fj#177, 2026-08-19:
 no-regression gate passed on the board; the >255 s positive path stays
 sim-proven until a repro disc appears — spec_audit is the tripwire). THE TRACK'S WORK QUEUE IS NOW EMPTY: everything below-spec is
 fixed or evidence-deferred; remaining gaps live in docs/conformance.md
-(MPEG-1 L2 audio, menu audio, UDF-only images).**
+(UDF-only images. MPEG-1 L2 audio and menu audio have since shipped, see
+`docs/mpeg1.md`. The 2026-10-01 3rd-edition audit in conformance.md carries the
+current list).**
 
 ## Why this document exists
 
@@ -76,9 +78,9 @@ libdvdread `ifo_types.h`/`nav_types.h` + *DVD Demystified* (both under
 
 ### Known feature gaps, deliberately out of scope here
 
-Tracked in `docs/conformance.md` with rationale: **MPEG-1 L2 audio** (common on PAL discs;
-demuxer currently discards 0xC0–0xDF — a codec project, not a limit), menu audio, UDF-only
-images, UOP masking, NVTMR/SPRM9 fire (libdvdnav doesn't fire it either; census 1/7 discs,
+Tracked in `docs/conformance.md` with rationale: ~~MPEG-1 L2 audio~~ (✅ shipped since,
+`dvd/mp2/`, `docs/mpeg1.md`), ~~menu audio~~ (✅ plays), UDF-only
+images, UOP masking (⛔ by decision 2026-10-01), NVTMR/SPRM9 fire (libdvdnav doesn't fire it either; census 1/7 discs,
 at 999 s), CHG_COLCON.
 
 ---

@@ -779,10 +779,14 @@ SPRM2 (bit6), with `O[15]` still forcing subtitles on.
 
 ## Punted (documented, not planned soon)
 
-Angle blocks (AGL fixed 1), karaoke/audio-mix modes, parental enforcement (SetTmpPML
-stores the level), NVTMR expiry (un-referenced — see "DVD-game entropy"), UOP enforcement,
-PTT exactness (`VTS_PTT_SRPT` = Phase 6 — PTT ≈ program until then), language-unit selection
-(LU[0] always; SPRM0 is a constant), TTN reverse-lookup on JumpSS_VTSM (SPRM4 kept).
+Karaoke/audio-mix modes, parental enforcement (SetTmpPML stores the level), NVTMR expiry
+(un-referenced — see "DVD-game entropy"), UOP enforcement (⛔ by decision, 2026-10-01,
+`docs/conformance.md` §1.5), TTN reverse-lookup on JumpSS_VTSM (SPRM4 kept).
+The open items from the 2026-10-01 3rd-edition audit are random PGC playback, the
+Title/Menu key edge cases and `auto_action`. They are ranked in `docs/roadmap.md`
+"2026-10-01 spec-audit".
+*(Since shipped and removed from this list: angle blocks with SPRM3 from the VM, PTT
+exactness via `VTS_PTT_SRPT` (PR fj#127), and language-unit selection by SPRM0 (PR fj#176).)*
 
 ## Verification
 
