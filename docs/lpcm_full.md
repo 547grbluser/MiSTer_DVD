@@ -1,7 +1,7 @@
 # Full DVD-Video audio: every legal LPCM format, and AC-3 dual mono
 
-**Status (2026-10-05): ⏳ design. The measurement and recommendation below are waiting on
-the maintainer's decisions (§10) before any RTL is written.** Branch `feature/lpcm-full`,
+**Status (2026-10-05): 🔧 in progress. Decided (§10): dedicated RTL, the `sys_top` tap,
+FFmpeg's channel order.** Branch `feature/lpcm-full`,
 `CORE_VERSION "dev-lpcmfull"`.
 
 This replaces audit item 4 of the 2026-10-01 *DVD Demystified* 3rd-edition audit
@@ -199,8 +199,9 @@ Bit-perfect 24/96 over S/PDIF as linear PCM (`docs/iec61937.md`, `docs/fabric_au
 needs a 48 kHz link, and `docs/hdmi_bitstream.md` says reg 0x15 follows the ini in bitstream
 mode too.
 
-## 10. Open decisions (⏳ the maintainer's)
+## 10. Decisions (the maintainer's, 2026-10-05)
 
-1. Option A (RTL) or B (engine) for the downmix and decimator (§4, §5).
-2. How the link rate reaches the core: (a), (b) or (c) (§6).
-3. Which multichannel channel order to assume: FFmpeg's or VLC's (§2).
+1. **Dedicated RTL** for the downmix and decimator (option A, §4).
+2. **The `sys_top` tap** for the link rate (§6 (a)): 96 kHz LPCM plays natively on a 96 kHz
+   link and is decimated on a 48 kHz one.
+3. **FFmpeg's channel order** (§2) for 3–8 channels.
