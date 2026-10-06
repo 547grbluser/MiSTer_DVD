@@ -23,7 +23,8 @@ predate later confirmations; the `CLAUDE.md` index carries the reconciled status
 ## Hardware status (THIS fork, verified 2026-06-21)
 
 - ✅ **.BUP FALLBACK WHEN AN IFO IS UNREADABLE (audit item 8, 2026-10-06,
-  `dev-bupfallback`; fabric ✅ HW-CONFIRMED A/B vs `main`, Main mirror host-proven ⏳ HW).** Design: `docs/dvd_nav.md` "IFO header gate
+  `dev-bupfallback`; fabric ✅ HW-CONFIRMED A/B vs `main`; Main mirror ✅ HW-CONFIRMED on a
+  physical disc).** Design: `docs/dvd_nav.md` "IFO header gate
   and .BUP fallback", `docs/physical_disc.md` "An unreadable IFO sector is served from its
   .BUP".
   - **Gap.** The Main zero-fills an unreadable sector and the reader never checked an IFO's
@@ -85,17 +86,19 @@ predate later confirmations; the `CLAUDE.md` index carries the reconciled status
       it, and showed the two runs were identical.
     - **Not run on HW:** the VTSI *and* its BUP both zeroed (the `ifo_nogood` revert).
       Bench arms E and F cover it.
-    - **Not yet on HW: the Main mirror.** There was no disc in the rig's drive and no CSS
-      image in the library (every `.iso` there is decrypted, so stock Main's file path
-      serves it). Its gate is `main/tests` [21]–[29].
+    - **The Main mirror, on a physical disc (THE_FORCE_AWAKENS, via the fault hook).**
+      - Faulting all 43 sectors of the feature's IFO: the BUP served them, with the same
+        `CH 2/51` and 2:17:57 and flags `000`.
+      - Faulting IFO and BUP sector 0: `unreadable in BOTH`, then the gate's
+        IFO → BUP → revert, linear playback, `ifo_nogood=1`.
+      - That pressing has real EIO sectors at sector 0 of three of its BUPs.
+      - Details: `docs/physical_disc.md`.
   - **Fit (SEED 7, unchanged):** clk_dec 88.75 / 88.84 MHz (100 °C / −40 °C, gate 86),
     clk_mem 96.61 / 98.26. Reader entity: +259 ALMs needed (4,389 → 4,648), +154 ALUTs,
     +188 registers; +1 M10K (`gmem_rtl_0`, still inferred). Device "ALMs needed" reads
     +1,506, but ALMs placed FELL 40,910 → 40,838; the swing is the fitter's
     dense-packing estimate (2,625 → 1,064), not logic.
-  - **Next:** push/PR when asked. Then the Main mirror on HW: a physical disc in the drive,
-    with `/media/fat/dvd_fault_lbas` listing IFO sectors (expect the `ifo:` log line and flags
-    `000`) and then IFO + BUP sectors (expect `ifo_nogood`).
+  - **Next:** push and open the PR when asked.
 
 - 🔧 **ANALOG DITHER: AN ORDERED DITHER AHEAD OF THE I/O BOARD'S 6-BIT VGA DAC (2026-10-06,
   `dev-dither`; ✅ HW-MEASURED via analog RGB capture, ✅ HW-CONFIRMED on a CRT by the

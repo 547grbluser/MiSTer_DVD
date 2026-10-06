@@ -4790,7 +4790,7 @@ the in-title PCI/HLI **button highlight** (the white-rabbit *icon* itself; `nav_
 in-title but the subpicture-graphic plumbing in `emu.sv` is menu-gated → renders "white on
 white"), and the transport-HUD-overlaps-subtitle bug (MiB visual commentary).
 
-## IFO header gate and .BUP fallback (audit item 8, 2026-10-06) — ✅ HW-CONFIRMED A/B vs `main` (`feature/bup-fallback`)
+## IFO header gate and .BUP fallback (audit item 8, 2026-10-06) — ✅ HW-CONFIRMED A/B vs `main`; the Main mirror ✅ HW on a physical disc (`feature/bup-fallback`)
 
 The 2026-10-01 *DVD Demystified* audit, item 8: *"No `.BUP` fallback when an IFO is
 unreadable."* Every IFO has a byte-identical backup, `VIDEO_TS.BUP` / `VTS_nn_0.BUP`

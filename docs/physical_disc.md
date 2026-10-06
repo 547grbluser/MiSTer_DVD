@@ -822,10 +822,32 @@ the worker:
 
 ## An unreadable IFO sector is served from its .BUP (audit item 8, 2026-10-06, `feature/bup-fallback`)
 
-**Status:** host-proven, with `main/tests/run_tests.sh --red` arms [21]–[29] and 10
-mutations, each caught by its own arm. ⏳ HW. On 2026-10-06 the rig had no disc in the
-drive, and the library holds no CSS image; the fabric layer was HW-confirmed that day.
-Next: a physical disc and the fault hook below.
+**Status:** ✅ HW-CONFIRMED 2026-10-06 on a physical disc (below), and host-proven:
+`main/tests/run_tests.sh --red` arms [21]–[29], 10 mutations each caught by its own arm.
+
+**HW (2026-10-06, rig, physical THE_FORCE_AWAKENS, a dual-layer Disney disc, build
+`DVD_bupfallback_20261006_1604.rbf` + this branch's Main, Disc Menus Off):**
+- **Baseline, no faults:** `CH 2/51`, 2:17:57, flags `000`.
+- **All 43 sectors of `VTS_05_0.IFO` (the feature) listed in `dvd_fault_lbas`:**
+  `ifo: VTS_05_0.IFO sector 0 unreadable -- served from VTS_05_0.BUP`. The HUD is identical
+  (`CH 2/51`, 2:17:57) and the flags are `000`, so the core never saw the hole. Every IFO
+  sector was faulted, so the 51-chapter table could only have come from the BUP. The seek
+  trace shows the single jump to `4011684` and then a sequential walk.
+- **IFO sector 0 *and* its BUP twin listed:**
+  1. `unreadable in BOTH`, and the read-ahead zero-fills 139309.
+  2. The core's header gate tries the BUP; 4011684 is zero-filled.
+  3. It reverts; 139309 is zero-filled again.
+  4. Linear playback, 0:00:00, no chapters, as before the feature.
+  5. `ifo_nogood=1`, and `dvd_report.log` says `an IFO header bad and no good .BUP -- parsed
+     as is`.
+
+  The two layers compose as designed.
+- **Found in passing:** this pressing has REAL unreadable sectors. Sector 0 of the BUPs of
+  VTS_02, VTS_06 and VTS_07 returns EIO from `/dev/sr0` (fast, not a 30 s timeout), while
+  every IFO reads. Whether that is wear or Disney's structure protection is unknown. Either
+  way it is the "one copy readable" case the mirror exists for. Here the IFOs are the good
+  copies, so playback never touches the bad ones.
+
 
 Every IFO has a byte-identical backup (`VIDEO_TS.BUP`, `VTS_nn_0.BUP`), written after the
 title set's VOBs, on the other side of the disc from the IFO, so one scratch rarely takes
