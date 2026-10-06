@@ -1076,3 +1076,76 @@ exactly what sent the fix to the vld:** the class is shared, so the fix should b
   it is the one number that turns the bench's separator models into a field measurement.
 - Progressive 480p on the analog pins keeps the dot-0 vsync reference (no field
   ambiguity there); anchoring it too is a one-line follow-up if a 31 kHz display objects.
+
+## 8. Analog Dither: the I/O board's 6-bit DAC (2026-10-06, ⏳ HW pending)
+
+**The problem.** sys_top drives the DE10-Nano I/O board's VGA DAC from the top 6 bits of
+each channel (`VGA_R = vga_o[23:18]`). The low two bits (`vga_r/g/b`) go only to the SDIO
+pins of boards with an 8-bit DAC. So the classic analog board shows 64 levels per channel,
+and dark film gradients contour on a CRT. A Y 16 → 64 ramp is RGB 0 → 56 after the BT.601
+matrix: 14 steps of 4 at the DAC. That count is arithmetic, not yet a measurement on this
+core: ⏳ the HW round below measures it. A 24-bit analog DAC (a SuperStation) cannot band
+this way, which is why the option is Off by default.
+
+**What ships.** `dvd/dac_dither.sv`, instanced in `sys/sys_top.v` (a `DVD-FORK` edit)
+on the core-raster VGA word `vga_o`. That word is taken after `vga_out` and after the
+`yc_out` mux, so RGB, YPbPr and S-Video/composite all get it. The module adds a 4×4 Bayer
+threshold of 0..3 LSB to each channel before the truncation, saturating at 255. The
+matrix inverts every field (`15 - b`). By Hermite's identity, `Σ_{t=0..3} floor((v+t)/4) = v`,
+so the DAC's mean is exactly `v/4` for `v ≤ 252`, and two consecutive fields at one
+position add exactly 3 LSB. The dither acts in DE only. Blanking, sync levels, the burst
+and the **line-21 caption waveform** pass bit-exact. The CC waveform is written outside DE
+(the `de_emu` note on the scanlines instance in sys_top), so the DE gate protects it. A
+multiple of 4 is unchanged at 6 bits.
+
+- **OSD:** `O[8],Analog Dither,Off,On` sits on the main page. Bit 8 was never allocated,
+  so every saved config reads Off and there is no `v,N` bump.
+- **Wiring:** emu's `VGA_DITHER = status[8]` reaches `vga_dither_en` in sys_top, inside
+  `ifndef MISTER_DUAL_SDRAM` next to `VGA_DISABLE`.
+- **No SDC entry.** `status` is on `clk_sys`, which *is* `CLK_VIDEO` here, so there is no
+  crossing. The two flops on `en` are kept so that a future CLK_VIDEO change cannot create
+  a silent unsynchronised path.
+
+**The pattern is keyed on clocks, and at 27 MHz that means pixels.** `col` is the clock in
+the line mod 4, and `row` is the line mod 4, reset on vs. Their period-4 fundamental is
+6.75 MHz, above NTSC/PAL luma bandwidth on S-Video and composite and well away from the
+3.58/4.43 MHz subcarriers. On Progressive, at one pixel per clock, this is a classic
+per-pixel ordered dither, and a 31 kHz monitor can resolve it up close. On 480i/240p a
+pixel is held for two clocks, so it gets two thresholds and the DAC/TV low-pass
+averages them. ⚠ That is coarser than a design whose video clock is a multiple of the dot
+rate, where the pattern sits far above the video bandwidth. Whether the texture is
+acceptable here is what the HW round decides. **Fallback if it is not:** a pattern on a
+faster clock domain (it would need a CLK_VIDEO change). Not designed.
+
+**Rejected:**
+- Dithering inside emu: HDMI would carry it.
+- A static pattern: it leaves a fixed crosshatch on flat areas.
+- An always-on dither: it does nothing for 24-bit DACs.
+- A MiSTer.ini key: a core cannot read MiSTer.ini.
+
+**Not covered:** the scaler-to-VGA path (`vgas_o`, `vga_scaler=1`). No NTSC 7.5 IRE setup
+is added.
+
+**Gates:**
+- `bench/dvd/run_dac_dither.sh` (`--red`). [T1] exact mean per level and v + 0..3 per
+  sample; [T2] multiples of 4; [T3] saturation; [T4] blanking bit-exact with a non-zero
+  word there; [T5] bypass bit-exact; [T6] fields complementary. Scored with `!==`, and
+  seven module mutations each fail their own arm.
+- `tools/check_dac_dither_wiring.py`, with seven wiring mutations in the same `--red`. It
+  checks:
+  - `status[8]` → `VGA_DITHER`, with no second CONF_STR row claiming bit 8;
+  - the emu port → `vga_dither_en`;
+  - `dac_dither` on `clk_vid` with `din = vga_o`;
+  - **all six DAC drivers read `vga_od`** (one left on `vga_o` is a channel that never
+    dithers, which no screenshot can show);
+  - the `.qsf` names the module.
+
+**HW plan:**
+- Control arm first: the previous build on the HIL rig with the 18-bit I/O board (CRT,
+  S-Video) shows the bands.
+- New build: Off must look identical to the control. On should remove the bands. Judge the
+  texture at 480i and 480p, and check composite too.
+- The rig with a 24-bit analog DAC: expect no visible change.
+- HDMI screenshots must be bit-identical between On and Off.
+- Test media: a smooth dark ramp `.mpg` (MPEG-2 at qscale 1, Y 16 → 64, plus a colour ramp),
+  checked smooth on the host first.

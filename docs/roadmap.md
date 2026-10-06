@@ -621,6 +621,15 @@ in `CONF_STR`. Design: `docs/cdda.md` "`.cue` sheets". ⛔ CHD still not support
 > **top gap confirmed = exact chapters/PTT (7/7 discs); interactive GPRM-counter/NVTMR promoted
 > above parental on measured prevalence (3/7 game discs).** Phase 3 = close gaps in that order.
 
+### 🔧 Analog Dither: an ordered dither ahead of the I/O board's 6-bit DAC (2026-10-06; sim-verified, ⏳ HW pending — see `docs/single_raster_analog.md` §8)
+
+The classic DE10-Nano I/O board's VGA DAC shows 64 levels per channel, so dark gradients band
+on a CRT. `dvd/dac_dither.sv` in sys_top adds a field-inverted 4×4 ordered dither to the
+analog word only. It is behind the OSD option `Analog Dither` (`O[8]`), Off by default, and
+HDMI stays bit-exact. Gate: `bench/dvd/run_dac_dither.sh --red`.
+**Next:** the HW round. The texture at 27 MHz (per-pixel on Progressive) decides whether it
+ships.
+
 ### ✅ User Still off: Play/Pause or Select ends a still with no buttons (2026-10-05; ✅ HW-CONFIRMED on timed stills, A/B vs `main`, ✅ MERGED PR #159 — see `docs/dvd_nav.md` "Still off")
 
 The 3rd-edition audit's item 5, a mandatory user operation (UOP18). With Disc Menus on, on a

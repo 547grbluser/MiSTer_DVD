@@ -280,6 +280,29 @@ until we know whether any real display prefers it.
 HDMI is completely unaffected by this setting, on every option. Composite and S-video use
 the same sync as RGB/component, so they change with it.
 
+## Analog Dither — if dark scenes show bands
+
+**Main page → `Analog Dither` → `Off` (default) / `On`.**
+
+The DE10-Nano's standard analog I/O board has a 6-bit video DAC: it shows 64 levels per
+colour channel, where the decoded picture has 256. Bright, detailed scenes hide this.
+Smooth dark gradients do not: a night sky, a fade to black or a dim wall can break into
+visible **bands** on a CRT, each one four levels wide.
+
+`On` adds a very fine ordered dither, a fixed pattern of tiny offsets, just before the
+picture reaches the DAC. The pattern flips every field. The television blurs it into the
+in-between levels the DAC cannot output, so a gradient comes out smooth.
+
+- **Leave it `Off` on a board with a full 8-bit (24-bit colour) analog DAC,** such as a
+  SuperStation. It has no bands to fix.
+- On a 31 kHz VGA monitor (`Video Output = Progressive`) the pattern is one pixel fine
+  and may be faintly visible up close. Turn it off if you prefer that.
+- It applies to RGB, component, S-video and composite alike. It never touches blanking,
+  sync, the colour burst or the line-21 closed captions.
+
+HDMI is completely unaffected by this setting. Like Analog CSync, it applies to the direct
+analog path (`vga_scaler=0`). With `vga_scaler=1` the setting does nothing.
+
 ## Known limitations
 
 - While `Video Output = Interlaced`, [Film 24p](film-24p.md) output is unavailable — a
