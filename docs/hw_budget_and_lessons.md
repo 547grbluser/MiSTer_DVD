@@ -185,7 +185,7 @@ fit (the menu-panscan build, 2026-10-01, `releases/*.rbf.json`) is the current f
 | M10K | 512 | 553 | 41 (7 %) |
 | DSP | 95 | 112 | 17 (15 %) |
 
-**2026-10-05 (the `dev-stilloff` SEED 7 fit, before `feature/lpcm-full`):** after the
+**2026-10-05 (the `dev-stilloff` SEED 7 fit, before PR #162):** after the
 audio engine absorbed AC-3, DTS and MP2 (PRs #148–#150), the fit is **38,699 ALM (~3,200
 free, 8 %)**, 519/553 M10K (34 free), 87/112 DSP (25 free). The table above is the
 2026-10-01 figure, kept for the trend. As before, read the newest `releases/*.rbf.json`

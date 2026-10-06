@@ -265,8 +265,8 @@ small FIFO drained at `aud_ce`.
 HDMI `AUDIO_L/R` interface). ps_demux now captures the LPCM sub-header **byte +5**
 word-length field (bits[7:6]: 0=16, 1=20, 2=24) and exports it as
 `aud_lpcm_quant`, routed to `lpcm_unpack.quant`.
-**Since 2026-10-05 every DVD-Video LPCM form plays** (`docs/lpcm_full.md`, branch
-`feature/lpcm-full`). It covers 1–8 channels, downmixed to stereo in FFmpeg's channel
+**Since 2026-10-05 every DVD-Video LPCM form plays** (`docs/lpcm_full.md`, PR
+#162). It covers 1–8 channels, downmixed to stereo in FFmpeg's channel
 order by the AC-3 path's law, and 96 kHz, which `dvd/lpcm_hb.sv`'s half-band decimates to
 48 kHz on a 48 kHz HDMI link. On a 96 kHz link (`hdmi_audio_96k`, tapped from `sys_top`)
 the NCO runs at 96 kHz (`nco_fs` 3) instead. A reserved rate or word length is drained

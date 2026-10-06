@@ -50,7 +50,7 @@ predate later confirmations; the `CLAUDE.md` index carries the reconciled status
     the maintainer on the 18-bit-board CRT, HDMI bit-identical between On and Off.
 
 - ✅ **FULL DVD-VIDEO AUDIO: EVERY LPCM FORM, AND AC-3 1+1 DUAL MONO (audit item 4,
-  2026-10-05, `dev-lpcmfull`; ✅ HW-CONFIRMED 2026-10-06 A/B against `main`; ⏳ PR).** Design, measurements and gates:
+  2026-10-05, `dev-lpcmfull`; ✅ HW-CONFIRMED 2026-10-06 A/B against `main`; ✅ MERGED (PR #162)).** Design, measurements and gates:
   `docs/lpcm_full.md`.
   - **Gap.** LPCM was 48 kHz stereo only. A 96 kHz track played at half speed, mono at
     double speed, and 3–8 channels mis-paired, all with no message. AC-3 acmod 0 was

@@ -1,8 +1,7 @@
 # Full DVD-Video audio: every legal LPCM format, and AC-3 dual mono
 
-**Status (2026-10-06): ✅ HW-CONFIRMED on the rig (§12), A/B against `main`; ⏳ PR. Decided (§10): dedicated RTL, the `sys_top` tap,
-FFmpeg's channel order.** Branch `feature/lpcm-full`,
-`CORE_VERSION "dev-lpcmfull"`.
+**Status (2026-10-06): ✅ HW-CONFIRMED on the rig (§12), A/B against `main`; ✅ MERGED (PR #162). Decided (§10): dedicated RTL, the `sys_top` tap,
+FFmpeg's channel order.** PR #162, `CORE_VERSION "dev-lpcmfull"`.
 
 This replaces audit item 4 of the 2026-10-01 *DVD Demystified* 3rd-edition audit
 ("Unsupported audio fails silently", unmerged branch `docs/demystified-3rd-audit`,

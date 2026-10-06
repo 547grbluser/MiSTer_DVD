@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Gate for full DVD-Video LPCM (feature/lpcm-full, docs/lpcm_full.md): check that
+"""Gate for full DVD-Video LPCM (PR #162, docs/lpcm_full.md): check that
 emu.sv carries the LPCM header from ps_demux to dvd_audio_decode, the HDMI link rate
 from sys_top through a synchroniser, and the reserved-header flag to the popup.
 

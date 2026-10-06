@@ -630,7 +630,7 @@ HDMI stays bit-exact. Gate: `bench/dvd/run_dac_dither.sh --red`.
 The maintainer judged it on the CRT: gradients look better with it on. Merged as PR #161.
 Composite and a 31 kHz monitor are unchecked.
 
-### ✅ Full DVD-Video audio: every LPCM form and AC-3 dual mono (2026-10-05, branch `feature/lpcm-full`; ✅ HW-CONFIRMED 2026-10-06, ⏳ PR — see `docs/lpcm_full.md`)
+### ✅ Full DVD-Video audio: every LPCM form and AC-3 dual mono (2026-10-05; ✅ HW-CONFIRMED 2026-10-06, ✅ MERGED PR #162 — see `docs/lpcm_full.md`)
 
 The 3rd-edition audit's item 4, reversed by decision: **support** the cases that failed
 silently instead of announcing them. LPCM at 48 or 96 kHz, 16/20/24-bit, 1–8 channels:
