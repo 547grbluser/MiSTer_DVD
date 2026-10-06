@@ -22,6 +22,64 @@ predate later confirmations; the `CLAUDE.md` index carries the reconciled status
 
 ## Hardware status (THIS fork, verified 2026-06-21)
 
+- 📋 **DVD DEMYSTIFIED 3RD-EDITION AUDIT: LANDED ON `main`, OPEN ITEMS RE-RANKED BY CENSUS
+  (2026-10-06, branch `docs/demystified-audit-land`; docs + census tools, no RTL, no
+  `CORE_VERSION` change).**
+  Full record: `docs/conformance.md` § "DVD Demystified 3rd-edition audit"; queue:
+  `docs/roadmap.md` "2026-10-01 spec-audit".
+  - **Why now.** The audit (2026-10-01) lived only on the unmerged branch
+    `docs/demystified-3rd-audit`. By the time its items 1–8 had shipped (PRs #151, #154,
+    #156, #158, #159, #162, #163), `main` already cited sections that existed only there, and
+    `conformance.md` still called SPRM14/15/20 constants, TMAP retired and DTS
+    passthrough-only. A straight merge conflicted in 10 files, and most of the branch's
+    manual edits described gaps that had since closed. So the audit was ported by hand, with
+    every claim re-checked against the tree, and the old branch was not merged.
+  - **The 2026-10-01 audit itself.** The 3rd edition's player-behaviour text was read in
+    full: ch. 9, ch. 3, ch. 5, the file format, ch. 10 and Appendix B. Every claim was checked
+    against the RTL. Census of 1,430 images, with `dvd_vm_ref` boot diffs for SPRM20/14.
+    - Decisions (user, 2026-10-01): UOPs ⛔, APS/CGMS-A ⛔, WSS a roadmap idea, SPRM20
+      follows the disc's region mask.
+    - Book errors recorded so nobody "fixes" toward them: p. 9-20 "128 commands per PGC in
+      total" (the library has 128 *pre* and 134 total), and p. 9-24 SPRM8 "1 to 36" (stored
+      `<< 10`).
+  - **The re-rank census (2026-10-06).**
+    - `tools/dvd_census.py` gained the audit's axes plus:
+      - random vs shuffle;
+      - the 0xFF-still command classified as a loop or not;
+      - menu-key entry misses (`key_pgc1_title/menu/cmenu`).
+    - `tools/spec_audit.py --deep` gained the `aa_*` auto-action axes per distinct HLI.
+    - Population and sample:
+      - IFO: 1,521 images (1 skip, 1 tool error on MILLIONAIRERUS);
+      - deep: the 24 game discs, plus 100 random (seed 20261006).
+    - Every new axis was checked on a known vehicle, and the `aa_*` axes also on synthetic
+      HLIs.
+    - **The new order:**
+      1. Title key on a disc with no Title menu: 88 discs. 84 of them replay the boot logos,
+         then land on the main menu, where the book and libdvdnav no-op.
+      2. An indefinite still with a non-loop cell command in a title: 7 discs, mostly
+         games. Unverified; `nav_diff` first.
+      3. A second Title press resumes: book-only, a user decision.
+      4. `auto_action`: 0 visible.
+      5. Random playback: ROBOTS_43 only.
+  - **Two audit premises corrected:**
+    - #11: libdvdnav fires `auto_action` only after a D-pad press, as we do. It does not
+      fire on a forced or VM selection.
+    - #10: "Title again resumes" is the book's alone; libdvdnav resumes only on `Escape`.
+  - **Measurement gotchas:**
+    - `aa_deadlink` equals `aa_any` on every disc, because authored auto buttons self-link
+      all round. It is moot (arriving already fired the button), so it is not ranked; the
+      visible case is `aa_init_orphan`.
+    - The 2026-10-01 claim "40 of 41 still+command discs are loops" undercounted: with the
+      command classified, 7 title and 15 menu discs are not loops.
+    - Two found stale in passing:
+      - The `dvd_vm.sv` `ev_title` comment says a missing Title entry falls to
+        resume/auto-title. A scan miss takes SRP[0] instead.
+      - 96 kHz LPCM now leaves the core natively on a 96 kHz HDMI link, CSS or not; the
+        book's licence note is recorded in class C.
+  - **Next concrete step:** roadmap "2026-10-01 spec-audit" open item 1, a no-op for a
+    user-key menu-entry miss. Keep the Chapter key's documented fallback to the main menu.
+    Vehicles: SPIDER-MAN_2, PANIC_ROOM_SUPERBIT, TOKYO_GODFATHERS.
+
 - ✅ **ANALOG DITHER MATRIX: A LATIN SQUARE, EXACT ON EVERY LINE (2026-10-06,
   `dev-ditherlatin`; ✅ HW-measured via capture, ✅ HW-CONFIRMED on a CRT, ✅ MERGED (PR #164)).**
   - **Trigger.** Reviewing the PWM cores (`Jokippo/MiSTer_PWM_Cores`) as a replacement for

@@ -621,6 +621,82 @@ in `CONF_STR`. Design: `docs/cdda.md` "`.cue` sheets". ⛔ CHD still not support
 > **top gap confirmed = exact chapters/PTT (7/7 discs); interactive GPRM-counter/NVTMR promoted
 > above parental on measured prevalence (3/7 game discs).** Phase 3 = close gaps in that order.
 
+### ⏳ 2026-10-01 spec-audit: DVD Demystified 3rd-edition follow-ups (items 1–8 ✅; the rest re-ranked 2026-10-06)
+
+The audit, with evidence and the user's decisions, is in
+[`docs/conformance.md` § 3rd-edition audit](conformance.md#dvd-demystified-3rd-edition-audit-2026-10-01).
+Each item is its own feature branch.
+
+**Shipped** (each has its own ✅ section below):
+1. Forced subtitles: PR #151.
+2. SPRM20 follows the disc's first allowed region: PR #154.
+3. SPRM14/15 follow the output setup: PR #154.
+4. Unsupported audio: **reversed by decision**. Every LPCM form and AC-3 dual mono now
+   *play*, in PR #162. DTS decodes since PRs #148/#149.
+5. User Still off (UOP18): PR #159.
+6. BT.601 as the default colour matrix: PR #156.
+7. Next/Prev at the title's edges: PR #158.
+8. `.BUP` fallback: PR #163.
+
+**Open, re-ranked by the 2026-10-06 census** (1,521 discs IFO; deep HLI scan of the 24
+game discs plus a seeded random 100; numbers and method in
+[conformance.md § The open items, re-ranked](conformance.md#the-open-items-re-ranked-2026-10-06)):
+
+1. **Title key on a disc with no Title menu (audit 10b): 88 discs (5.8 %).** The VMGM
+   PGCI_UT exists but has no entry-2 PGC.
+   - **What happens.** The reader's entry scan misses and takes SRP[0], which is VMGM
+     PGC 1 (`dvd_iso_reader.sv` `S_SRP_EVAL`). On 84 of the 88 discs that PGC is the boot
+     chain. Title therefore replays the opening logos (14 s typical, up to 28 s) and then
+     lands on the main menu.
+   - **What should happen.** The book (3rd ed. p. 9-26, quoting the spec: "the transition
+     … is not actually executed") and libdvdnav (`get_ID` → `set_PGCN` fails, domain
+     restored) make the key a no-op.
+   - **Fix.** Make a *user-key* entry miss a no-op. Keep SRP[0] for VM-command jumps.
+   - **Keep the Chapter Menu key's fallback to the main menu.** It is HW-measured, and the
+     manual describes it. 1,387 discs author no chapter menu, so the strict no-op would make
+     the key dead on most discs. Only 1 disc (THE_RED_FURY) lands somewhere other than Root.
+     The Menu key's miss case is 0 discs.
+   - ⚠ The `dvd_vm.sv` `ev_title` comment says a missing Title entry "falls to
+     resume/auto-title" via `FB_VMGM`. That is stale: a scan miss never raises `pgc_error`.
+     Only a VMGM with no PGCI_UT at all does. Fix the comment in this branch.
+   - Vehicles: SPIDER-MAN_2, PANIC_ROOM_SUPERBIT, TOKYO_GODFATHERS (Sony/Columbia
+     authoring, VMGM entry ids all 0x00).
+2. **Indefinite still + a non-loop cell command in a title (audit class C residual): 7
+   discs, 6 of them games.** The discs are Thayer's Quest, Deal or No Deal, Tomb Raider,
+   HP Hogwarts Challenge, Space Pirates, BEAST_MASTER and Land Before Time.
+   - **What happens.** The reader runs the cell command first (after serving any unspent
+     cell duration). Often that command is `LinkTailPGC`, the "no answer" branch.
+   - **What a player does.** libdvdnav holds the still until a button or Still off.
+   - **Verify before fixing.** Run a `nav_diff` A/B against libdvdnav on Thayer's Quest and
+     Deal or No Deal, and play the "wait at the question" path. Thayer's timed choices are
+     HW-confirmed, and they are finite stills, a separate path.
+3. **A second Title press resumes (audit 10a): 1,428 discs author a Title menu.**
+   - The book (p. 9-26) says a second Title or Menu press resumes playback. The core
+     already does that for Menu.
+   - **libdvdnav does not** (`dvdnav_menu_call` resumes only on `DVD_MENU_Escape`), so this
+     is a book-only behaviour and needs a user decision.
+   - The fix is one arm in `dvd_vm.sv` `ev_title`.
+   - Rebase onto the unmerged `feature/vm-state-ram` if it lands first. It reworks the VM's
+     state, and this touches the key arms.
+4. **`auto_action` (audit 11): no measured exposure. Record, and close unless a disc
+   appears.**
+   - The audit's premise was wrong. libdvdnav fires auto-action only after a D-pad press
+     (`highlight.c:243-291`), as `nav_pci` does. It does not fire on a forced or VM-set
+     selection.
+   - The real differences:
+     - libdvdnav fires even when the press goes nowhere;
+     - it fires on any non-zero mode.
+   - The only *visible* case is an auto-action button that is the initial selection and
+     that no other button links to (`aa_init_orphan`). It shows on 0/24 game discs and
+     0/100 random discs. Mode 2/3 shows on 0.
+5. **Random program playback (audit 9): 1 disc.** ROBOTS_43 has one title PGC with mode
+   `0x07`: random first program among 8. Shuffle is on 0 discs. libdvdnav implements
+   random only (`play.c:69`).
+
+**Idea, not a gap:** WSS / CPR-1204 / SCART pin-8 widescreen signalling on the analog output,
+which would give auto 16:9 switching on PAL widescreen CRTs.
+**⛔ by decision 2026-10-01:** UOP enforcement, APS (Macrovision) and CGMS-A.
+
 ### ✅ .BUP fallback when an IFO is unreadable (2026-10-06, ✅ MERGED PR #163; fabric ✅ HW-CONFIRMED A/B vs `main`, Main mirror ✅ HW on a physical disc — see `docs/dvd_nav.md` "IFO header gate and .BUP fallback")
 
 The 3rd-edition audit's item 8. Two layers (user decision, 2026-10-06):
