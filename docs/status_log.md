@@ -23,7 +23,7 @@ predate later confirmations; the `CLAUDE.md` index carries the reconciled status
 ## Hardware status (THIS fork, verified 2026-06-21)
 
 - 📋 **DVD DEMYSTIFIED 3RD-EDITION AUDIT: LANDED ON `main`, OPEN ITEMS RE-RANKED BY CENSUS
-  (2026-10-06, branch `docs/demystified-audit-land`; docs + census tools, no RTL, no
+  (2026-10-06, ✅ MERGED PR #165; docs + census tools, no RTL, no
   `CORE_VERSION` change).**
   Full record: `docs/conformance.md` § "DVD Demystified 3rd-edition audit"; queue:
   `docs/roadmap.md` "2026-10-01 spec-audit".
