@@ -23,7 +23,8 @@ predate later confirmations; the `CLAUDE.md` index carries the reconciled status
 ## Hardware status (THIS fork, verified 2026-06-21)
 
 - 🔧 **ANALOG DITHER: AN ORDERED DITHER AHEAD OF THE I/O BOARD'S 6-BIT VGA DAC (2026-10-06,
-  `dev-dither`, branch `feature/analog-dither`; sim-verified, ⏳ HW pending, not yet a PR).**
+  `dev-dither`, branch `feature/analog-dither`; ✅ HW-MEASURED via analog RGB capture, ⏳ CRT by
+  eye, not yet a PR).**
   - **Gap.** sys_top drives the classic I/O board's DAC from `vga_o[23:18]`: 64 levels per
     channel. Dark film gradients contour on a CRT. HDMI and 24-bit analog DACs are unaffected.
   - **Built.** `dvd/dac_dither.sv` on `vga_o` in sys_top (`DVD-FORK`). A 4×4 Bayer threshold
@@ -38,7 +39,11 @@ predate later confirmations; the `CLAUDE.md` index carries the reconciled status
     and `tools/check_dac_dither_wiring.py`. Design: `docs/single_raster_analog.md` §8.
   - **Fit:** 15 ALM, SEED 7 unchanged, both clocks pass at both corners (clk_dec 89.4 MHz
     at −40 °C, clk_mem 95.75 at 100 °C). Build `DVD_dither_20261006_0425.rbf`.
-  - **Next:** the HW round in §8: control arm first, Off identical, On judged by
+  - **HW (2026-10-06, RGB → RetroTINK → capture, paused ramp, toggled live):** the grey
+    ramp's staircase residual is 1.00 Off and 0.50 On at 480i, and 1.01 Off and 0.52 On at
+    480p. Off → On → Off repeats to within 0.03. The control arm (`main`'s netlist) gives
+    1.01, the same as Off. Table in §8.
+  - **Next (left from the HW round in §8):** control arm first, Off identical, On judged by
     the maintainer on the 18-bit-board CRT, HDMI bit-identical between On and Off.
 
 - ✅ **USER STILL OFF: PLAY/PAUSE OR SELECT ENDS A STILL WITH NO BUTTONS (audit item 5,

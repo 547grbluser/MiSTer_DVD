@@ -1077,14 +1077,13 @@ exactly what sent the fix to the vld:** the class is shared, so the fix should b
 - Progressive 480p on the analog pins keeps the dot-0 vsync reference (no field
   ambiguity there); anchoring it too is a one-line follow-up if a 31 kHz display objects.
 
-## 8. Analog Dither: the I/O board's 6-bit DAC (2026-10-06, ⏳ HW pending)
+## 8. Analog Dither: the I/O board's 6-bit DAC (2026-10-06, ✅ HW-measured via capture, ⏳ CRT by eye)
 
 **The problem.** sys_top drives the DE10-Nano I/O board's VGA DAC from the top 6 bits of
 each channel (`VGA_R = vga_o[23:18]`). The low two bits (`vga_r/g/b`) go only to the SDIO
 pins of boards with an 8-bit DAC. So the classic analog board shows 64 levels per channel,
 and dark film gradients contour on a CRT. A Y 16 → 64 ramp is RGB 0 → 56 after the BT.601
-matrix: 14 steps of 4 at the DAC. That count is arithmetic, not yet a measurement on this
-core: ⏳ the HW round below measures it. A 24-bit analog DAC (a SuperStation) cannot band
+matrix: 14 steps of 4 at the DAC. The bands are measured on this core below. A 24-bit analog DAC (a SuperStation) cannot band
 this way, which is why the option is Off by default.
 
 **What ships.** `dvd/dac_dither.sv`, instanced in `sys/sys_top.v` (a `DVD-FORK` edit)
@@ -1158,7 +1157,40 @@ is added.
 clk_dec 91.2 / 89.4 MHz (target 86), clk_mem 95.75 / 96.34 MHz (runs at 90). `lint_undriven`
 and `netlist_canary` pass.
 
-**HW plan:**
+**HW measurement (2026-10-06, the shared HIL rig, analog RGB → RetroTINK-6X → USB capture
+at 1280×720).** The test clip is a 720×480 MPEG-2 ramp encoded at qscale 1, decoding within
+1 LSB of its source. The top half is Y 16 → 64 (grey); the bottom half is a dark colour
+ramp, scored on the blue channel. Method:
+- **Paused, one frame:** `Analog Dither` switched live with `mister.py osd` between
+  captures.
+- **Averaging:** every valid frame averaged (the card's flat RGB-7 no-signal frames
+  dropped), then the column profile taken.
+- **Score:** the RMS residual against a cubic fit of the profile, i.e. the staircase left
+  after the smooth ramp is removed. Lower is smoother.
+
+| Arm | 480i grey | 480i blue | 480p grey | 480p blue |
+|---|---|---|---|---|
+| Control: `main`'s netlist (`DVD_stilloff_20261005_2238.rbf`) | 1.01 | 1.71 | — | — |
+| Dither build, Off | 1.00 | 1.77 | 1.01 | 1.59 |
+| Dither build, **On** | **0.50** | **1.18** | **0.52** | **1.36** |
+| Dither build, Off again | 1.00 | 1.74 | 1.01 | 1.59 |
+
+- **Repeatable:** Off → On → Off reproduces Off to within 0.03.
+- **Off is unchanged:** the control arm matches Off.
+- **On halves the grey staircase in both modes.** The mean rises ~1 capture level, as
+  expected: the dither adds a mean of 1.5 LSB in 256 before the truncation.
+- At 5× contrast, the 480i On frame shows a smooth gradient with a fine line texture where
+  Off shows hard bands.
+- The blue ramp improves less. Its profile also carries the colour matrix's and the
+  RetroTINK's curvature, which a cubic does not remove.
+- On 480p the 6X CE scales the picture to half height. That is the converter, not the core;
+  the regions were moved to match.
+
+⏳ **Not yet judged:** the texture by eye on a CRT (the go/no-go), composite/S-Video, and a
+24-bit DAC. The capture chain resamples and compresses, so it can show that the bands go,
+but not how visible the texture is on a tube.
+
+**Remaining HW plan:**
 - Control arm first: the previous build on the HIL rig with the 18-bit I/O board (CRT,
   S-Video) shows the bands.
 - New build: Off must look identical to the control. On should remove the bands. Judge the
