@@ -463,6 +463,16 @@ If `vga_mode` is set and other cores show color on the same cable but the DVD co
 not — or an NTSC disc shows color while a PAL disc is B&W — that is worth
 [reporting](reporting-a-bug.md), along with the OSD's reported resolution line.
 
+### Dark scenes show bands or contours on a CRT
+
+Smooth gradients, such as a night sky or a fade to black, break into steps on the analog
+output but look smooth over HDMI. The standard I/O board's video DAC has only 64 levels
+per channel. Set **`Analog Dither = On`**. See
+[Analog Dither](../video/analog-crt.md#analog-dither-if-dark-scenes-show-bands).
+
+If the bands show over HDMI too, they are in the disc itself, and this setting will not
+change them.
+
 ### Nothing on the analog output at all
 
 Check `MiSTer.ini` has `vga_scaler=0` and a sync mode matching your cable

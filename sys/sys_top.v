@@ -1502,6 +1502,7 @@ reg  [39:0] PhaseInc;
 
 
 	wire VGA_DISABLE;
+	wire vga_dither_en;   // DVD-FORK: emu's VGA_DITHER (OSD Analog Dither), see dac_dither below
 	wire [23:0] vgas_o;
 	wire vgas_hs, vgas_vs, vgas_cs, vgas_de;
 	`ifndef MISTER_DEBUG_NOHDMI
@@ -1548,6 +1549,23 @@ reg  [39:0] PhaseInc;
 		assign {vga_o, vga_hs, vga_vs, vga_cs, vga_de } =  {vga_o_t, vga_hs_t, vga_vs_t, vga_cs_t, vga_de_t } ;
 	`endif
 
+	// DVD-FORK (Analog Dither, 2026-10-06, docs/single_raster_analog.md §8): the I/O board's
+	// DAC takes the top 6 bits below, so film gradients band in 64 steps on a CRT. An ordered
+	// dither on the core-raster VGA word (RGB, YPbPr, S-Video / composite alike) averages the
+	// DAC's output back to the 8-bit value. Active video only; HDMI and the scaler-to-VGA path
+	// (vgas_o) are untouched; Off (bit-exact) unless the OSD turns it on.
+	wire [23:0] vga_od;
+	dac_dither vga_dither
+	(
+		.clk(clk_vid),
+		.en(vga_dither_en),
+		.hs(vga_hs),
+		.vs(vga_vs),
+		.de(vga_de),
+		.din(vga_o),
+		.dout(vga_od)
+	);
+
 	wire vgas_en = vga_fb | vga_scaler;
 
 	wire cs1 = vgas_en ? vgas_cs : vga_cs;
@@ -1555,13 +1573,13 @@ reg  [39:0] PhaseInc;
 
 	assign VGA_VS = av_dis ? 1'bZ      :(((vgas_en ? (~vgas_vs ^ VS[12])                         : VGA_DISABLE ? 1'd1 : ~vga_vs) | csync_en) & subcarrier_out);
 	assign VGA_HS = av_dis ? 1'bZ      :  (vgas_en ? ((csync_en ? ~vgas_cs : ~vgas_hs) ^ HS[12]) : VGA_DISABLE ? 1'd1 : (csync_en ? ~vga_cs : ~vga_hs));
-	assign VGA_R  = av_dis ? 6'bZZZZZZ :   vgas_en ? vgas_o[23:18]                               : VGA_DISABLE ? 6'd0 : vga_o[23:18];
-	assign VGA_G  = av_dis ? 6'bZZZZZZ :   vgas_en ? vgas_o[15:10]                               : VGA_DISABLE ? 6'd0 : vga_o[15:10];
-	assign VGA_B  = av_dis ? 6'bZZZZZZ :   vgas_en ? vgas_o[7:2]                                 : VGA_DISABLE ? 6'd0 : vga_o[7:2]  ;
+	assign VGA_R  = av_dis ? 6'bZZZZZZ :   vgas_en ? vgas_o[23:18]                               : VGA_DISABLE ? 6'd0 : vga_od[23:18]; // DVD-FORK: vga_od
+	assign VGA_G  = av_dis ? 6'bZZZZZZ :   vgas_en ? vgas_o[15:10]                               : VGA_DISABLE ? 6'd0 : vga_od[15:10];
+	assign VGA_B  = av_dis ? 6'bZZZZZZ :   vgas_en ? vgas_o[7:2]                                 : VGA_DISABLE ? 6'd0 : vga_od[7:2]  ;
 
-	wire [1:0] vga_r  = vgas_en ? vgas_o[17:16] : VGA_DISABLE ? 2'd0 : vga_o[17:16];
-	wire [1:0] vga_g  = vgas_en ? vgas_o[9:8]   : VGA_DISABLE ? 2'd0 : vga_o[9:8];
-	wire [1:0] vga_b  = vgas_en ? vgas_o[1:0]   : VGA_DISABLE ? 2'd0 : vga_o[1:0];
+	wire [1:0] vga_r  = vgas_en ? vgas_o[17:16] : VGA_DISABLE ? 2'd0 : vga_od[17:16];
+	wire [1:0] vga_g  = vgas_en ? vgas_o[9:8]   : VGA_DISABLE ? 2'd0 : vga_od[9:8];
+	wire [1:0] vga_b  = vgas_en ? vgas_o[1:0]   : VGA_DISABLE ? 2'd0 : vga_od[1:0];
 `endif
 
 reg video_sync = 0;
@@ -1844,6 +1862,7 @@ emu emu
 
 `ifndef MISTER_DUAL_SDRAM
 	.VGA_DISABLE(VGA_DISABLE),
+	.VGA_DITHER(vga_dither_en),   // DVD-FORK (2026-10-06): the analog DAC's dither (dvd/dac_dither.sv)
 `endif
 
 	.HDMI_WIDTH(direct_video ? 12'd0 : hdmi_width),

@@ -22,6 +22,33 @@ predate later confirmations; the `CLAUDE.md` index carries the reconciled status
 
 ## Hardware status (THIS fork, verified 2026-06-21)
 
+- 🔧 **ANALOG DITHER: AN ORDERED DITHER AHEAD OF THE I/O BOARD'S 6-BIT VGA DAC (2026-10-06,
+  `dev-dither`; ✅ HW-MEASURED via analog RGB capture, ✅ HW-CONFIRMED on a CRT by the
+  maintainer, ✅ MERGED (PR #161)).**
+  - **Gap.** sys_top drives the classic I/O board's DAC from `vga_o[23:18]`: 64 levels per
+    channel. Dark film gradients contour on a CRT. HDMI and 24-bit analog DACs are unaffected.
+  - **Built.** `dvd/dac_dither.sv` on `vga_o` in sys_top (`DVD-FORK`). A 4×4 Bayer threshold
+    of 0..3 LSB, inverted every other vs, in DE only, saturating. On Interlaced that means the
+    two fields get opposite patterns, fixed on a still (deliberate; §8 has the alternative). OSD `O[8],Analog Dither,Off,On`
+    (bit 8 never allocated, no `v,N` bump). No SDC entry, because `status` and `CLK_VIDEO`
+    are the same 27 MHz `clk_sys`.
+  - **Open question for HW.** At 27 MHz the pattern is per-pixel on Progressive (6.75 MHz
+    fundamental). Whether that texture is acceptable on S-Video, composite and a 31 kHz
+    monitor is the go/no-go. The fallback (a faster clock domain) is recorded, not designed.
+  - **Gates:** `bench/dvd/run_dac_dither.sh --red` (T1–T6, 7 module + 7 wiring mutations)
+    and `tools/check_dac_dither_wiring.py`. Design: `docs/single_raster_analog.md` §8.
+  - **Fit:** 15 ALM, SEED 7 unchanged, both clocks pass at both corners (clk_dec 89.4 MHz
+    at −40 °C, clk_mem 95.75 at 100 °C). Build `DVD_dither_20261006_0425.rbf`.
+  - **HW (2026-10-06, RGB → RetroTINK → capture, paused ramp, toggled live):** the grey
+    ramp's staircase residual is 1.00 Off and 0.50 On at 480i, and 1.01 Off and 0.52 On at
+    480p. Off → On → Off repeats to within 0.03. The control arm (`main`'s netlist) gives
+    1.01, the same as Off. Table in §8.
+  - **CRT (2026-10-06, the maintainer, S-Video 480i, 18-bit board):** "gradients look better
+    on the CRT with dither." The go/no-go is passed. The 27 MHz pattern is acceptable as built.
+  - **Next (optional):** composite, a 31 kHz monitor at 480p, the 24-bit rig.
+  - **The plan as originally written (§8):** control arm first, Off identical, On judged by
+    the maintainer on the 18-bit-board CRT, HDMI bit-identical between On and Off.
+
 - ✅ **USER STILL OFF: PLAY/PAUSE OR SELECT ENDS A STILL WITH NO BUTTONS (audit item 5,
   2026-10-05, `dev-stilloff`; sim-verified, ✅ HW-CONFIRMED on
   timed stills, Play and Select, A/B against `main`, on the pinned SEED 7 build; ✅ MERGED

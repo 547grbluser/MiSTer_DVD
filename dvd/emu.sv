@@ -9,6 +9,7 @@ module emu (
 	output        HDMI_BLACKOUT,
 	output        HDMI_BOB_DEINT,
 	output        VGA_DISABLE,
+	output        VGA_DITHER,     // DVD-FORK: sys_top's dac_dither enable (OSD Analog Dither)
 
 	output        CLK_SYS,
 	output        CLK_MEM,
@@ -379,6 +380,10 @@ assign VGA_SL       = 0;
 // drives 0 and the ini alone decides scaler-vs-native on the analog pins.
 assign VGA_SCALER   = 1'b0;
 assign VGA_DISABLE  = 0;
+// DVD-FORK (Analog Dither, 2026-10-06): the ordered dither ahead of the I/O board's
+// 6-bit VGA DAC lives in sys_top (dvd/dac_dither.sv, docs/single_raster_analog.md §8);
+// the core only hands it the OSD bit. status is on clk_sys, which IS CLK_VIDEO here.
+assign VGA_DITHER   = status[8];
 assign HDMI_FREEZE      = 0;
 assign HDMI_BLACKOUT    = 0;
 // DVD-FORK FIX (interlaced cadence): 480i deinterlace mode for the MiSTer scaler
@@ -693,7 +698,7 @@ assign CE_PIXEL = interlaced_eff ? ce_pix_q : 1'b1;
 // the branch changes the netlist anyway - and NEVER PER COMMIT. Do not derive
 // either from a git SHA or a timestamp: every compile would become a new
 // netlist. Same-day rebuilds on one branch append a digit ("dev-seekrealign2").
-`define CORE_VERSION "dev-stilloff"
+`define CORE_VERSION "dev-dither"
 
 parameter CONF_STR = {
     "DVD;;",
@@ -858,6 +863,15 @@ parameter CONF_STR = {
     // VIDEO_ARX/ARY switch to 4:3 while active so HDMI geometry stays correct.
     // status[4:3]: 0=Auto, 1=Fit, 2=Letterbox, 3=Crop. See docs/crt_anamorphic.md.
     "O[4:3],Analog Aspect,Auto,Fit,Letterbox,Crop;",
+    // Analog Dither (2026-10-06): the DE10-Nano's classic analog I/O board drives its
+    // VGA DAC from the top 6 bits of each channel, so dark film gradients band in 64
+    // steps on a CRT. On = a 4x4 ordered dither, inverted every field, ahead of that
+    // truncation (sys_top's dac_dither): the DAC's output averages back to the 8-bit
+    // value. Analog pins only — HDMI is bit-exact either way. Off by default because a
+    // 24-bit analog DAC (e.g. a SuperStation) has nothing to fix. status[8]: never
+    // allocated before, so every saved config reads Off and no "v,N" bump is needed.
+    // See docs/single_raster_analog.md §8.
+    "O[8],Analog Dither,Off,On;",
     // (Line-21 CC moved to the debug page — see P1O[14] below. Normal users never
     // need it: the data is invisible in the VBI and correct behavior is On.)
     // Video Standard: NTSC (720x480p @ 59.94 Hz, 27 MHz dot clock) or PAL (720x576p
