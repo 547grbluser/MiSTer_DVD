@@ -563,6 +563,58 @@ instruction set that `dvd_vm` decodes with hardwired muxes.
   Acceptance would be bench verdicts plus `tools/nav_diff.py` against libdvdnav on HIL,
   as Branch E was.
 
+**Would it make navigation changes easier? (2026-10-05, from the last 40 merged PRs.)**
+Twelve of them changed the reader, the VM or `nav_pci`, and **all twelve also changed
+`emu.sv`**. Lines changed:
+
+| PR | reader / VM / `nav_pci` | `emu.sv` | other `dvd/` |
+|---|---|---|---|
+| #159 Still off | 140 | 32 | 0 |
+| #158 chapter skip at the title's edges | 196 | 14 | 0 |
+| #134 Auto-mode chapter table | 93 | 2 | 0 |
+| #115 protection-zone hang | 87 | 2 | 0 |
+| #128 TMAP seek | 231 | 92 | 60 |
+| #154 player parameters | 55 | 42 | 85 |
+| #152 32 subtitle tracks | 97 | 173 | 77 |
+| #113 SPU re-send per cell | 9 | 50 | 79 |
+
+The first four are navigation decisions (which PGC next, what a button means at an edge,
+which chapter table): those would become microcode edits. The last rows are wiring and
+other modules, which stay hardware.
+
+- **Easier:**
+  - a change costs ROM words, not ALMs or state codes, so headroom stops gating
+    navigation work;
+  - a Python emulator of the program (the DTS/AC-3 method) could be diffed against
+    libdvdnav over the whole ISO library before any build. Today `tools/nav_diff.py`
+    needs the HIL rig, one disc at a time. ★ This is probably the largest practical win;
+  - a microcode-only change might not need a refit: Quartus can usually replace an
+    M10K's initial contents without re-placing (the update-MIF flow; ⏳ unverified on
+    17.0), which would avoid the seed and timing churn (#159 needed a SEED 7 pin). A
+    program loaded at startup, like the idle logo's `boot.rom`, would let a fix ship as a
+    file, at the risk of a file and core that do not match;
+  - the VM is already an interpreter: semantics fixes such as #158's Next → POST and
+    Prev → `prev_pgcn` become small program changes.
+- **Not easier:**
+  - the seams stay in RTL (buttons, the HUD, flushes, the subpicture path), with their
+    `check_*_wiring.py` gates;
+  - the costliest bugs are races between a decision and the real-time path (§8's
+    `fetch_cross` that `seek_jump` never clears; the stale audio PTS of PR #143).
+    Microcode does not remove them, it adds a boundary (sequencer ↔ sector pump) where
+    they can occur, and a Python emulator does not model that timing;
+  - one sequencer serialises three blocks that run in parallel today, so it needs a
+    scheduling rule (an NV_PCK arriving mid VM command chain). Event rates are low, about
+    two a second.
+- **Cost:** a rewrite of about 9,300 lines (reader ~6,000, VM ~2,400, `nav_pci` ~960), each
+  carrying fixes recorded in `status_log.md`. The risk is reintroducing a fixed bug; with
+  no bit-identical trace gate, libdvdnav diffs over the library are the main net.
+- **★ Smallest step that answers the question: microcode the VM alone first.** 1,384
+  ALMs, self-contained, its semantics fully specified by libdvdnav's `vm.c`, with
+  `dvd_vm_tb`, `nav_diff` and Branch E's gate pattern (`run_gprm_ram.sh`) already in
+  place. It measures whether the workflow is really easier, and what it costs in ALMs and
+  M10K, before the reader is touched. The reader's parse would follow; its sector pump
+  stays hardwired.
+
 ### 10c. The transport cluster: share one arithmetic unit (resource sharing, not microcode)
 
 `seek_bar` 1,015 · `scrub_ctrl` 678 · `transport_hud` 409 · `lin_rate` 350 · `seek_time`
@@ -617,5 +669,6 @@ the census since F1 + F2, `decode_pacing.md`) is the hardest-won property in the
 1. **`mult22x16`** (10d): small, exact, an afternoon plus a fit.
 2. **The IMDCT on the engine** (10a): exactness decided, cycles measured; next, the
    budget gate's `IMDCT_BLOCK` and the executor design.
-3. **The reader state split** (10b, measurement only), which decides whether 10b and 10c
-   are worth a branch.
+3. **The VM as a microcode pilot** (10b), or the reader state split first if the area
+   question matters more than the workflow one. Either decides whether the rest of 10b
+   and 10c are worth a branch.
