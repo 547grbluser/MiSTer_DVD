@@ -212,9 +212,15 @@ MSB-first barrel reader over a byte FIFO.
   BSI must not over-read past the frame.
 - Latches `bsid`, `bsmod`, `acmod`, `dsurmod`, `lfeon`, `dialnorm`; everything
   else is parsed and discarded.
-- **Scope guards:** sets sticky `err_unsupported` and halts in `B_ERR` if
-  `acmod != 2` or `lfeon != 0`. (For `acmod==2`: no cmixlev/surmixlev, `dsurmod`
-  present, no dual-mono block — the decoded path is specialized to this case.)
+- **Scope guards:** sets sticky `err_unsupported` and halts in `B_ERR` for
+  `acmod == 0` (1+1 dual mono). *(Historical: the first cut also rejected
+  `acmod != 2` and `lfeon != 0`.)* ⚠ **This module is no longer in the build.**
+  Since 2026-10-03 the AC-3 parse runs as `dvd/dts/ac3.uasm` on the shared audio
+  engine (`docs/ac3_engine.md`), and `bsi_parse` is only the reference that
+  `bench/dvd/run_ac3_ab.sh` scores it against. In the engine, acmod 1–7 with or
+  without LFE decode to a Lo/Ro downmix, and acmod 0 decodes too, Ch1 left and Ch2
+  right (PR #162, `docs/lpcm_full.md` §7). `dsurmod` and `dialnorm` are read and
+  discarded.
 - Out: `bsi_valid` (1-cycle pulse), the latched fields, `err_unsupported`.
 - Verified: chain TB (synthetic frames with ffmpeg-identical BSI bytes
   `40 43 E1`) + Verilator/liba52 co-sim golden-checking acmod/lfe per frame.

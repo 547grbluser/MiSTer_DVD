@@ -4,8 +4,8 @@
 FFmpeg's channel order.** PR #162, `CORE_VERSION "dev-lpcmfull"`.
 
 This replaces audit item 4 of the 2026-10-01 *DVD Demystified* 3rd-edition audit
-("Unsupported audio fails silently", unmerged branch `docs/demystified-3rd-audit`,
-`docs/roadmap.md` "2026-10-01 spec-audit" and `docs/conformance.md` §4). The maintainer
+("Unsupported audio fails silently"; `docs/conformance.md` § "DVD Demystified 3rd-edition
+audit", `docs/roadmap.md` "2026-10-01 spec-audit"). The maintainer
 decided to **support** these formats rather than announce them. `AUDIO UNSUPPORTED` stays
 only for header values the format reserves (§2).
 

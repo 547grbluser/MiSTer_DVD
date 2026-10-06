@@ -479,8 +479,8 @@ otherwise; `--red` runs its mutation arms).
 ### Known gaps
 
 - ❌ HD output (720p/1080p): fixed 27 MHz SD dot clock.
-- ❌ Chapters/PTT exactness (Phase 6, `VTS_PTT_SRPT`), UDF-only images, parental control,
-  GPRM counter mode.
+- ❌ UDF-only images, parental control.
+- ⏳ 3rd-ed. audit tail (1–8 shipped): `docs/roadmap.md` "2026-10-01 spec-audit".
 - ❌ Trick play (continuous 2×/4×): needs a flush-free I-frame splice (`docs/dvd_nav.md` §2d).
 - ⚠ `lates` counts one per refresh while a PGC still is held, so boot/menu windows
   over-report (`docs/decode_pacing.md` §2c). Real lates are 0 on the census set since F1 +
