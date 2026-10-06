@@ -278,6 +278,13 @@ engine.
   second BSI block. FFmpeg's "new coupling strategy must be present in block 0" on
   the first rewritten stream found it. As in liba52 (`parse.c`), the last one sent
   applies to both channels.
+- **`run_ac3_seq.sh`'s X8 had been surviving on `main`, unnoticed.** The local gate set
+  gained a second zero-SNR window (*Anastasia*, 2026-09-15) that sorts ahead of the one
+  X8 was written against (*DARK PASSENGERS*) and carries no block X8 can see. Measured:
+  X8 survives on `main` and on this branch with *Anastasia*, and is caught with *DARK
+  PASSENGERS*. `pick()` now tries that window first.
+- **`ac3_ab_tb`'s `+refuse` required the engine to refuse too.** A 1+1 stream now runs
+  with `+halt`: `ac3_front` must halt, and the engine must decode past it.
 - **The only 1+1 in the library is silence.** Both frames of the *Casino Royale* window
   decode to zero in our arithmetic and in a52dec. The synthetic stream is the one that
   proves the decode.
