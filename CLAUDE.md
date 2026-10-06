@@ -386,7 +386,7 @@ otherwise; `--red` runs its mutation arms).
 | Forced subtitles: FSTA_DSP units shown with subtitles off (SPRM2 stream, else first declared; libdvdnav) | ✅ HW, MERGED PR #151 (BHD vs `main`) | `subpicture.md` "Forced subtitles" | `run_forced_subs.sh --red`, `check_forced_subs_wiring.py` |
 | Player parameters: SPRM20 = disc's first allowed region, SPRM14 from output/Analog Aspect, SPRM15 with DTS (`player_regs`) | ✅ HW (HARTSWAR_169 VTS 4→3 on HDMI vs `main`), MERGED PR #154 | `dvd_vm.md` "Player parameters" | `run_player_regs.sh --red`, `check_player_regs_wiring.py` |
 | Chapter skip at the title's edges: Next → POST, Prev → `prev_pgcn` (audit 7) | ✅ HW (vs libdvdnav), MERGED PR #158 | `dvd_nav.md` | `run_chap_edge.sh --red`, `check_chap_edge_wiring.py` |
-| `.BUP` fallback (audit 8): fabric IFO header gate; Main mirrors unreadable IFO sectors | ✅ HW: fabric A/B vs `main`, Main mirror on a physical disc | `dvd_nav.md` "IFO header gate" | `run_bup.sh --red`, `main/tests` [21]–[29] |
+| `.BUP` fallback (audit 8): fabric IFO header gate; Main mirrors unreadable IFO sectors | ✅ HW (fabric A/B vs `main`; Main mirror on a physical disc), MERGED PR #163 | `dvd_nav.md` "IFO header gate" | `run_bup.sh --red`, `main/tests` [21]–[29] |
 
 ### Transport, HUD and input
 

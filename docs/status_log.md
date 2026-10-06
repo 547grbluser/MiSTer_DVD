@@ -24,7 +24,7 @@ predate later confirmations; the `CLAUDE.md` index carries the reconciled status
 
 - ✅ **.BUP FALLBACK WHEN AN IFO IS UNREADABLE (audit item 8, 2026-10-06,
   `dev-bupfallback`; fabric ✅ HW-CONFIRMED A/B vs `main`; Main mirror ✅ HW-CONFIRMED on a
-  physical disc).** Design: `docs/dvd_nav.md` "IFO header gate
+  physical disc; ✅ MERGED (PR #163)).** Design: `docs/dvd_nav.md` "IFO header gate
   and .BUP fallback", `docs/physical_disc.md` "An unreadable IFO sector is served from its
   .BUP".
   - **Gap.** The Main zero-fills an unreadable sector and the reader never checked an IFO's
@@ -98,7 +98,7 @@ predate later confirmations; the `CLAUDE.md` index carries the reconciled status
     +188 registers; +1 M10K (`gmem_rtl_0`, still inferred). Device "ALMs needed" reads
     +1,506, but ALMs placed FELL 40,910 → 40,838; the swing is the fitter's
     dense-packing estimate (2,625 → 1,064), not logic.
-  - **Next:** push and open the PR when asked.
+  - **Next:** none for this feature. Optional: a disc whose IFO is the unreadable copy.
 
 - 🔧 **ANALOG DITHER: AN ORDERED DITHER AHEAD OF THE I/O BOARD'S 6-BIT VGA DAC (2026-10-06,
   `dev-dither`; ✅ HW-MEASURED via analog RGB capture, ✅ HW-CONFIRMED on a CRT by the

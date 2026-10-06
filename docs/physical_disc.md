@@ -820,7 +820,7 @@ the worker:
 - DDR3 contention from a full-speed refill after a seek is unmeasured. Check the
   `lates`/`drops` telemetry on the rig.
 
-## An unreadable IFO sector is served from its .BUP (audit item 8, 2026-10-06, `feature/bup-fallback`)
+## An unreadable IFO sector is served from its .BUP (audit item 8, 2026-10-06, ✅ MERGED PR #163)
 
 **Status:** ✅ HW-CONFIRMED 2026-10-06 on a physical disc (below), and host-proven:
 `main/tests/run_tests.sh --red` arms [21]–[29], 10 mutations each caught by its own arm.
