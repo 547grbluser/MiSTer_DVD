@@ -71,6 +71,7 @@ set_global_assignment -name SYSTEMVERILOG_FILE dvd/aud_route.sv
 # decoder DDR path.)
 set_global_assignment -name SYSTEMVERILOG_FILE dvd/dvd_audio_decode.sv
 set_global_assignment -name SYSTEMVERILOG_FILE dvd/lpcm_unpack.sv
+set_global_assignment -name SYSTEMVERILOG_FILE dvd/lpcm_hb.sv
 # IEC 61937 S/PDIF bitstream passthrough (Path B): iec61937_wrap wraps undecoded
 # AC-3/DTS frames into 61937 bursts; spdif_pass is the biphase encoder (a copy of
 # sys/spdif.v with the non-PCM channel-status bit set). See docs/iec61937.md.

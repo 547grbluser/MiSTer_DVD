@@ -62,17 +62,20 @@ as an `.mpg` encoded for BT.709, is converted the way its label says.
 
 Covered in full on [Audio formats](../audio/formats.md). In short: AC-3 (all channel modes)
 and DTS (its core stream, up to 5.1, to stereo) and MP2 and LPCM decode in the core; DTS
-extensions (DTS-ES, 96/24) reach a receiver only through Passthru; AC-3 1+1 dual mono is
-deliberately refused; the MPEG-2 multichannel MP2 extension is unverified.
+extensions (DTS-ES, 96/24) reach a receiver only through Passthru; AC-3 1+1 dual mono plays
+its two programmes on the left and right; the MPEG-2 multichannel MP2 extension is
+unverified.
 
 **WAV files** play through the same PCM path (16-bit stereo, 44.1/48 kHz); unsupported
 shapes are refused rather than played as noise, and they play as PCM on both outputs
 whichever way `Audio Out` is set.
 
-Two limits worth knowing: **LPCM is 48 kHz stereo**, and 20/24-bit tracks play but are
-truncated to 16 bits, so there is real fidelity loss on high-bit-depth music discs. 96 kHz
-and multichannel LPCM are not supported — the board wires a single two-channel audio line
-to the HDMI transmitter, which is also why 5.1 must leave as a compressed bitstream.
+**LPCM** plays in every form DVD-Video allows: 48 or 96 kHz, 16/20/24-bit, 1 to 8
+channels. Two limits are worth knowing. The output is **stereo**: multichannel LPCM is
+downmixed, because the board wires a single two-channel audio line to the HDMI transmitter
+(which is also why 5.1 must leave as a compressed bitstream). It is also **16-bit**: 20/24-bit
+tracks are truncated, so there is real fidelity loss on high-bit-depth music discs. 96 kHz
+is filtered down to 48 kHz unless `hdmi_audio_96k=1` runs the HDMI link at 96 kHz.
 
 ## Navigation
 

@@ -124,5 +124,6 @@ near-instant.
 
 - **Core DTS only** — 48 kHz, up to 16-bit. No DTS-HD, no 96 kHz, no high-bit-depth
   variants. DVDs do not carry those.
-- **LPCM is 48 kHz stereo, 16-bit.** 96 kHz and multichannel LPCM are not decoded;
-  24-bit is truncated to 16. Those discs are rare and the format is a DVD-Audio corner.
+- **LPCM always leaves as 16-bit stereo PCM.** IEC 61937 has no LPCM form, so multichannel
+  LPCM is decoded and downmixed to stereo, and 20/24-bit is truncated to 16, in both
+  `Audio Out` modes. See [Audio formats](formats.md#lpcm).

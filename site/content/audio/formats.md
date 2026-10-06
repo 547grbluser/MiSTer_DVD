@@ -5,9 +5,9 @@ same as the video path.
 
 | Format | Decoded in core | Passthrough | Notes |
 |---|:--:|:--:|---|
-| **AC-3 (Dolby Digital)** | yes | yes | Every channel mode from 1.0 mono to 5.1, downmixed to stereo |
+| **AC-3 (Dolby Digital)** | yes | yes | Every channel mode from 1.0 mono to 5.1, downmixed to stereo; 1+1 dual mono as left/right |
 | **MPEG-1 Layer II (MP2)** | yes | no | Rare on DVD, universal on Video CD. 48/44.1/32 kHz |
-| **LPCM** | yes | no | 48 kHz stereo. 20/24-bit tracks play, truncated to 16-bit |
+| **LPCM** | yes | no | Every DVD-Video form: 48 or 96 kHz, 16/20/24-bit, 1–8 channels. Multichannel is downmixed to stereo; output is 16-bit |
 | **DTS** | yes | yes | The DTS core, up to 5.1, downmixed to stereo |
 | **WAV (PCM file)** | yes | no | 16-bit stereo, 44.1/48 kHz — a plain audio file, not a disc |
 
@@ -19,10 +19,10 @@ For multichannel you want [bitstream passthrough](passthrough.md) to an AV recei
 All channel modes are supported and downmixed to stereo for the HDMI output: mono (1.0),
 stereo (2.0), and the multichannel modes up to 5.1.
 
-!!! note "One deliberate exception"
-    AC-3 **1+1 dual mono** (`acmod 0`) carries two *independent* programmes rather than one
-    two-channel programme, so there is no correct way to mix them together. It is refused
-    and plays silent. In a survey of 491 discs this appeared on 4 frames of 1 disc.
+**1+1 dual mono** carries two *independent* mono programmes rather than one stereo
+programme, for example the same dialogue in two languages. The first plays on the left
+and the second on the right, unmixed, so a listener can pick one with the TV's balance
+control. It is rare. In a survey of 491 discs it appeared on 4 frames of 1 disc.
 
 If a track plays silent and shows `AUDIO UNSUPPORTED`, cycle to another with **B7**.
 
@@ -70,21 +70,47 @@ verify, so such a track currently reports `AUDIO UNSUPPORTED`.
 
 ## LPCM
 
-Uncompressed, so there is nothing to decode. **48 kHz stereo.**
+Uncompressed, so there is nothing to decode. Every form DVD-Video allows plays:
 
-DVD also permits 20-bit and 24-bit LPCM. Those tracks **play**, but the core takes the top
-16 bits of each sample and discards the rest — the audio path out to HDMI is 16-bit, so the
-extra resolution has nowhere to go.
+| | |
+|---|---|
+| Sample rate | 48 or 96 kHz |
+| Word length | 16, 20 or 24 bit |
+| Channels | 1 to 8 |
+
+The disc's bit rate caps the combinations (no more than two channels at 96 kHz/24-bit, for
+example), so the most demanding tracks are 96 kHz stereo and 48 kHz multichannel. Both are
+rare. They mostly turn up on audiophile "96/24" music discs and on some concert discs.
+
+**Multichannel LPCM is downmixed to stereo**, the same way Dolby Digital and DTS are: the
+centre and surrounds are folded in at −3 dB and the LFE channel is left out. The board cannot
+send more than two PCM channels out (see below), so stereo is what reaches the TV. A disc
+does not label its LPCM channels, so the core assumes front left, front right, centre, LFE,
+then the surrounds for 5.1, the order FFmpeg-based players such as mpv and Kodi assume. Not
+every player agrees: VLC, for one, reads 5.1 LPCM in a different order.
+
+**96 kHz LPCM** is converted to 48 kHz with a proper low-pass filter, which is also what most
+set-top players do. If you have set `hdmi_audio_96k=1` in `MiSTer.ini`, the HDMI link runs at
+96 kHz and a 96 kHz track plays at its own rate instead. The core reads that setting
+directly, so there is nothing to change in its own menu.
+
+**20-bit and 24-bit tracks** play, but the core takes the top 16 bits of each sample and
+discards the rest. The audio path out to HDMI is 16-bit, so the extra resolution has nowhere
+to go.
 
 !!! note "There is real fidelity loss on 20/24-bit tracks"
     Truncation, not rounding or dithering. On the sort of content that ships as high-bit-depth
     LPCM — concert recordings, audiophile music discs — this is the one place the core is
     audibly short of what the disc holds. A 16-bit LPCM track is unaffected and is exact.
 
-**96 kHz and multichannel LPCM are not supported.** Multichannel is not a matter of effort:
-the DE10-Nano wires a single audio data line to its HDMI transmitter, which carries two
-channels, and the board routes no other pin for it. That is also why 5.1 has to leave as a
-[compressed bitstream](passthrough.md) rather than as PCM.
+**Why the output is stereo:** the DE10-Nano wires a single audio data line to its HDMI
+transmitter, which carries two channels, and the board routes no other pin for it. Decoding
+multichannel LPCM is not the problem; sending more than two PCM channels out is. That is also
+why 5.1 has to leave as a [compressed bitstream](passthrough.md) rather than as PCM, and
+LPCM, which has no bitstream form, always leaves as the stereo downmix.
+
+A track whose header holds a value DVD-Video does not allow (a 44.1 or 32 kHz rate, or an
+undefined word length) is muted and shows `AUDIO UNSUPPORTED`, rather than playing as noise.
 
 ## DTS
 

@@ -162,6 +162,12 @@ module ps_demux (
     // single fixed word length). lpcm_unpack uses it to depack 20/24-bit groups
     // (top-16-bit truncation for the 16-bit HDMI path). Held (not a strobe).
     output logic [1:0]  aud_lpcm_quant,
+    // The same byte's other fields (docs/lpcm_full.md): bits[2:0] channels - 1,
+    // bits[5:4] = 1 a 96 kHz track, and `bad` when a field holds a value DVD-Video
+    // reserves (bits[5:4] = 2/3, 44.1/32 kHz; bits[7:6] = 3). Held like quant.
+    output logic [2:0]  aud_lpcm_nch_m1,
+    output logic        aud_lpcm_fs96,
+    output logic        aud_lpcm_bad,
 
     // CSS detection: one-cycle pulse when a video/audio PES header carries
     // PES_scrambling_control != 0 (bits [5:4] of the first PES-flags byte) — the
@@ -276,6 +282,9 @@ logic [1:0]  aud_type_r;       // 0=AC3, 1=DTS, 2=LPCM, 3=MP2 (MPEG-1 Layer II; 
                                // the never-forwarded "unknown" sentinel — code 3 only
                                // ever reaches the ring with payload for MP2)
 logic [1:0]  lpcm_quant_r;     // LPCM word-length (sub-header byte +5 bits[7:6])
+logic [2:0]  lpcm_nch_r;       //   channels - 1 (bits[2:0])
+logic        lpcm_fs96_r;      //   bits[5:4] == 1
+logic        lpcm_bad_r;       //   a reserved rate or word length
 logic        first_aud_byte;   // marks first forwarded byte of an audio frame
 logic        rlgn_pend;        // aud_realign seen; next forwarded audio must start on a real frame
 logic  [2:0] aud_ssid_r;       // low 3 bits of the current PES's audio substream id
@@ -375,6 +384,9 @@ assign aud_byte        = in_byte;
 assign aud_valid       = (state == S_AUDIO_DATA) && in_valid;
 assign aud_type        = aud_type_r;
 assign aud_lpcm_quant  = lpcm_quant_r;
+assign aud_lpcm_nch_m1 = lpcm_nch_r;
+assign aud_lpcm_fs96   = lpcm_fs96_r;
+assign aud_lpcm_bad    = lpcm_bad_r;
 assign aud_frame_start = (state == S_AUDIO_DATA) && in_valid && first_aud_byte;
 
 // Per-frame PTS: aud_pts is a held register carrying the current PES's audio PTS
@@ -438,6 +450,9 @@ always_ff @(posedge clk or negedge rst_n) begin
         pes_hdr_len    <= 8'd0;
         aud_type_r     <= 2'd0;
         lpcm_quant_r   <= 2'd0;    // default 16-bit
+        lpcm_nch_r     <= 3'd1;    // stereo, 48 kHz
+        lpcm_fs96_r    <= 1'b0;
+        lpcm_bad_r     <= 1'b0;
         first_aud_byte <= 1'b0;
         rlgn_pend      <= 1'b0;
         aud_ssid_r     <= 3'd0;
@@ -749,8 +764,12 @@ always_ff @(posedge clk or negedge rst_n) begin
                 // channels) is in in_byte when bytes_remaining == 2. bits[7:6] =
                 // 0=16, 1=20, 2=24-bit. (aud_type_r==2 gates out AC-3/DTS, which
                 // also pass through bytes_remaining==2 but carry no such field.)
-                if (aud_type_r == 2'd2 && bytes_remaining == 16'd2)
+                if (aud_type_r == 2'd2 && bytes_remaining == 16'd2) begin
                     lpcm_quant_r <= in_byte[7:6];
+                    lpcm_nch_r   <= in_byte[2:0];
+                    lpcm_fs96_r  <= (in_byte[5:4] == 2'b01);
+                    lpcm_bad_r   <= (in_byte[5]) || (in_byte[7:6] == 2'b11);
+                end
                 // AC-3/DTS sub-header = num_frames, first_access_unit_pointer (2B).
                 // The pointer counts from the byte AFTER it (1 = the first payload
                 // byte); 0 = no frame starts in this PES. (tools/acmod_scan.py uses

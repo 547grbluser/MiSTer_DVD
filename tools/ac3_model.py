@@ -42,8 +42,9 @@ AC3 = os.path.join(REPO, 'dvd', 'ac3')
 OPT = set()
 STATS = ('blocks', 'cpl', 'remat', 'dynrnge', 'short', 'dith', 'deltba_new', 'deltba_reuse',
          'deltbaie_off_after_new', 'skip', 'zero_snr', 'phsflginu', 'phsflg', 'recomb_sat',
-         'remat_sat', 'cpl_ch0_uncoupled', 'cplmerge')
-# (phsflg: bands whose phase flag was set; *_sat: coefficients that saturated)
+         'remat_sat', 'cpl_ch0_uncoupled', 'cplmerge', 'dualmono')
+# (phsflg: bands whose phase flag was set; *_sat: coefficients that saturated;
+#  dualmono: 1+1 frames)
 
 
 class Ac3Error(Exception):
@@ -388,8 +389,9 @@ class Decoder:
         br.bits(5)                                      # bsid
         br.bits(3)                                      # bsmod
         acmod = br.bits(3)
-        if acmod == 0:
-            raise Ac3Error('ACMOD0', 'dual mono is refused')
+        # acmod 0 (1+1 dual mono) decodes since docs/lpcm_full.md §7: two independent
+        # channels, Ch1 to the left and Ch2 to the right (nfchans 2, no downmix);
+        # bsi() repeats dialnorm/compr/langcod/audprodi for Ch2, below.
         cmix = surmix = 0
         if (acmod & 1) and acmod != 1:
             cmix = br.bits(2)
@@ -405,6 +407,15 @@ class Decoder:
             br.bits(8)                                  # langcod
         if br.bits(1):
             br.bits(7)                                  # audprodi
+        if acmod == 0:                                  # 1+1: Ch2's copy of the four
+            self.stats['dualmono'] += 1
+            br.bits(5)                                  # dialnorm2
+            if br.bits(1):
+                br.bits(8)                              # compr2
+            if br.bits(1):
+                br.bits(8)                              # langcod2
+            if br.bits(1):
+                br.bits(7)                              # mixlevel2, roomtyp2
         br.bits(2)                                      # copyrightb, origbs
         if br.bits(1):
             br.bits(14)
@@ -433,6 +444,9 @@ class Decoder:
         if br.bits(1):
             self.dynrng = br.bits(8)
             st['dynrnge'] += 1
+        if acmod == 0 and br.bits(1):                   # 1+1: Ch2's dynrng2e. As liba52
+            self.dynrng = br.bits(8)                    # (parse.c), the last one sent
+            st['dynrnge'] += 1                          # applies to both channels
         cpl = self.cpl
         if br.bits(1):                                  # cplstre
             self.chincpl = 0
@@ -785,6 +799,12 @@ def compare(stream, golden, nframes=0):
                 nf += 1
                 break                                    # both refuse: the RTL halts here
             return nf, nb, bad + 1, f'frame {k}: the model refused ({e}), the RTL did not'
+        if g['err'] and hdr['acmod'] == 0 and not g['blocks']:
+            # dvd/ac3 (the RTL the goldens come from, retired from the core) refuses 1+1
+            # dual mono; the engine and this model decode it (docs/lpcm_full.md §7). It
+            # halts there, so the comparison ends, as when both refuse.
+            nf += 1
+            break
         if g['hdr'] is None:
             return nf, nb, bad + 1, f'frame {k}: the RTL refused it before its header, the model did not'
         for key in ('acmod', 'lfeon', 'cmixlev', 'surmixlev'):

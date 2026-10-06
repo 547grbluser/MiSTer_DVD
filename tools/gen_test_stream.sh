@@ -10,6 +10,7 @@
 #   silence_48k_stereo_192k.ac3   digital silence, same params
 #   *.ac3.hex                     one-byte-per-line hex (for $readmemh / sims)
 #   *.frame0.hex                  just the first frame's bytes
+#   dualmono_440_1k_48k_192k.ac3  1+1 dual mono, by tools/ac3_dualmono.py
 #
 # Notes:
 #   - `-c:a ac3` is the float encoder; `-c:a ac3_fixed` is the integer encoder
@@ -172,3 +173,9 @@ gen_mc 3 "3.0"       acmod3_30_48k_640k.ac3
 gen_mc 3 "3.0(back)" acmod4_21_48k_640k.ac3
 gen_mc 4 "4.0"       acmod5_31_48k_640k.ac3
 gen_mc 4 "quad"      acmod6_22_48k_640k.ac3
+
+# 1+1 dual mono (acmod 0): no encoder writes it, so tools/ac3_dualmono.py rewrites an
+# FFmpeg 2/0 stream (440 Hz left, 1 kHz right, no coupling or rematrixing) frame by frame
+# and checks it against FFmpeg and a52dec (docs/lpcm_full.md §7).
+echo "[gen] 1+1 -> dualmono_440_1k_48k_192k.ac3"
+python3 "$ROOT/tools/ac3_dualmono.py" "$OUT/dualmono_440_1k_48k_192k.ac3"

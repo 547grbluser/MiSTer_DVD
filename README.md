@@ -51,7 +51,8 @@ know. It is not an endorsement of the approach — draw your own conclusions.
 - **Video** — MPEG-2 and MPEG-1, NTSC and PAL auto-detected, progressive or native
   480i/576i, [3:2 pulldown for film](https://owenb321.github.io/MiSTer_DVD/video/film-24p/), and one clock for
   picture, sound, subtitles and captions — so lip sync holds across seeks, menus and mode changes.
-- **Audio** — AC-3 (every channel mode), DTS (the core stream, up to 5.1) and MP2 and LPCM decoded
+- **Audio** — AC-3 (every channel mode), DTS (the core stream, up to 5.1), MP2, and LPCM (up to
+  96 kHz and 8 channels, downmixed) decoded
   [entirely in fabric](https://owenb321.github.io/MiSTer_DVD/audio/formats/); AC-3 and DTS as
   [IEC 61937 bitstream](https://owenb321.github.io/MiSTer_DVD/audio/passthrough/) to a receiver — over optical S/PDIF,
   or over HDMI with the custom Main, so 5.1 needs no add-on board. Tracks with no bitstream

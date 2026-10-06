@@ -30,7 +30,8 @@ the engine reads past its end as zeros (counted). The model is not consulted fro
 K on.
 --rtl-gold DIR also scores the emulator's blocks against the RTL's own dump of the same
 stream, DIR/<stream name>.gold (bench/ac3/golden_main.cpp, tools/test_ac3_model.py
-goldens()), up to the first refused frame (dvd/ac3 halts there; the engine goes on):
+goldens()), up to the first refused frame or the first 1+1 dual-mono frame (dvd/ac3
+halts at either; the engine goes on):
 STEM.coef is then the RTL's coefficients, not only the emulator's.
 --badexp K rewrites frame K's first five exponent group codes (EXPD's 7-bit reads) to
 124 -- digits 4 4 4, +6 an exponent a group -- so the exponent passes 24 and EXPD
@@ -113,6 +114,7 @@ def main(argv=None):
     ref = M.Decoder()
     ref.snapshot = True
     checked, refused_at, nb_ok = 0, None, None
+    nb_dual = None              # blocks before the first 1+1 frame: dvd/ac3 halts there too
     for k, fr in enumerate(sel):
         n0, e0 = len(m.blocks), sum(m.errors.values())
         m.feed(fr)
@@ -124,8 +126,10 @@ def main(argv=None):
             refused_at = k if refused and refused_at is None else refused_at
             continue
         try:
-            _, gblocks = ref.frame(fr)
+            ghdr, gblocks = ref.frame(fr)
             model_refused = False
+            if ghdr['acmod'] == 0 and nb_dual is None:
+                nb_dual = n0
         except M.Ac3Error:
             model_refused = True
         if refused != model_refused:
@@ -148,8 +152,12 @@ def main(argv=None):
             ap.error('--rtl-gold scores an unmodified stream from its first frame')
         from test_ac3_isa import rtl_compare
 
-        class Upto:                                     # the emulator's blocks before it
-            blocks = m.blocks[:nb_ok] if nb_ok is not None else m.blocks
+        # the emulator's blocks before dvd/ac3's halt: its first refusal, or the first 1+1
+        # frame, which dvd/ac3 refuses and the engine decodes (docs/lpcm_full.md §7)
+        halt = min(x for x in (nb_ok, nb_dual, len(m.blocks)) if x is not None)
+
+        class Upto:
+            blocks = m.blocks[:halt]
         gpath = os.path.join(a.rtl_gold, os.path.basename(a.stream) + '.gold')
         bad, first, n = rtl_compare(Upto, gpath)
         if bad or (not n and Upto.blocks):

@@ -120,6 +120,7 @@ module dts_dec_tb;
         .clk(clk), .rst_n(rst_n), .enable(1'b1), .pause(1'b0), .aud_soft_switch(1'b0),
         .ring_byte, .ring_valid, .ring_ready, .frame_valid, .frame_len, .frame_type,
         .lpcm_quant(2'd2),                    // a stale LPCM 24-bit word length: DTS must force 16
+        .lpcm_nch_m1(3'd1), .lpcm_fs96(1'b0), .lpcm_bad(1'b0), .link96(1'b0), .lpcm_unsup(),
         .cdda_mode(1'b0), .cdda_fs(2'd0), .cdda_wr_en(1'b0), .cdda_wr_data(8'd0),
         .cdda_flush(1'b0), .cdda_full(),
         .frame_pts(33'd0), .frame_pts_valid(1'b0), .frame_seamless(1'b0), .frame_pop,

@@ -17,7 +17,7 @@ red=0; [ "${1:-}" = "--red" ] && red=1
 echo "== GREEN: the host images and the checksum are current =="
 python3 tools/dts_isa.py --asm --check | sed 's/^/  /' || fail=1
 python3 tools/dts_golden.py --codebooks "$GEN/cb" > /dev/null || { echo "FAIL codebooks"; exit 1; }
-SRC="dvd/audio_ring.sv dvd/lpcm_unpack.sv dvd/dts/cb_host_ram.sv dvd/dts/dts_cb_mem.sv"
+SRC="dvd/audio_ring.sv dvd/lpcm_unpack.sv dvd/lpcm_hb.sv dvd/dts/cb_host_ram.sv dvd/dts/dts_cb_mem.sv"
 TB=bench/dvd/cb_copy_tb.sv
 build() {   # dir tb -> sim
   (cd "$1" && iverilog -g2012 -I dvd/ac3 -o sim $SRC "$2" 2>build.log) || { cat "$1/build.log"; return 1; }
@@ -29,7 +29,7 @@ run() {     # dir args... -> log
 mkdir -p "$GEN/w/dvd/dts" "$GEN/w/dvd/ac3" "$GEN/w/dvd/mp2" "$GEN/w/bench/dvd"
 stage() {   # dir: a private copy of the sources (mutations edit it)
   rm -rf "$1"; mkdir -p "$1/dvd/dts" "$1/dvd/ac3" "$1/dvd/mp2" "$1/bench/dvd"
-  cp dvd/audio_ring.sv dvd/lpcm_unpack.sv "$1/dvd/"
+  cp dvd/audio_ring.sv dvd/lpcm_unpack.sv dvd/lpcm_hb.sv "$1/dvd/"
   cp dvd/ac3/*.sv dvd/ac3/*.svh "$1/dvd/ac3/"; cp dvd/dts/dts_cb_mem.sv dvd/dts/cb_host_ram.sv dvd/dts/dts_cb.svh dvd/dts/cb_host_*.mem "$1/dvd/dts/"
   cp $TB "$1/bench/dvd/"
 }

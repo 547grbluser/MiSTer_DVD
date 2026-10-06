@@ -49,6 +49,54 @@ predate later confirmations; the `CLAUDE.md` index carries the reconciled status
   - **The plan as originally written (§8):** control arm first, Off identical, On judged by
     the maintainer on the 18-bit-board CRT, HDMI bit-identical between On and Off.
 
+- ✅ **FULL DVD-VIDEO AUDIO: EVERY LPCM FORM, AND AC-3 1+1 DUAL MONO (audit item 4,
+  2026-10-05, `dev-lpcmfull`; ✅ HW-CONFIRMED 2026-10-06 A/B against `main`; ✅ MERGED (PR #162)).** Design, measurements and gates:
+  `docs/lpcm_full.md`.
+  - **Gap.** LPCM was 48 kHz stereo only. A 96 kHz track played at half speed, mono at
+    double speed, and 3–8 channels mis-paired, all with no message. AC-3 acmod 0 was
+    refused, so it played silent. The audit proposed announcing them; the maintainer chose
+    to support them.
+  - **Built.**
+    - `ps_demux` reads the whole LPCM header byte.
+    - `lpcm_unpack` keeps its stereo path unchanged and adds mono groups, a channel
+      counter and a downmix MAC (FFmpeg's channel order, the AC-3 law).
+    - `lpcm_hb.sv`: a 71-tap half-band (−88 dB from 28 kHz) for 96 kHz on a 48 kHz link.
+    - The NCO runs at 96 kHz on a 96 kHz link: `sys_top`'s `audio_96k` reaches `emu` as
+      `AUDIO_96K`, through a 2-flop sync.
+    - A reserved header is drained, and `AUDIO UNSUPPORTED` shows.
+    - AC-3 1+1 is a microcode change: the second BSI block and each block's `dynrng2e`.
+      The last DRC word applies to both channels, as liba52.
+  - **Evidence.**
+    - `run_lpcm_full.sh --red`: the model checked against FFmpeg on 13 formats, 19 bench
+      arms, S1–S5 seams, H1–H6, 19 RTL mutations each failing exactly its arms.
+    - `check_lpcm_wiring.py --red`: 10 mutations.
+    - An open-content 1+1 stream (`tools/ac3_dualmono.py`) decodes in FFmpeg (CRC-checked)
+      and a52dec. The core's arithmetic correlates 1.00000 with a52dec per channel.
+  - **Measured.** Authored LPCM packs PES payloads in whole groups (*Three Tenors*,
+    *Roger Waters*: every PES), so the realign path needs no change. FFmpeg's muxer does
+    not.
+  - **Bugs the benches caught before HW.**
+    - An 18-bit gain constant wraps unity to −1, silently in Icarus.
+    - The half-band started an output while the last one was still being written.
+  - **Refuted on HW:** HDMI bitstream passthrough on an `hdmi_audio_96k=1` link was
+    predicted to fail from the code (the Main declares 96 kHz in channel status). On an AV
+    receiver, Dolby Digital locks and plays. The receiver also reports 96 kHz LPCM as
+    PCM 96 kHz, 2 ch.
+  - **Fit (SEED 7):** +405 ALM, +1 M10K, +4 DSP. `clk_dec` 91.8/91.6 MHz; `clk_mem`
+    90.14/90.75 MHz, a thin pass (it runs at 90.0). Rebased onto PR #161: 39,120 ALM,
+    `clk_mem` 96.24/94.61 MHz, so the margin is back. The rebased build passes all seven
+    VOBs on the rig, plays the DTS and 20-bit LPCM discs, and its THE_OFFICE smoke equals
+    `main`'s.
+  - **HW (2026-10-06, `docs/lpcm_full.md` §12).**
+    - Captured HDMI audio, control arm `main`: all seven formats pass on this build
+      (mono/20, 5.0/24, 5.1/20, 7.1/16, 96k stereo/24, 96k 4.0/16, AC-3 1+1), and every
+      one tried fails on `main`.
+    - On an `hdmi_audio_96k=1` link the core measures 96,000.2 Hz: native, through the
+      `sys_top` tap, on stock Main.
+    - Legacy LPCM and DTS discs play every track. The `clk_mem` smoke equals `main`'s
+      (1 late, 0 drops).
+  - **Next:** the PR.
+
 - ✅ **USER STILL OFF: PLAY/PAUSE OR SELECT ENDS A STILL WITH NO BUTTONS (audit item 5,
   2026-10-05, `dev-stilloff`; sim-verified, ✅ HW-CONFIRMED on
   timed stills, Play and Select, A/B against `main`, on the pinned SEED 7 build; ✅ MERGED

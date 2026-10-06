@@ -57,6 +57,12 @@ module emu (
 	// reads as x in simulation.
 	output  [1:0] AUDIO_MIX,
 
+	// DVD-FORK: the HDMI audio link runs at 96 kHz (MiSTer.ini hdmi_audio_96k=1: sys_top's
+	// cfg[6], the bit audio_out clocks from). Read only by the LPCM path: a 96 kHz track
+	// then plays at its own rate, else lpcm_unpack decimates it (docs/lpcm_full.md §6).
+	// sys_top's clock domain, not ours: synchronised below (aud_link96).
+	input         AUDIO_96K,
+
 	// DVD-FORK: IEC 61937 S/PDIF bitstream passthrough (docs/audio.md Path B).
 	// SPDIF_PASS is a biphase-encoded (IEC 60958, non-PCM) bitstream that
 	// sys_top muxes onto the S/PDIF pin(s) in place of the framework's PCM
@@ -698,7 +704,7 @@ assign CE_PIXEL = interlaced_eff ? ce_pix_q : 1'b1;
 // the branch changes the netlist anyway - and NEVER PER COMMIT. Do not derive
 // either from a git SHA or a timestamp: every compile would become a new
 // netlist. Same-day rebuilds on one branch append a digit ("dev-seekrealign2").
-`define CORE_VERSION "dev-dither"
+`define CORE_VERSION "dev-lpcmfull"
 
 parameter CONF_STR = {
     "DVD;;",
@@ -1327,6 +1333,15 @@ wire [7:0] ps_aud_byte;
 wire       ps_aud_valid;
 wire [1:0] ps_aud_type;
 wire [1:0] ps_aud_lpcm_quant;    // LPCM word length (0=16,1=20,2=24) -> dvd_audio_decode
+wire [2:0] ps_aud_lpcm_nch_m1;   // LPCM channels - 1                -> dvd_audio_decode
+wire       ps_aud_lpcm_fs96;     // LPCM 96 kHz track                -> dvd_audio_decode
+wire       ps_aud_lpcm_bad;      // LPCM reserved rate / word length -> dvd_audio_decode
+wire       aud_lpcm_unsup;       // dvd_audio_decode: the playing LPCM track is reserved-format
+// AUDIO_96K comes from sys_top's clock domain: two flops into clk_sys. Static (the ini
+// is read once at boot), so this is insurance, not a protocol.
+reg  [1:0] aud_link96_s = 2'b00;
+always @(posedge clk_sys) aud_link96_s <= {aud_link96_s[0], AUDIO_96K};
+wire       aud_link96 = aud_link96_s[1];
 wire       ps_aud_frame_start;
 wire [7:0] ps_pci_byte;         // NAV PCI payload -> nav_pci (Phase 3)
 wire       ps_pci_valid;
@@ -3884,6 +3899,9 @@ ps_demux ps_demux_inst (
     // Track-stable, so wired live (not threaded through the ring): settles well
     // before samples drain, and track switches reset audio_ring+dvd_audio_decode.
     .aud_lpcm_quant   (ps_aud_lpcm_quant),
+    .aud_lpcm_nch_m1  (ps_aud_lpcm_nch_m1),
+    .aud_lpcm_fs96    (ps_aud_lpcm_fs96),
+    .aud_lpcm_bad     (ps_aud_lpcm_bad),
 
     // CSS detection: marker + denominator -> the css_detect density verdict below
     .pes_scrambled    (ps_pes_scrambled),
@@ -4061,9 +4079,14 @@ end
 // to DDR3 at configuration; if that copy's checksum failed (cb_tables_ok low, telemetry
 // word 26) the decoder discards DTS, and a DTS track in Decode PCM says so here rather
 // than playing silent (D4 rule 2). In Passthru the receiver decodes DTS: no notice.
-wire aud_unsupported = iso_mode_w & nav_ready_w & aud_dec_en & ~css_scrambled &
-                       ((attr_a_fmt_w == 3'd3) |
-                        ((attr_a_fmt_w == 3'd6) & ~cb_tables_ok & ~pass_mode));
+// LPCM whose header holds a value DVD-Video reserves (44.1/32 kHz, quant 3) is muted
+// by dvd_audio_decode, which says so while that track is the one playing
+// (docs/lpcm_full.md). Read from the stream, so it holds for .VOB/.mpg files too: not
+// gated on iso_mode_w/nav_ready_w, nor on pass_mode (LPCM is decoded here either way).
+wire aud_unsupported = (iso_mode_w & nav_ready_w & aud_dec_en & ~css_scrambled &
+                        ((attr_a_fmt_w == 3'd3) |
+                         ((attr_a_fmt_w == 3'd6) & ~cb_tables_ok & ~pass_mode))) |
+                       (aud_lpcm_unsup & aud_dec_en & ~css_scrambled);
 
 // (C) Title-VTS notice — largest-VTS heuristic path ONLY. With Disc Menus On
 // (the default since PR #179) the disc's own VM picks the title, so the
@@ -4533,6 +4556,11 @@ dvd_audio_decode #(.CLK_HZ(27000000), .AUD_HZ(48000),
     .frame_len   (aud_frame_len),
     .frame_type  (aud_frame_type),
     .lpcm_quant  (ps_aud_lpcm_quant),   // LPCM word length -> lpcm_unpack (20/24-bit depack)
+    .lpcm_nch_m1 (ps_aud_lpcm_nch_m1),  // channels - 1 -> lpcm_unpack's downmix
+    .lpcm_fs96   (ps_aud_lpcm_fs96),    // 96 kHz track -> half-band, or the 96 kHz NCO
+    .lpcm_bad    (ps_aud_lpcm_bad),     // reserved header value -> muted
+    .link96      (aud_link96),          // the HDMI link rate (AUDIO_96K, synchronised)
+    .lpcm_unsup  (aud_lpcm_unsup),      // -> aud_unsupported (the popup)
     .frame_pts       (aud_frame_pts_w),
     .frame_pts_valid (aud_frame_pts_valid_w),
     .frame_seamless  (aud_frame_seamless_w),   // this frame's cell is authored seamless: no re-time

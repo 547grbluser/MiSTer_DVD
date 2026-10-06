@@ -15,7 +15,7 @@
 ; ---------------------------------------------------------------- error codes
 .equ E_SYNC      1
 .equ E_FSCOD     2
-.equ E_ACMOD0    3
+.equ E_ACMOD0    3                 ; retired: acmod 0 decodes (docs/lpcm_full.md §7)
 .equ E_CPLBND    4
 .equ E_DELTBAE   5
 .equ E_CPLDELTBA 6
@@ -104,9 +104,8 @@ FRAME:
         bgei    r2, 38, EFSCOD
         get     r2, 5                   ; bsid
         get     r2, 3                   ; bsmod
-        get     r2, 3                   ; acmod
-        beqi    r2, 0, EACMOD0
-        st      r2, F_ACMOD
+        get     r2, 3                   ; acmod (0 = 1+1 dual mono: Ch1 left, Ch2 right,
+        st      r2, F_ACMOD             ; nfchans 2; docs/lpcm_full.md §7)
         ld      r3, C_NFCHANS[r2]
         st      r3, F_NF
         st      r0, F_CMIX
@@ -137,6 +136,20 @@ H_LANG:
         get     r3, 8
 H_PROD:
         get     r3, 1                   ; audprodie
+        beqi    r3, 0, H_DUAL
+        get     r3, 7
+H_DUAL:                                 ; 1+1: Ch2's dialnorm, compr, langcod, audprodi
+        bnei    r2, 0, H_COPY           ;MUT nodual: jmp H_COPY
+        get     r3, 5                   ; dialnorm2
+        get     r3, 1                   ; compr2e
+        beqi    r3, 0, H_LANG2
+        get     r3, 8
+H_LANG2:
+        get     r3, 1                   ; langcod2e
+        beqi    r3, 0, H_PROD2
+        get     r3, 8
+H_PROD2:
+        get     r3, 1                   ; audprodi2e
         beqi    r3, 0, H_COPY
         get     r3, 7
 H_COPY:
@@ -187,6 +200,13 @@ B_DTH:
         st      r0, F_DYNRNG            ; unity at the frame's start ;MUT dynreset: nop
 B_DYN:
         get     r2, 1                   ; dynrnge
+        beqi    r2, 0, B_DYN2
+        get     r2, 8
+        st      r2, F_DYNRNG
+B_DYN2:                                 ; 1+1: Ch2's dynrng2e; as liba52, the last one
+        ld      r2, F_ACMOD             ; sent applies to both channels
+        bnei    r2, 0, B_CPLSTRE        ;MUT nodyn2: jmp B_CPLSTRE
+        get     r2, 1                   ; dynrng2e
         beqi    r2, 0, B_CPLSTRE
         get     r2, 8
         st      r2, F_DYNRNG

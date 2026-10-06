@@ -57,7 +57,7 @@ module cb_copy_tb;
         .bytes_available(), .overflow_count(), .almost_full(), .drop_pulse(1'b0));
 
     lpcm_unpack #(.FIFO_AW(12), .CB_INIT("dvd/dts/cb_host_lpcm.mem")) u_lpcm (
-        .clk, .rst(!rst_n || host_rst), .quant(2'd0), .le(1'b0), .wr_en(lpcm_wr), .wr_data(lpcm_wd),
+        .clk, .rst(!rst_n || host_rst), .quant(2'd0), .le(1'b0), .nch_m1(3'd1), .dec(1'b0), .wr_en(lpcm_wr), .wr_data(lpcm_wd),
         .full(), .afull(), .aud_ce(1'b0), .audio_l(lpcm_l), .audio_r(lpcm_r), .aud_valid(),
         .cp_mode, .cp_step(lpcm_step));
 

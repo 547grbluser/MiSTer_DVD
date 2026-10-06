@@ -65,7 +65,10 @@ for p in sys.argv[2:]:
         break
 PYEOF
 }
-ZSNR=$(pick zero_snr "$GATE"/*.ac3)
+# X8's window: DARK PASSENGERS first, the one it was written against. A later zero-SNR
+# window (Anastasia, 2026-09-15) sorts ahead of it and carries no block X8 can see, so
+# X8 SURVIVED on main from then on, unnoticed (found 2026-10-05, PR #162).
+ZSNR=$(pick zero_snr $(ls "$GATE"/*DARK_PASSENGERS*zero_snr*.ac3 2>/dev/null) "$GATE"/*.ac3)
 PHS=$(pick phsflg "$GATE"/*.ac3)
 CPL=$(pick cpl "$GATE"/*.ac3)
 

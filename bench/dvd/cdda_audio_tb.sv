@@ -88,6 +88,7 @@ module cdda_audio_tb;
         .ring_byte(8'd0), .ring_valid(1'b0), .ring_ready(),
         .frame_valid(1'b0), .frame_len(16'd0), .frame_type(2'd0),
         .lpcm_quant(2'd0),
+        .lpcm_nch_m1(3'd1), .lpcm_fs96(1'b0), .lpcm_bad(1'b0), .link96(1'b0), .lpcm_unsup(),
         .frame_pts(33'd0), .frame_pts_valid(1'b0), .frame_seamless(1'b0), .frame_pop(),
         .cdda_mode(cdda_mode_w), .cdda_fs(cdda_fs_w),
         .cdda_wr_en(stream_valid & cdda_mode_w), .cdda_wr_data(stream_data),
@@ -354,7 +355,7 @@ module cdda_audio_tb;
     wire       red_v;
     reg        red_ce = 0;
     lpcm_unpack #(.FIFO_AW(6)) red_dut ( .cp_mode(1'b0), .cp_step(1'b0),
-        .clk(red_clk), .rst(red_rst), .quant(2'd0), .le(red_le),
+        .clk(red_clk), .rst(red_rst), .quant(2'd0), .le(red_le), .nch_m1(3'd1), .dec(1'b0),
         .wr_en(red_wr), .wr_data(red_wd), .full(red_full), .afull(),
         .aud_ce(red_ce), .audio_l(red_l), .audio_r(red_r), .aud_valid(red_v)
     );

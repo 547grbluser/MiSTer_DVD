@@ -15,6 +15,10 @@ make -f Makefile.cosim >/dev/null
 
 rc=0
 for s in "$ROOT"/tools/streams/*.ac3; do
+    # ac3_front (retired from the core) refuses 1+1 dual mono by design; the engine
+    # decodes it, and its gates are run_ac3*.sh and tools/ac3_dualmono.py --check
+    # (docs/lpcm_full.md §7)
+    case "$s" in *dualmono*) echo "=== $(basename "$s") === skipped: ac3_front refuses 1+1"; continue;; esac
     echo "=== $(basename "$s") ==="
     ./obj_cosim/ac3_front_cosim "$s" || rc=1
 done

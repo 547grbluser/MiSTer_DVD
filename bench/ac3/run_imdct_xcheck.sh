@@ -14,7 +14,7 @@ if [[ "${1:-}" == "--red" ]]; then RED=1; shift; fi
 if [[ $# -gt 0 ]]; then
     STREAMS=("$@")
 else
-    STREAMS=("$ROOT"/tools/streams/{sweep_192k,tone_5p1_48k_192k,noise_5p1_48k_640k,acmod3_30_48k_640k,acmod4_21_48k_640k,acmod5_31_48k_640k,acmod6_22_48k_640k}.ac3
+    STREAMS=("$ROOT"/tools/streams/{sweep_192k,tone_5p1_48k_192k,noise_5p1_48k_640k,acmod3_30_48k_640k,acmod4_21_48k_640k,acmod5_31_48k_640k,acmod6_22_48k_640k,dualmono_440_1k_48k_192k}.ac3
              "$ROOT"/bench/ac3/vectors/{bbb_mono,bbb_short_5p1}.ac3)
     GATE="${AC3_TEST_DIR:-$HOME/ac3-streams/gate}"
     for f in "$GATE"/*dynrnge*.ac3 "$GATE"/*short*.ac3; do [[ -f "$f" ]] && STREAMS+=("$f"); done

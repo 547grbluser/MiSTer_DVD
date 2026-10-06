@@ -1,38 +1,44 @@
 //============================================================================
-//  dvd_audio_decode.sv — in-fabric DVD audio: AC-3 + LPCM -> s16 L/R.
+//  dvd_audio_decode.sv — in-fabric DVD audio: AC-3, DTS, MP2 and LPCM -> s16 L/R.
 //
 //  Replaces the old DDR3-ring + HPS-daemon audio path.  Drains the audio_ring
 //  read side (committed byte stream + {len,type} frame descriptors), dispatches
-//  each frame by codec, decodes it in fabric, and presents stereo s16 PCM at
-//  ~48 kHz for emu.sv to drive onto AUDIO_L/AUDIO_R.
+//  each frame by codec, decodes it in fabric, and presents stereo s16 PCM at the
+//  NCO's rate (48 kHz; MP2's and CD-DA's own 44.1/32 kHz; 96 kHz for a 96 kHz LPCM
+//  track on a 96 kHz HDMI link) for emu.sv to drive onto AUDIO_L/AUDIO_R.
 //
-//    frame_type (from ps_demux / audio_ring): 0=AC-3  1=DTS  2=LPCM  3=unknown
+//    frame_type (from ps_demux / audio_ring): 0=AC-3  1=DTS  2=LPCM  3=MP2
 //      AC-3   -> audio_engine (the microcoded engine's AC-3 program + imdct_512:
-//                decode + 5.1->stereo downmix) -> pcm_out (Q8.23->s16)
-//      LPCM   -> lpcm_unpack (BE->LE 16-bit, L/R interleave)
+//                decode + 5.1->stereo downmix; 1+1 dual mono as left/right) ->
+//                pcm_out (Q8.23->s16)
+//      LPCM   -> lpcm_unpack: every DVD-Video form (docs/lpcm_full.md), 16/20/24-bit
+//                to s16, 1-8 channels downmixed to stereo, 96 kHz decimated to 48 by
+//                lpcm_hb unless the link is 96 kHz (link96); a reserved header
+//                (lpcm_bad) is drained and announced (lpcm_unsup)
 //      MP2    -> audio_engine (the engine's MP2 program; docs/mp2_engine.md M3), its
 //                pairs serialised into lpcm_unpack's FIFO, as DTS's
 //      DTS    -> audio_engine (the engine's DTS core program, stereo; docs/dts_decoder.md,
 //                PRs #148/#149) once the codebooks have copied (cb_tables_ok);
-//                discarded if that copy failed. unknown -> discarded.
+//                discarded if that copy failed.
+//  Bitstream passthrough is not here: iec61937_wrap in emu.sv takes the ring's AC-3
+//  and DTS frames instead (docs/iec61937.md).
 //
 //  Everything runs in clk_sys (~27 MHz) — the same domain as ps_demux/audio_ring.
 //  The AC-3 core has ~3000x real-time headroom at this clock, and pcm_out's async
 //  output FIFO is run with aud_clk = clk so its CDC degenerates harmlessly.
 //
 //  PACING / A-V SYNC: pcm_out drains one pair per aud_ce (a 48 kHz fractional NCO
-//  off clk).  When its FIFO backs up, pcm_out stalls -> ac3_front.pcm_done is
+//  off clk).  When its FIFO backs up, pcm_out stalls -> the engine's pcm_done is
 //  delayed -> the input FIFO fills -> the dispatch holds out_ready low.  audio_ring
 //  then asserts almost_full and emu.sv stalls the DEMUX stream (STD-model flow
 //  control, watchdog-guarded; drop-on-full remains the fallback) — see the FLOW
 //  CONTROL note in dvd/audio_ring.sv.
 //
-//  The 48 kHz NCO is GENLOCKED to the video-referenced STC by dvd/av_sync.sv: the
-//  signed `nco_trim` input slews the increment (±0.5%) so the dispatched audio PTS
-//  tracks the video presentation clock (PTS-driven A/V sync).  We also emit
-//  `dispatch_pts` (the PTS of each frame as it enters the decoder) for av_sync's
-//  loop.  Free-running fallback: with av_sync disabled, nco_trim=0 and this reverts
-//  to the prior fixed-rate behaviour.
+//  A/V SYNC is the PTS-scheduled drain gate (docs/stc_freerun.md): decoded audio waits
+//  in the output FIFOs until the STC reaches the dispatched frame's PTS. The NCO
+//  free-runs: the `nco_trim` genlock port is tied 0 in emu.sv since the lip-sync v3
+//  retirement (2026-07-02, docs/fabric_audio.md). `dispatch_pts` is still emitted (the
+//  PTS of each frame as it enters the decoder) for the gate and the telemetry.
 //============================================================================
 
 `timescale 1ns/1ps
@@ -72,6 +78,16 @@ module dvd_audio_decode #(
     input  logic [15:0] frame_len,
     input  logic [1:0]  frame_type,
     input  logic [1:0]  lpcm_quant,       // LPCM word length (ps_demux): 0=16,1=20,2=24-bit
+    // The rest of the LPCM header (ps_demux, docs/lpcm_full.md): channels - 1, a 96 kHz
+    // track, and a value the format reserves (44.1/32 kHz, quant 3: muted, and
+    // lpcm_unsup raises AUDIO UNSUPPORTED). link96: the HDMI link runs at 96 kHz
+    // (MiSTer.ini hdmi_audio_96k, sys_top's cfg[6], synchronised in emu): 96 kHz LPCM
+    // then plays at its own rate; on a 48 kHz link lpcm_unpack decimates it.
+    input  logic [2:0]  lpcm_nch_m1,
+    input  logic        lpcm_fs96,
+    input  logic        lpcm_bad,
+    input  logic        link96,
+    output logic        lpcm_unsup,
     input  logic [32:0] frame_pts,        // PES PTS of the queued frame
     input  logic        frame_pts_valid,  // that PTS is meaningful
     input  logic        frame_seamless,   // audio_ring: the frame's cell is authored seamless_play
@@ -256,8 +272,10 @@ module dvd_audio_decode #(
     // drain gate is closed (!draining — load / seek / underrun re-arm), so a
     // mid-play header rate change can't phase-kick the FIFO drain; the rate
     // swap lands with the next scheduled release. The framework side needs
-    // nothing: sys/audio_out.v zero-order-holds AUDIO_L/R at its own fixed
-    // 48 kHz, so a 44.1 kHz core tick gives correct pitch (NN-resample only).
+    // nothing: sys/audio_out.v low-pass filters the held AUDIO_L/R and samples
+    // it at the link's rate, so a 44.1 kHz core tick gives correct pitch.
+    // 96 kHz (nco_fs 3): an LPCM track at 96 kHz on a 96 kHz HDMI link
+    // (docs/lpcm_full.md); on a 48 kHz link lpcm_unpack decimates it instead.
     // (Localparams are elaboration-time constants — the Quartus-17 N'() cast
     // hazard applies to runtime expressions, not these.)
     // ---------------------------------------------------------------------
@@ -267,8 +285,11 @@ module dvd_audio_decode #(
     localparam logic [31:0] NCO_INC_441 = NCO441_64[31:0];
     localparam logic [63:0] NCO32K_64   = (64'd32000 << 32) / CLK_HZ;
     localparam logic [31:0] NCO_INC_32K = NCO32K_64[31:0];
+    localparam logic [63:0] NCO96K_64   = (64'd96000 << 32) / CLK_HZ;
+    localparam logic [31:0] NCO_INC_96K = NCO96K_64[31:0];
 
-    // fs coding matches the MP2 header: 0 = 44.1 k, 1 = 48 k (reset), 2 = 32 k.
+    // fs coding matches the MP2 header: 0 = 44.1 k, 1 = 48 k (reset), 2 = 32 k;
+    // 3 = 96 k (LPCM only).
     // nco_fs is latched in the drain-gate controller at the end of this file
     // (where `draining`/`cur_codec` are in scope — declaration-before-use).
     wire [1:0] mp2_fs;                       // the engine's (MFS: the MP2 header's rate)
@@ -277,7 +298,8 @@ module dvd_audio_decode #(
     // Effective increment = nominal + av_sync trim (signed, ±0.5% so always > 0).
     // av_sync genlocks the audio sample rate to the video-referenced STC.
     wire [31:0] nco_inc_base = (nco_fs == 2'd0) ? NCO_INC_441 :
-                               (nco_fs == 2'd2) ? NCO_INC_32K : NCO_INC;
+                               (nco_fs == 2'd2) ? NCO_INC_32K :
+                               (nco_fs == 2'd3) ? NCO_INC_96K : NCO_INC;
     wire signed [33:0] nco_inc_s   = $signed({2'b00, nco_inc_base}) + $signed(nco_trim);
     wire        [31:0] nco_inc_eff = nco_inc_s[31:0];
     logic [32:0] nco_acc;
@@ -569,7 +591,7 @@ module dvd_audio_decode #(
     logic        lpcm_full;
     wire         sink_ready = discard_cur         ? 1'b1 :   // stale: null sink
                               eng_frame            ? ~ac3_full  :   // AC-3, DTS, MP2
-                              (cur_type == T_LPCM) ? ~lpcm_full :
+                              (cur_type == T_LPCM) ? (~lpcm_full | lpcm_bad) :
                               1'b1;                       // DTS without tables: discard
 
     // consume a byte this cycle?
@@ -882,7 +904,10 @@ module dvd_audio_decode #(
     // ---------------------------------------------------------------------
     // LPCM unpacker (BE->LE 16-bit, L/R interleave).
     // ---------------------------------------------------------------------
-    wire        lpcm_wr   = consume && (cur_type == T_LPCM) && !discard_cur;
+    wire        lpcm_wr   = consume && (cur_type == T_LPCM) && !discard_cur && !lpcm_bad;
+    // DVD LPCM is the playing codec (not the engine's pairs, not CD-DA)
+    wire        lpcm_src  = (cur_codec == T_LPCM) && !eng_pcm && !cdda_mode;
+    assign      lpcm_unsup = lpcm_src && lpcm_bad;
     wire signed [15:0] lpcm_l, lpcm_r;
     wire        lpcm_aud_valid;
 
@@ -916,6 +941,10 @@ module dvd_audio_decode #(
         .rst      (rst | (cdda_mode & cdda_flush)),
         .quant    ((cdda_mode || eng_pcm) ? 2'd0 : lpcm_quant),
         .le       (cdda_mode),
+        // the channel count and the 2:1 decimation are DVD LPCM's alone: CD-DA and the
+        // engine's serialised pairs take the original stereo path
+        .nch_m1   ((cdda_mode || eng_pcm) ? 3'd1 : lpcm_nch_m1),
+        .dec      (!(cdda_mode || eng_pcm) && lpcm_fs96 && !link96),
         .wr_en    ((cdda_mode ? cdda_wr_en : (lpcm_wr || ser_wr)) && !cb_cp_mode),
         .wr_data  (cdda_mode ? cdda_wr_data : lpcm_wr ? ring_byte : ser_byte),
         .full     (lpcm_full),
@@ -1155,9 +1184,12 @@ module dvd_audio_decode #(
     logic [32:0] play_anchor;
     logic [33:0] pos_ticks;
     logic [5:0]  pos_frac;
-    wire  [1:0]  pos_int = (nco_fs == 2'd1) ? 2'd1 : 2'd2;
-    wire  [5:0]  pos_num = (nco_fs == 2'd0) ? 6'd2  : (nco_fs == 2'd2) ? 6'd13 : 6'd7;
-    wire  [5:0]  pos_den = (nco_fs == 2'd0) ? 6'd49 : (nco_fs == 2'd2) ? 6'd16 : 6'd8;
+    // (96 kHz: 90000/96000 = 0+15/16)
+    wire  [1:0]  pos_int = (nco_fs == 2'd1) ? 2'd1 : (nco_fs == 2'd3) ? 2'd0 : 2'd2;
+    wire  [5:0]  pos_num = (nco_fs == 2'd0) ? 6'd2  : (nco_fs == 2'd2) ? 6'd13 :
+                           (nco_fs == 2'd3) ? 6'd15 : 6'd7;
+    wire  [5:0]  pos_den = (nco_fs == 2'd0) ? 6'd49 : (nco_fs == 2'd2) ? 6'd16 :
+                           (nco_fs == 2'd3) ? 6'd16 : 6'd8;
     wire  [6:0]  pos_frac_nx = {1'b0, pos_frac} + {1'b0, pos_num};
     wire         pos_carry   = (pos_frac_nx >= {1'b0, pos_den});
     wire signed [34:0] play_err_w =
@@ -1185,14 +1217,16 @@ module dvd_audio_decode #(
             ce_play_d <= aud_ce_play;
 
             // NCO rate select: MP2's header rate while MP2 is the active codec
-            // (44.1/32 kHz VCD/SVCD audio), else 48 kHz. Latched ONLY while the
+            // (44.1/32 kHz VCD/SVCD audio), 96 kHz for a 96 kHz LPCM track on a
+            // 96 kHz link, else 48 kHz. Latched ONLY while the
             // drain gate is closed so a swap can never phase-kick mid-playback.
             // CD-DA/WAV overrides unconditionally: cdda_fs is static for the
             // whole mount (no mid-play change exists to phase-kick).
             if (cdda_mode)
                 nco_fs <= cdda_fs;
             else if (!draining)
-                nco_fs <= mp2_active ? mp2_fs : 2'd1;     // the engine's MFS (the header's)
+                nco_fs <= mp2_active ? mp2_fs :            // the engine's MFS (the header's)
+                          (lpcm_src && lpcm_fs96 && link96 && !lpcm_bad) ? 2'd3 : 2'd1;
 
             // latch the phase reference: first PTS-tagged dispatch while armed
             if (!draining && !play_pts_valid && dispatch_pts_valid) begin

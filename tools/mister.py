@@ -953,7 +953,8 @@ def telem_print(s):
         ahz = s['audio_hz']
         print(f'  audio rate {ahz:9.3f} Hz')
         print(f'    vs nominal 48000 Hz: {(ahz / 48000 - 1) * 1e6:+.0f} ppm'
-              '  (reads 44.1/32 kHz on MP2 / CD-DA by design)')
+              '  (reads 44.1/32 kHz on MP2 / CD-DA, and 96 kHz for 96 kHz LPCM on a '
+              'hdmi_audio_96k link, by design)')
         if rrate:
             per, ideal = ahz / rrate, 48000.0 / rrate
             print(f'  samples per raster refresh: {per:.4f}  (48 kHz ideal on this '

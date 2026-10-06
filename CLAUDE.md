@@ -175,8 +175,8 @@ feature should be designed:
   `!=` on X so a third of its pixels passed vacuously. The rules earned are in §4 and
   apply to every bench in this tree.
 
-Also: current fabric headroom (~3 % ALM ≈ 1,125 / 7 % M10K / 15 % DSP as of 2026-10-02 —
-the ALM figure is the binding one), what a DDR3 line pump
+Also: current fabric headroom (~8 % ALM ≈ 3,200 / 6 % M10K / 22 % DSP as of 2026-10-05,
+after the engine merges — the ALM figure is the binding one), what a DDR3 line pump
 costs (~190 ALM + 6 M10K), and the retime trick that took a build from two failed seed
 sweeps to a first-fit pass.
 
@@ -456,6 +456,7 @@ otherwise; `--red` runs its mutation arms).
 | In-fabric DTS core decode (stereo, `Decode PCM`): the shared audio engine, codebooks in three FIFOs' power-up contents copied to DDR3 (`ram2`) | ✅ HW (T2's DTS track plays, 0.922 correlation with its AC-3 track; clean by ear on T2); ✅ MERGED (P0/P1 PR #148, P2/P3 PR #149); ⏳ by ear on more DTS discs | `dts_decoder.md` "P2 + P3 result" | `run_dts_dec.sh --red`, `run_cb_copy.sh --red`, `run_dts_seq.sh --red`, `run_dts.sh --red`, `check_dts_wiring.py` |
 | AC-3 parse on the shared audio engine (scenario E): the DTS engine running a second program | ✅ W1 wired in (`dvd/audio_engine.sv` replaces `ac3_front`): bit-identical block for block on 30 streams; in core −290 ALM for the front end; AC-3 audible and clean by ear on the rig; ✅ MERGED (PR #149) | `ac3_engine.md` | `run_ac3_ab.sh`, `run_ac3.sh --red`, `run_ac3_seq.sh --red`, `tools/test_ac3_isa.py` |
 | MP2 on the shared audio engine (the rest of scenario E): `mp2_decode`'s work as a third program | ✅ HW (VCD + 2 DVD MP2 tracks, correlation ≥ 0.9986 with `mp2_decode`; by ear every codec, no issues); −825 ALM by entity; ✅ MERGED (PR #150) | `mp2_engine.md` | `run_mp2_eng.sh --red`, `run_mp2_ab.sh --red`, `run_mp2_model.sh`, `tools/test_mp2_isa.py`, `run_mp2.sh`, `run_vcd.sh` |
+| Every DVD-Video LPCM form (48/96 kHz, 16/20/24-bit, 1–8 ch downmixed; 96k native on `hdmi_audio_96k`); AC-3 1+1 dual mono | ✅ HW (captured A/B vs `main`; receiver: PCM 96 kHz, DD passthrough fine on a 96k link), MERGED PR #162 | `lpcm_full.md` | `run_lpcm_full.sh --red`, `check_lpcm_wiring.py`, `ac3_dualmono.py --check` |
 | Hard flush resets the audio reframers and realigns the demux: no stale PTS (~1.2 s hold, ~2.5 s silence) after a backward jump, no stray-sync click at the landing; pre-existing, not a regression | ✅ HW (0/68 vs 7/78), MERGED PR #143 | `dvd_nav.md` §2h "The stale audio PTS" | `run_seek_rf_pts.sh --red`, `check_rf_flush_wiring.py` |
 
 ### Formats and physical media (mostly the custom Main, `main/`)
@@ -477,7 +478,7 @@ otherwise; `--red` runs its mutation arms).
 
 - ❌ HD output (720p/1080p): fixed 27 MHz SD dot clock.
 - ❌ Chapters/PTT exactness (Phase 6, `VTS_PTT_SRPT`), UDF-only images, parental control,
-  GPRM counter mode, dual-mono AC-3 (acmod 0, rejected deliberately).
+  GPRM counter mode.
 - ❌ Trick play (continuous 2×/4×): needs a flush-free I-frame splice (`docs/dvd_nav.md` §2d).
 - ⚠ `lates` counts one per refresh while a PGC still is held, so boot/menu windows
   over-report (`docs/decode_pacing.md` §2c). Real lates are 0 on the census set since F1 +

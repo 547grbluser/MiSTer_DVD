@@ -1910,6 +1910,9 @@ emu emu
 	.AUDIO_R(audio_r),
 	.AUDIO_S(audio_s),
 	.AUDIO_MIX(audio_mix),
+	// DVD-FORK: the HDMI audio link rate (hdmi_audio_96k = cfg[6], what audio_out clocks
+	// from), so 96 kHz LPCM can play at its own rate (docs/lpcm_full.md §6).
+	.AUDIO_96K(audio_96k),
 
 	// DVD-FORK: IEC 61937 bitstream passthrough — override the framework PCM
 	// spdif on the S/PDIF pin(s) when the core requests it (see the S/PDIF

@@ -1,7 +1,11 @@
 //============================================================================
 //  mp2_decode.sv — fabric MPEG-1 Layer II (MP2) audio decoder.
 //
-//  The third playable codec in dvd_audio_decode (T_MP2 = 2'd3), covering the
+//  ⚠ No longer in the core: the shared audio engine's MP2 program replaced it
+//  (docs/mp2_engine.md, PR #150). Kept as the reference the engine is A/B-scored
+//  against (bench/dvd/run_mp2_ab.sh), so its behaviour must not change.
+//
+//  Was the third playable codec in dvd_audio_decode (T_MP2 = 2'd3), covering the
 //  DVD-spec "MPEG audio" format (stream_id 0xC0+n): pure-HDL serialized FSM in
 //  the dvd/ac3 house style — no soft CPU (see docs/vcd_svcd_mpeg_reuse.md), all
 //  tables/buffers in sync-read RAM (the recurring LUT-RAM lesson), serialized
@@ -11,9 +15,9 @@
 //  dual / joint (intensity) stereo, stereo s16 out. No CRC check (CRC bytes
 //  skipped). MPEG-2 LSF, Layer I/III -> never sync (15-bit qualified hunt);
 //  free format / invalid header after sync -> err_unsupported (sticky; the
-//  dvd_audio_decode self-heal watchdog wraps recovery). Output rate is the
-//  core's fixed 48 kHz aud_ce; 44.1 kHz streams (future VCD) decode correctly
-//  but play fast against it.
+//  dvd_audio_decode self-heal watchdog wraps recovery). Its fs_o reports the
+//  header's rate, and dvd_audio_decode ran its NCO at that rate (44.1/32 kHz for
+//  VCD/SVCD), so every rate played at true pitch.
 //
 //  BIT-EXACT contract with tools/mp2_ref.py (the golden model — see its header
 //  for the fixed-point derivation; bench/dvd/mp2_decode_tb.sv compares PCM

@@ -122,10 +122,11 @@ attenuate.
 
 ## NOT supported — each currently **fails loud** (`err_unsupported`)
 
-- **`acmod 0` (1+1 dual mono)** — deliberately still refused. It carries a
-  SECOND `dialnorm/compr/langcod/audprodi` block in `bsi()` that the FSM does not
-  walk, so accepting it would desync `bsi` and emit garbage rather than silence,
-  which is strictly worse. Census: 4 frames on 1 disc out of 491.
+- **`acmod 0` (1+1 dual mono)** — refused by THIS RTL (`dvd/ac3`, retired from the
+  core). It carries a SECOND `dialnorm/compr/langcod/audprodi` block in `bsi()` and a
+  `dynrng2e` in every audio block, which the FSM does not walk. ✅ **The shared audio
+  engine decodes it since 2026-10-05**: Ch1 left, Ch2 right, the last DRC word for both
+  as liba52 (`docs/lpcm_full.md` §7, §11). Census: 4 frames on 1 disc out of 491.
 - Non-48 kHz sample rates, E-AC-3, and a true multichannel (vs downmixed-stereo)
   output path. ⚠ Failing loud here means SILENCE: `err_unsupported` → `ac3_err` →
   an `ac3_front` self-heal reset every frame.

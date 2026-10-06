@@ -264,9 +264,14 @@ small FIFO drained at `aud_ce`.
 **Scope:** 48 kHz **stereo**, **16 / 20 / 24-bit** (truncated to 16-bit for the
 HDMI `AUDIO_L/R` interface). ps_demux now captures the LPCM sub-header **byte +5**
 word-length field (bits[7:6]: 0=16, 1=20, 2=24) and exports it as
-`aud_lpcm_quant`, routed to `lpcm_unpack.quant`. **96 kHz** and **multichannel
-(>2 ch)** LPCM are still **not** handled (96 kHz needs the audio-NCO ÷2 path;
-multichannel needs per-channel deinterleave + downmix).
+`aud_lpcm_quant`, routed to `lpcm_unpack.quant`.
+**Since 2026-10-05 every DVD-Video LPCM form plays** (`docs/lpcm_full.md`, PR
+#162). It covers 1–8 channels, downmixed to stereo in FFmpeg's channel
+order by the AC-3 path's law, and 96 kHz, which `dvd/lpcm_hb.sv`'s half-band decimates to
+48 kHz on a 48 kHz HDMI link. On a 96 kHz link (`hdmi_audio_96k`, tapped from `sys_top`)
+the NCO runs at 96 kHz (`nco_fs` 3) instead. A reserved rate or word length is drained
+and raises `AUDIO UNSUPPORTED`. The stereo path below is unchanged code: it is the
+"original path" `lpcm_unpack` keeps when the track is stereo at the output rate.
 
 **Why the fix is small (20/24-bit depacking).** Per FFmpeg `libavcodec/pcm-dvd.c`,
 a DVD LPCM group spans 2 sample-times per channel. For stereo the group is the four
@@ -718,8 +723,9 @@ picture and sound together, since backpressure stalls the shared demux and video
 ## Open follow-ups
 - DTS in-fabric + IEC 61937 bitstream → Digital I/O board (Toslink).
 - LPCM: 20/24-bit @ 48 kHz stereo ✅ HW-CONFIRMED (PR fj#133, top-16 truncation for HDMI;
-  see the LPCM section above). Still open: **96 kHz** (audio-NCO ÷2) and **multichannel**
-  LPCM, plus the bit-perfect 24-bit-over-S/PDIF path (`docs/iec61937.md`).
+  see the LPCM section above). 96 kHz and multichannel: ✅ HW-CONFIRMED 2026-10-06
+  (`docs/lpcm_full.md`). Still open: the bit-perfect 24-bit-over-S/PDIF path
+  (`docs/iec61937.md`).
 - PTS-driven A/V sync correction (ps_demux `aud_pts`).
 - Area/timing: ✅ addressed by the **M19 area pass** (2026-07-11, branch
   `feature/ac3-area-reduction` — see `docs/ac3_decoder_architecture.md` §4.11).
