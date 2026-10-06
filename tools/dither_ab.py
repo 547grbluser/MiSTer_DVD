@@ -45,8 +45,12 @@ def vdev():
     return v or '/dev/video0'
 
 
-def grab(secs, warm=1.5):
+def grab(secs, warm=1.5, fps=None):
     """Live frames (the card's flat RGB-7 no-signal frames dropped), retrying on open."""
+    # 10 fps by default. At 480p the dither inverts every frame, so a 60 Hz output sampled at
+    # 10 fps (every 6th frame) always shows ONE phase; 20 fps (every 3rd) alternates them, so
+    # the average shows what the eye blends. DITHER_FPS overrides.
+    fps = fps or int(os.environ.get('DITHER_FPS', '10'))
     for _ in range(4):
         # Uncompressed YUYV, declared FULL range. The card's MJPEG mode crushes everything
         # below ~16/255 to black (measured on a levels pattern: steps 0..14 all read 0 in
@@ -54,7 +58,7 @@ def grab(secs, warm=1.5):
         # crush the same codes again on conversion.
         raw = subprocess.run(['ffmpeg', '-hide_banner', '-loglevel', 'error', '-f', 'v4l2',
                               '-input_format', 'yuyv422', '-video_size', f'{W}x{H}',
-                              '-framerate', '10', '-i', vdev(), '-ss', str(warm),
+                              '-framerate', str(fps), '-i', vdev(), '-ss', str(warm),
                               '-t', str(secs), '-vf',
                               'scale=in_range=full:out_range=full:in_color_matrix=bt709',
                               '-f', 'rawvideo', '-pix_fmt', 'rgb24', '-'],
