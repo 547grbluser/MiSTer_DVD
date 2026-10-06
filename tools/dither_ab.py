@@ -23,7 +23,8 @@ Scores (lower = smoother):
          averaged over frames. The line texture of a dither whose lines do not each average
          to the value. Only resolvable at 480i: the RetroTINK halves 480p's height.
 
-Capture-card traps (resolve it by name; drop its flat no-signal frames; 1280x720 MJPEG) are
+Capture: 1920x1080 uncompressed YUYV at 10 fps, full range (the card's MJPEG mode crushes the
+blacks). Capture-card traps (resolve it by name; drop its flat no-signal frames) are
 in .claude/skills/hil-testing. Check nothing (OBS) holds the video node first.
 """
 import os, subprocess, sys, time
@@ -31,7 +32,7 @@ import numpy as np
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 CAP = os.path.join(ROOT, '.sim', 'dither_cap')
-W, H = 1280, 720
+W, H = 1920, 1080
 
 
 def vdev():
@@ -44,15 +45,21 @@ def vdev():
 def grab(secs, warm=1.5):
     """Live frames (the card's flat RGB-7 no-signal frames dropped), retrying on open."""
     for _ in range(4):
+        # Uncompressed YUYV, declared FULL range. The card's MJPEG mode crushes everything
+        # below ~16/255 to black (measured on a levels pattern: steps 0..14 all read 0 in
+        # MJPEG, all distinct in YUYV), and ffmpeg assumes TV range for YUYV, which would
+        # crush the same codes again on conversion.
         raw = subprocess.run(['ffmpeg', '-hide_banner', '-loglevel', 'error', '-f', 'v4l2',
-                              '-input_format', 'mjpeg', '-video_size', f'{W}x{H}',
-                              '-framerate', '30', '-i', vdev(), '-ss', str(warm),
-                              '-t', str(secs), '-f', 'rawvideo', '-pix_fmt', 'rgb24', '-'],
+                              '-input_format', 'yuyv422', '-video_size', f'{W}x{H}',
+                              '-framerate', '10', '-i', vdev(), '-ss', str(warm),
+                              '-t', str(secs), '-vf',
+                              'scale=in_range=full:out_range=full:in_color_matrix=bt709',
+                              '-f', 'rawvideo', '-pix_fmt', 'rgb24', '-'],
                              capture_output=True).stdout
         n = len(raw) // (W * H * 3)
         fr = np.frombuffer(raw[:n * W * H * 3], np.uint8).reshape(n, H, W, 3)
         good = [f for f in fr if f.std() >= 1.0]
-        if len(good) >= 10:
+        if len(good) >= 8:
             return np.stack(good).astype(np.float32), n
         print(f'  only {len(good)}/{n} live frames, retrying')
         time.sleep(1)
