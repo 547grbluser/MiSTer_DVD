@@ -30,7 +30,7 @@ bash bench/dvd/run_disp_sched.sh || fail=1
 echo "== 3. mirror =="
 iv /tmp/av_sync_sim dvd/av_sync.sv bench/dvd/av_sync_tb.sv && run av_sync "PASS: av_sync" vvp /tmp/av_sync_sim
 echo "== 4. audio =="
-iv /tmp/aud_sim dvd/ac3/*.sv dvd/dts/dts_seq.sv dvd/dts/dts_vec.sv dvd/dts/dts_top.sv dvd/audio_engine.sv dvd/lpcm_unpack.sv dvd/dts/cb_host_ram.sv dvd/dvd_audio_decode.sv bench/dvd/dvd_audio_decode_tb.sv \
+iv /tmp/aud_sim dvd/ac3/*.sv dvd/dts/dts_seq.sv dvd/dts/dts_vec.sv dvd/dts/dts_top.sv dvd/audio_engine.sv dvd/lpcm_unpack.sv dvd/lpcm_hb.sv dvd/dts/cb_host_ram.sv dvd/dvd_audio_decode.sv bench/dvd/dvd_audio_decode_tb.sv \
   && run dvd_audio_decode "PASS: dvd_audio_decode" vvp /tmp/aud_sim
 # RED: release on the PROVISIONAL (parse-front) anchor instead of the display one.
 # That was the shipping behaviour on 2026-09-07 and it put audio ~1.6 s ahead of the
@@ -39,7 +39,7 @@ iv /tmp/aud_sim dvd/ac3/*.sv dvd/dts/dts_seq.sv dvd/dts/dts_vec.sv dvd/dts/dts_t
 red_aud=$(mktemp -d)
 sed 's/if (play_pts_valid \&\& disp_anchored \&\& video_live/if (play_pts_valid \&\& stc_anchored \&\& video_live/' \
     dvd/dvd_audio_decode.sv > "$red_aud/dvd_audio_decode.sv"
-if iv "$red_aud/sim" dvd/ac3/*.sv dvd/dts/dts_seq.sv dvd/dts/dts_vec.sv dvd/dts/dts_top.sv dvd/audio_engine.sv dvd/lpcm_unpack.sv dvd/dts/cb_host_ram.sv "$red_aud/dvd_audio_decode.sv" \
+if iv "$red_aud/sim" dvd/ac3/*.sv dvd/dts/dts_seq.sv dvd/dts/dts_vec.sv dvd/dts/dts_top.sv dvd/audio_engine.sv dvd/lpcm_unpack.sv dvd/lpcm_hb.sv dvd/dts/cb_host_ram.sv "$red_aud/dvd_audio_decode.sv" \
       bench/dvd/dvd_audio_decode_tb.sv 2>/dev/null \
    && vvp "$red_aud/sim" 2>/dev/null | grep -q "FAIL C1: released against the PROVISIONAL anchor"; then
   echo "  PASS dvd_audio_decode RED (provisional-anchor release is caught)"
@@ -53,7 +53,7 @@ rm -rf "$red_aud"
 red_aud=$(mktemp -d)
 sed 's/end else if (rst && !aud_soft_switch) begin/end else if (rst) begin/' \
     dvd/dvd_audio_decode.sv > "$red_aud/dvd_audio_decode.sv"
-if iv "$red_aud/sim" dvd/ac3/*.sv dvd/dts/dts_seq.sv dvd/dts/dts_vec.sv dvd/dts/dts_top.sv dvd/audio_engine.sv dvd/lpcm_unpack.sv dvd/dts/cb_host_ram.sv "$red_aud/dvd_audio_decode.sv" \
+if iv "$red_aud/sim" dvd/ac3/*.sv dvd/dts/dts_seq.sv dvd/dts/dts_vec.sv dvd/dts/dts_top.sv dvd/audio_engine.sv dvd/lpcm_unpack.sv dvd/lpcm_hb.sv dvd/dts/cb_host_ram.sv "$red_aud/dvd_audio_decode.sv" \
       bench/dvd/dvd_audio_decode_tb.sv 2>/dev/null \
    && vvp "$red_aud/sim" 2>/dev/null | grep -q "FAIL D1: snapped to 0 instead of ramping"; then
   echo "  PASS dvd_audio_decode RED (a gentle switch snapping instantly is caught)"
@@ -67,7 +67,7 @@ rm -rf "$red_aud"
 red_aud=$(mktemp -d)
 sed "s/end else if (rst \&\& !aud_soft_switch) begin/end else if (1'b0) begin/" \
     dvd/dvd_audio_decode.sv > "$red_aud/dvd_audio_decode.sv"
-if iv "$red_aud/sim" dvd/ac3/*.sv dvd/dts/dts_seq.sv dvd/dts/dts_vec.sv dvd/dts/dts_top.sv dvd/audio_engine.sv dvd/lpcm_unpack.sv dvd/dts/cb_host_ram.sv "$red_aud/dvd_audio_decode.sv" \
+if iv "$red_aud/sim" dvd/ac3/*.sv dvd/dts/dts_seq.sv dvd/dts/dts_vec.sv dvd/dts/dts_top.sv dvd/audio_engine.sv dvd/lpcm_unpack.sv dvd/lpcm_hb.sv dvd/dts/cb_host_ram.sv "$red_aud/dvd_audio_decode.sv" \
       bench/dvd/dvd_audio_decode_tb.sv 2>/dev/null \
    && vvp "$red_aud/sim" 2>/dev/null | grep -q "FAIL E1: hard reset did not snap"; then
   echo "  PASS dvd_audio_decode RED (a hard reset ramping instead of cutting is caught)"
@@ -82,7 +82,7 @@ red_aud=$(mktemp -d)
 sed -e "s/end else if (soft_arm \&\& tgt_upd) begin/end else if (1'b0) begin/" \
     -e "s/wire declicking = aud_soft_switch || soft_arm || /wire declicking = aud_soft_switch || /" \
     dvd/dvd_audio_decode.sv > "$red_aud/dvd_audio_decode.sv"
-if iv "$red_aud/sim" dvd/ac3/*.sv dvd/dts/dts_seq.sv dvd/dts/dts_vec.sv dvd/dts/dts_top.sv dvd/audio_engine.sv dvd/lpcm_unpack.sv dvd/dts/cb_host_ram.sv "$red_aud/dvd_audio_decode.sv" \
+if iv "$red_aud/sim" dvd/ac3/*.sv dvd/dts/dts_seq.sv dvd/dts/dts_vec.sv dvd/dts/dts_top.sv dvd/audio_engine.sv dvd/lpcm_unpack.sv dvd/lpcm_hb.sv dvd/dts/cb_host_ram.sv "$red_aud/dvd_audio_decode.sv" \
       bench/dvd/dvd_audio_decode_tb.sv 2>/dev/null \
    && vvp "$red_aud/sim" 2>/dev/null | grep -q "FAIL D5: late content snapped in"; then
   echo "  PASS dvd_audio_decode RED (a ramp-in keyed on the reset alone is caught)"
@@ -95,7 +95,7 @@ rm -rf "$red_aud"
 red_aud=$(mktemp -d)
 sed "s|if (rst \&\& !aud_soft_switch) begin          // hard cause: no ramp either way|if (1'b0) begin|" \
     dvd/dvd_audio_decode.sv > "$red_aud/dvd_audio_decode.sv"
-if iv "$red_aud/sim" dvd/ac3/*.sv dvd/dts/dts_seq.sv dvd/dts/dts_vec.sv dvd/dts/dts_top.sv dvd/audio_engine.sv dvd/lpcm_unpack.sv dvd/dts/cb_host_ram.sv "$red_aud/dvd_audio_decode.sv" \
+if iv "$red_aud/sim" dvd/ac3/*.sv dvd/dts/dts_seq.sv dvd/dts/dts_vec.sv dvd/dts/dts_top.sv dvd/audio_engine.sv dvd/lpcm_unpack.sv dvd/lpcm_hb.sv dvd/dts/cb_host_ram.sv "$red_aud/dvd_audio_decode.sv" \
       bench/dvd/dvd_audio_decode_tb.sv 2>/dev/null \
    && vvp "$red_aud/sim" 2>/dev/null | grep -q "FAIL E2: hard reset left the ramp-in armed"; then
   echo "  PASS dvd_audio_decode RED (a hard reset that leaves the ramp-in armed is caught)"
@@ -110,7 +110,7 @@ red_aud=$(mktemp -d)
 sed "s/wire declicking = aud_soft_switch || soft_arm || /wire declicking = soft_arm || /" \
     dvd/dvd_audio_decode.sv > "$red_aud/dvd_audio_decode.sv"
 if ! cmp -s dvd/dvd_audio_decode.sv "$red_aud/dvd_audio_decode.sv" \
-   && iv "$red_aud/sim" dvd/ac3/*.sv dvd/dts/dts_seq.sv dvd/dts/dts_vec.sv dvd/dts/dts_top.sv dvd/audio_engine.sv dvd/lpcm_unpack.sv dvd/dts/cb_host_ram.sv "$red_aud/dvd_audio_decode.sv" \
+   && iv "$red_aud/sim" dvd/ac3/*.sv dvd/dts/dts_seq.sv dvd/dts/dts_vec.sv dvd/dts/dts_top.sv dvd/audio_engine.sv dvd/lpcm_unpack.sv dvd/lpcm_hb.sv dvd/dts/cb_host_ram.sv "$red_aud/dvd_audio_decode.sv" \
       bench/dvd/dvd_audio_decode_tb.sv 2>/dev/null \
    && vvp "$red_aud/sim" 2>/dev/null | grep -q "FAIL D1: snapped to 0 instead of ramping"; then
   echo "  PASS dvd_audio_decode RED (a first-cycle snap on the switch is caught)"

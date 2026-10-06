@@ -10,6 +10,10 @@
 //   - the 7-byte header (substream_id + 6) is fully stripped: the first
 //     forwarded audio byte is the first real sample byte (0x11), and exactly
 //     the 4 payload bytes reach the audio output.
+// Then (docs/lpcm_full.md) the same byte's other fields, one PES per value:
+//   H1 0x41: stereo, 48 kHz, legal      H2 0x15: 6 ch, 96 kHz, legal
+//   H3 0x31: 32 kHz -> bad              H4 0xA7: 44.1 kHz, 8 ch -> bad
+//   H5 0xC1: quant 3 -> bad             H6 0x41 again: bad clears
 `timescale 1ns/1ps
 `default_nettype none
 
@@ -26,6 +30,8 @@ wire   [7:0] aud_byte;
 wire         aud_valid;
 wire   [1:0] aud_type;
 wire   [1:0] aud_lpcm_quant;
+wire   [2:0] aud_lpcm_nch_m1;
+wire         aud_lpcm_fs96, aud_lpcm_bad;
 wire         aud_frame_start;
 logic        aud_ready;
 
@@ -65,7 +71,10 @@ ps_demux dut (
     .dsi_byte       (),
     .dsi_valid      (),
     .dsi_frame_start(),
-    .aud_lpcm_quant (aud_lpcm_quant)
+    .aud_lpcm_quant (aud_lpcm_quant),
+    .aud_lpcm_nch_m1(aud_lpcm_nch_m1),
+    .aud_lpcm_fs96  (aud_lpcm_fs96),
+    .aud_lpcm_bad   (aud_lpcm_bad)
 );
 
 always #9.26 clk = ~clk;
@@ -83,7 +92,7 @@ always_ff @(posedge clk) begin
             if (aud_type !== 2'd2) begin
                 $display("FAIL: aud_type=%0d, expected 2 (LPCM)", aud_type); errs++;
             end
-            if (aud_lpcm_quant !== 2'd1) begin
+            if (aud_bytes_count == 0 && aud_lpcm_quant !== 2'd1) begin
                 $display("FAIL: aud_lpcm_quant=%0d, expected 1 (20-bit)", aud_lpcm_quant); errs++;
             end
         end
@@ -124,6 +133,21 @@ logic [7:0] lpcm_pkt [] = '{
     8'h11, 8'h22, 8'h33, 8'h44
 };
 
+// send the same PES with byte +5 = b5 (pack header skipped: the demux hunts for
+// start codes), then check the four held fields
+task automatic hdr(input [7:0] b5, input [1:0] q, input [2:0] nm1, input f96, input b,
+                   input [8*2-1:0] name);
+    for (int i = 14; i < LPCM_PKT_LEN; i++) send_byte(i == 28 ? b5 : lpcm_pkt[i]);
+    repeat (20) @(posedge clk);
+    if (aud_lpcm_quant !== q || aud_lpcm_nch_m1 !== nm1 || aud_lpcm_fs96 !== f96 ||
+        aud_lpcm_bad !== b) begin
+        $display("FAIL %s: byte %02h -> quant %0d nch_m1 %0d fs96 %0b bad %0b, want %0d %0d %0b %0b",
+                 name, b5, aud_lpcm_quant, aud_lpcm_nch_m1, aud_lpcm_fs96, aud_lpcm_bad,
+                 q, nm1, f96, b);
+        errs++;
+    end else $display("PASS %s", name);
+endtask
+
 initial begin
     clk = 0; rst_n = 0; in_valid = 0; in_byte = 0;
     vid_ready = 1; aud_ready = 1;
@@ -144,10 +168,18 @@ initial begin
         $display("FAIL: forwarded %0d audio bytes, expected 4", aud_bytes_count); errs++;
     end
 
-    if (errs == 0) $display("PASS: ps_demux LPCM quant capture + framing");
-    else           $display("FAIL: %0d error(s)", errs);
+    // ---- the rest of the header byte, one PES per value ----
+    hdr(8'h41, 2'd1, 3'd1, 1'b0, 1'b0, "H1");
+    hdr(8'h15, 2'd0, 3'd5, 1'b1, 1'b0, "H2");
+    hdr(8'h31, 2'd0, 3'd1, 1'b0, 1'b1, "H3");
+    hdr(8'hA7, 2'd2, 3'd7, 1'b0, 1'b1, "H4");
+    hdr(8'hC1, 2'd3, 3'd1, 1'b0, 1'b1, "H5");
+    hdr(8'h41, 2'd1, 3'd1, 1'b0, 1'b0, "H6");
+
+    if (errs == 0) $display("PASS: ps_demux LPCM quant capture + framing + header fields");
+    else           $fatal(1, "FAIL: %0d error(s)", errs);
     $finish;
 end
 
-initial begin #200000 $display("FAIL: timeout"); $finish; end
+initial begin #2000000 $fatal(1, "FAIL: timeout"); end
 endmodule

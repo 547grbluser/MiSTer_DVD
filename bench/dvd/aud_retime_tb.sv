@@ -135,7 +135,8 @@ module aud_retime_tb;
         .clk(clk), .rst_n(rst_n), .enable(1'b1), .pause(1'b0), .aud_soft_switch(1'b0),
         .ring_byte(ring_byte), .ring_valid(ring_valid), .ring_ready(ring_ready),
         .frame_valid(frame_valid), .frame_len(frame_len), .frame_type(2'd2),   // LPCM
-        .lpcm_quant(2'd0), .frame_pts(frame_pts), .frame_pts_valid(frame_pts_valid),
+        .lpcm_quant(2'd0), .lpcm_nch_m1(3'd1), .lpcm_fs96(1'b0), .lpcm_bad(1'b0),
+        .link96(1'b0), .lpcm_unsup(), .frame_pts(frame_pts), .frame_pts_valid(frame_pts_valid),
         .frame_seamless(frame_seamless),
         .frame_pop(frame_pop),
         .cdda_mode(1'b0), .cdda_fs(2'd0), .cdda_wr_en(1'b0), .cdda_wr_data(8'd0),
