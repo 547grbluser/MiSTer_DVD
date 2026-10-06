@@ -905,6 +905,10 @@ def telem_summary(rows):
                  for f in ('menu', 'still', 'video_live', 'pause', 'blend', 'bob')}
     s['tagged'] = {k: _mode([x.get(k) for x in rows if k in x])
                    for k in ('first_tagged', 'first_seen', 'prov_seen')}
+    # The IFO header gate's flags are sticky per mount, so "any row" is the
+    # reading (docs/dvd_nav.md "IFO header gate"; absent on an older core = 0).
+    s['ifo'] = {f: max(_flag(x, f) for x in rows)
+                for f in ('bup_vmg', 'bup_vts', 'ifo_nogood')}
     # disp_lag / av_drift are [19:4] slices of a wider difference: +-5825 ms is
     # the whole range, so a value near it has probably aliased.
     for k in ('disp_lag_ms', 'av_drift_ms', 'play_err_ms'):

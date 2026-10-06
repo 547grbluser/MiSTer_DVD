@@ -38,7 +38,9 @@
 //     word 12 play_err       -- SIGNED, audio playback position vs its anchor, same scale
 //     word 13 av_drift       -- SIGNED, dispatched audio PTS - STC, same scale
 //     word 14 sched_flags    word 15 sched_dur (debug layout, see dvd_ctl.cpp; word 14
-//                               bit 8 = bob active, bit 9 = disc prohibits every region)
+//                               bit 8 = bob active, bit 9 = disc prohibits every region,
+//                               bits 10/11 = VMGI/VTSI read from its .BUP, bit 12 = an
+//                               IFO header bad with no good .BUP -- docs/dvd_nav.md)
 //     word 16 DUTY_MAGIC     -- says words 17..20 exist. ⚠ A core built before them
 //                               answers strobes past 15 with word 15 AGAIN (wcnt
 //                               saturated at 4'hF), not with zero, so the reader

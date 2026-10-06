@@ -189,7 +189,9 @@ MUTATIONS = [
     ('reader mask open', r'\.vmg_rmask\s*\(\s*vmg_rmask_w\s*\)', '.vmg_rmask ()'),
     ('VM SPRM20 constant', r'\.cfg_sprm20\s*\(\s*pr_sprm20\s*\)', ".cfg_sprm20 (16'h0001)"),
     ('VM SPRM14/15 swapped', r'\.cfg_sprm14\s*\(\s*pr_sprm14\s*\)', '.cfg_sprm14 (pr_sprm15)'),
-    ('allp off telemetry', r'\{6\'d0, pr_rmask_allp,', "{6'd0, 1'b0,"),
+    # anchored on the net itself, not on word 14's zero pad (which shrinks as bits are
+    # added -- the .BUP flags took bits 10-12 and broke a '{6'd0, ...' anchor)
+    ('allp off telemetry', r'(\.sched_flags\s*\(\{[^}]*?)\bpr_rmask_allp\b', r"\g<1>1'b0"),
 ]
 
 
