@@ -1299,8 +1299,11 @@ behind the 18-bit I/O board, toggled live from the OSD: *"gradients look better 
 with dither."* This settles the go/no-go: the 27 MHz pattern is acceptable as built, so
 the faster-clock fallback is not needed. The fixed-per-field Interlaced pattern is kept as
 built, and the per-frame alternative stays recorded above.
-⏳ **Not checked:** composite (`vga_mode=cvbs`), 480p on a 31 kHz monitor, and a 24-bit
-DAC (Off by default there, expected no change).
+⏳ **Not checked:** composite (`vga_mode=cvbs`) and 480p on a 31 kHz monitor.
+✅ **A 24-bit DAC (2026-10-06, the second rig through the same RetroTINK, Latin-square
+build):** On vs Off differs by a mean 0.68 capture levels. That is the dither's +1.5 LSB in
+256 offset, with no visible change, as expected. The same session's three-way comparison
+images (18-bit Off / 18-bit On / 24-bit) show the On panel close to the 24-bit reference.
 
 **The HW plan as run** (composite and the 24-bit rig not yet):
 - Control arm first: the previous build on the HIL rig with the 18-bit I/O board (CRT,

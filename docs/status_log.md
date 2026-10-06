@@ -51,6 +51,9 @@ predate later confirmations; the `CLAUDE.md` index carries the reconciled status
     `mem_shim_burst`, a congestion detour). SEED 9 passes: clk_dec 90.59 / 86.11, clk_mem
     96.58 / 93.76 → `DVD_ditherlatin_20261006_1829.rbf`. The CRT-tested build was the
     pre-rebase one; the dither logic is identical.
+    HIL smoke on the SEED 9 build (480i, a static showcase clip): 0 lates and 0 drops over
+    20 s, 2.000 refreshes per pickup, and the HDMI-side shot decodes correctly. A 24-bit DAC
+    (the second rig) shows no visible change with the dither On.
   - **HW A/B (capture, 4 repeats at 480i):** line texture (grey) 0.257 → 0.055. The
     grey staircase is unchanged (0.51 → 0.53), and Off is identical between builds. The ×5
     contrast still shows the control's hatching gone. ⚠ The 480i blue staircase is
