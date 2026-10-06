@@ -78,8 +78,10 @@ predate later confirmations; the `CLAUDE.md` index carries the reconciled status
   - **Bugs the benches caught before HW.**
     - An 18-bit gain constant wraps unity to −1, silently in Icarus.
     - The half-band started an output while the last one was still being written.
-  - ⏳ **Not fixed, pre-existing:** HDMI bitstream passthrough declares 96 kHz with
-    `hdmi_audio_96k=1` (the Main writes reg 0x15/N from the ini).
+  - **Refuted on HW:** HDMI bitstream passthrough on an `hdmi_audio_96k=1` link was
+    predicted to fail from the code (the Main declares 96 kHz in channel status). On an AV
+    receiver, Dolby Digital locks and plays. The receiver also reports 96 kHz LPCM as
+    PCM 96 kHz, 2 ch.
   - **Fit (SEED 7):** +405 ALM, +1 M10K, +4 DSP. `clk_dec` 91.8/91.6 MHz; `clk_mem`
     90.14/90.75 MHz, a thin pass (it runs at 90.0). Rebased onto PR #161: 39,120 ALM,
     `clk_mem` 96.24/94.61 MHz, so the margin is back. The rebased build passes all seven

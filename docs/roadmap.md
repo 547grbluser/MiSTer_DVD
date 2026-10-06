@@ -641,8 +641,8 @@ multichannel downmixed to stereo (FFmpeg's order, the AC-3 law), 96 kHz decimate
 Decisions (user, 2026-10-05): dedicated RTL rather than engine microcode, the `sys_top` tap,
 FFmpeg's channel order. Gates: `bench/dvd/run_lpcm_full.sh --red`,
 `tools/check_lpcm_wiring.py --red`, the AC-3 suites, `tools/ac3_dualmono.py --check`.
-Found on the way, ⏳ not fixed: HDMI bitstream passthrough declares 96 kHz when
-`hdmi_audio_96k=1` (a Main fix, `docs/lpcm_full.md` §11).
+A code-reading worry that HDMI bitstream passthrough would fail on a 96 kHz link was
+refuted on hardware: Dolby Digital locks and plays (`docs/lpcm_full.md` §11).
 HW (2026-10-06): all seven synthetic formats pass on captured HDMI audio, and every
 one tried fails on `main`. A 96 kHz link plays 96 kHz natively (measured 96,000.2 Hz).
 **Next:** the PR.

@@ -296,7 +296,16 @@ engine.
   decode to zero in our arithmetic and in a52dec. The synthetic stream is the one that
   proves the decode.
 
-### ⏳ Found, not fixed: bitstream passthrough on a 96 kHz HDMI link
+### ✅ Refuted on hardware (2026-10-06): bitstream passthrough on a 96 kHz HDMI link
+
+**It works.** On .201, over HDMI to an AV receiver with `hdmi_audio_96k=1`, THE_OFFICE in
+`Passthru` locked to Dolby Digital and played normally. The receiver evidently identifies
+the IEC 61937 burst from its preamble and ignores the 96 kHz that the channel status
+declares. The prediction below was read from the code; it is kept because a stricter
+receiver could still disagree. Only one receiver has been tried, and DTS passthrough on a
+96 kHz link has not been. The manual's caution was removed.
+
+The original reading:
 
 `main/integration/apply_integration.py` writes ADV7513 reg `0x15` from `hdmi_audio_96k` in
 bitstream mode too, and leaves N at 12288 (stock Main's 96 kHz value), while
@@ -394,8 +403,12 @@ Unchanged paths, this build:
   reached the core, and on stock Main.
 - A 48 kHz 5.1 file and the AC-3 1+1 file also play correctly on the 96 kHz link.
 
-⏳ **Not checked on hardware:** HDMI bitstream passthrough on a 96 kHz link (§11, no
-receiver on the rig).
+**.201, HDMI to an AV receiver, `hdmi_audio_96k=1` (2026-10-06, rebased build):**
+- The 96 kHz LPCM file: the core measures 96,001 Hz with 0 drain-gate closures, and the
+  receiver reports **PCM 96 kHz, 2 ch** and plays the tones. That is native 96 kHz end to
+  end, as far as HDMI.
+- AC-3 in `Passthru` on the same link: **Dolby Digital, plays fine**. This refutes §11's
+  prediction.
 
 ### Next
 
