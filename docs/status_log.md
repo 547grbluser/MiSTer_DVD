@@ -83,6 +83,8 @@ predate later confirmations; the `CLAUDE.md` index carries the reconciled status
     - Lesson recorded: an early "black screen vs a trailer" difference was two shots taken
       a few seconds apart across a scene change. The Debug Overlay PGC/VTS sequence settled
       it, and showed the two runs were identical.
+    - **Not run on HW:** the VTSI *and* its BUP both zeroed (the `ifo_nogood` revert).
+      Bench arms E and F cover it.
     - **Not yet on HW: the Main mirror.** There was no disc in the rig's drive and no CSS
       image in the library (every `.iso` there is decrypted, so stock Main's file path
       serves it). Its gate is `main/tests` [21]–[29].

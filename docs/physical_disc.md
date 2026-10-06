@@ -852,7 +852,9 @@ libdvdread: it knows *the read failed*, and which sector. So:
   later sector zero-fills the tail.
 - **No-libdvdcss drive.** It enumerates too now, because `css_raw_read` and `src_chunk`
   dispatch through a `raw_rd` seam, so an unencrypted disc on a Main without libdvdcss
-  mirrors as well.
+  mirrors as well. ⚠ That path now issues READ(10)s at mount (the ISO9660 walk) that it
+  never issued before. It is host-tested only (arm [29]) and has not been run on a real
+  drive without libdvdcss.
 - **Not reached by this layer:** a plain decrypted `.iso` takes stock Main's file path, so
   this layer never sees it. That case is the fabric gate's.
 
