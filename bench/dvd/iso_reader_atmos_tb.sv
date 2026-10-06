@@ -157,15 +157,16 @@ module iso_reader_atmos_tb;
     integer errors = 0;
     integer t, i, found66, e0;
 
-    // GMEM field layout: {vts[8], base[7], cnt[7], ifo_lba[32], menu_lba[32], menu_blk[32]}
-    // width 118, so vts = bits [117:110].
+    // GMEM field layout: {vts[8], base[7], cnt[7], ifo_lba[32], menu_lba[32], menu_blk[32],
+    // bup_lba[32]} width 150 (bup_lba added for the .BUP fallback, audit 8), so
+    // vts = bits [149:142].
     task dump_gmem;
         integer k;
         reg [7:0] v;
         begin
             found66 = 0;
             for (k = 0; k < dut.grp_count; k = k + 1) begin
-                v = dut.gmem[k][117:110];
+                v = dut.gmem[k][149:142];
                 if (v == 8'd66) found66 = 1;
             end
         end
