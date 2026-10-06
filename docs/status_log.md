@@ -23,7 +23,7 @@ predate later confirmations; the `CLAUDE.md` index carries the reconciled status
 ## Hardware status (THIS fork, verified 2026-06-21)
 
 - 🔧 **ANALOG DITHER MATRIX: A LATIN SQUARE, EXACT ON EVERY LINE (2026-10-06,
-  `dev-ditherlatin`, `feature/dither-latin`; sim-verified, ⏳ HW A/B pending).**
+  `dev-ditherlatin`, `feature/dither-latin`; ✅ HW-measured via capture, ⏳ CRT look).**
   - **Trigger.** Reviewing the PWM cores (`Jokippo/MiSTer_PWM_Cores`) as a replacement for
     PR #161's dither, together with a forum critique of them. The critic wants a pattern
     with "the same sum of values per line". Ours did not have that.
@@ -47,9 +47,17 @@ predate later confirmations; the `CLAUDE.md` index carries the reconciled status
   - **Fit:** `DVD_ditherlatin_20261006_1536.rbf`, SEED 7 unchanged. `dac_dither` 16.1 ALM
     (was 15.2). clk_dec 91.75 / 88.78 MHz, clk_mem 98.8 / 99.98 MHz (100 °C / −40 °C).
     `fmax_check` and `lint_undriven` pass.
-  - **Next:** a build from `feature/dither-latin`. HW A/B: the paused-ramp capture
-    (480i/480p, cubic-residual score) against PR #161's build, then a look on the CRT.
-    Expect the score to be no worse and the line texture to go at 5× contrast.
+  - **HW A/B (capture, 4 repeats at 480i):** line texture (grey) 0.257 → 0.055. The
+    grey staircase is unchanged (0.51 → 0.53), and Off is identical between builds. The ×5
+    contrast still shows the control's hatching gone. ⚠ The 480i blue staircase is
+    repeatably worse (0.536 → 0.650), while 480p blue is better (0.73 → 0.66). It sits in
+    one stretch of the ramp at long period, and grey R also differs from G/B. Both patterns
+    are mean-exact in sim, so this reads as an analog/RetroTINK-sampling interaction with
+    the pattern's spectrum, not a mean error. Table and reasoning: §8 "The matrix".
+    Tool: `tools/dither_ab.py`.
+  - **Next:** the maintainer's CRT look at 480i over S-Video, A/B against PR #161's build,
+    with dark gradients and a blue sky. If the CRT agrees, merge. If blue reads worse,
+    compare `{0 2 1 3; 3 1 2 0; 1 3 0 2; 2 0 3 1}` (the other Latin choice in §8).
 - ✅ **.BUP FALLBACK WHEN AN IFO IS UNREADABLE (audit item 8, 2026-10-06,
   `dev-bupfallback`; fabric ✅ HW-CONFIRMED A/B vs `main`; Main mirror ✅ HW-CONFIRMED on a
   physical disc; ✅ MERGED (PR #163)).** Design: `docs/dvd_nav.md` "IFO header gate
