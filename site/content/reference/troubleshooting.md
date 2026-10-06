@@ -167,10 +167,10 @@ Press **B7** to see which audio track is playing, and again while the popup is u
 - **DTS showing `AUDIO UNSUPPORTED`** — the DTS decoder could not load its tables at
   start-up, so DTS is skipped (it should never happen; please report it). Use
   [Passthru](../audio/passthrough.md) to a receiver, or pick the disc's AC-3 track.
-- **96 kHz or multichannel LPCM** — only 48 kHz stereo is decoded. (LPCM and MP2 at
-  48 kHz play in *both* modes; in Passthru they are sent as ordinary PCM.)
-- **AC-3 1+1 dual mono** — deliberately refused, since it carries two independent
-  programmes with no correct way to combine them.
+- **LPCM showing `AUDIO UNSUPPORTED`** — the track's header declares a sample rate or
+  word length that DVD-Video does not allow (44.1 or 32 kHz, or an undefined word length),
+  so it is muted rather than played as noise. Every legal LPCM track plays, in both
+  `Audio Out` modes.
 
 `AUDIO UNSUPPORTED` on screen means exactly this.
 

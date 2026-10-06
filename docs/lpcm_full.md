@@ -1,6 +1,6 @@
 # Full DVD-Video audio: every legal LPCM format, and AC-3 dual mono
 
-**Status (2026-10-05): 🔧 in progress. Decided (§10): dedicated RTL, the `sys_top` tap,
+**Status (2026-10-05): 🔧 built and gated (§11); ⏳ fit and HW. Decided (§10): dedicated RTL, the `sys_top` tap,
 FFmpeg's channel order.** Branch `feature/lpcm-full`,
 `CORE_VERSION "dev-lpcmfull"`.
 
@@ -205,3 +205,108 @@ mode too.
 2. **The `sys_top` tap** for the link rate (§6 (a)): 96 kHz LPCM plays natively on a 96 kHz
    link and is decimated on a 48 kHz one.
 3. **FFmpeg's channel order** (§2) for 3–8 channels.
+
+## 11. What was built (2026-10-05)
+
+| piece | where |
+|---|---|
+| header capture: channels, 96 kHz, `bad` (reserved rate / quant 3) | `dvd/ps_demux.sv` `aud_lpcm_nch_m1/fs96/bad` |
+| the new path: mono groups, channel counter, downmix MAC | `dvd/lpcm_unpack.sv` (`npath`) |
+| 71-tap half-band, 2:1, 128-pair ring in one M10K | `dvd/lpcm_hb.sv` |
+| 96 kHz NCO (`nco_fs` 3), `dec`, reserved-header drain, `lpcm_unsup` | `dvd/dvd_audio_decode.sv` |
+| the link rate: `sys_top` `.AUDIO_96K(audio_96k)` → 2-flop sync → `.link96` | `sys/sys_top.v`, `dvd/emu.sv` |
+| popup: `aud_lpcm_unsup` in `aud_unsupported` | `dvd/emu.sv` |
+| golden model, fixtures, FFmpeg cross-check | `tools/lpcm_model.py` |
+| AC-3 1+1: dual BSI block and per-block `dynrng2e` | `dvd/dts/ac3.uasm`, `tools/ac3_model.py` |
+| an open-content 1+1 stream, and its a52dec cross-check | `tools/ac3_dualmono.py` (run by `tools/gen_test_stream.sh` → `tools/streams/dualmono_440_1k_48k_192k.ac3`, generated, not committed) |
+| LPCM test VOBs (FFmpeg video, our group-aligned LPCM) and the capture scorer | `tools/lpcm_vob.py` |
+
+The original stereo path (stereo at the output rate, CD-DA/WAV, the engine's
+serialised DTS/MP2 pairs) is unchanged code: the path is chosen at a sample-time
+boundary, and `dvd_audio_decode` forces `nch_m1 = 1`, `dec = 0` for CD-DA and the
+engine.
+
+### Gates
+
+- **`bench/dvd/run_lpcm_full.sh --red`.** It runs:
+  - `tools/lpcm_model.py --selftest`: the tables are re-derived, and unpack is checked
+    against FFmpeg's `pcm_dvd` decoder on the 13 formats its encoder writes;
+  - `lpcm_full_tb`: 19 arms (A–T) pair for pair with `!==`. They cover mono at 16/20/24
+    bit, 3–8 channels, 96 kHz through the half-band, 96 kHz on a 96 kHz link, a stereo
+    control, and three pressure arms;
+  - `lpcm_dec_tb` S1–S5: the NCO's rate measured, decimation, the reserved-header
+    drain and popup, a 5.1 downmix, and CD-DA immune to a stale header;
+  - `ps_demux_lpcm_tb` H1–H6;
+  - `lpcm_unpack_tb`, unchanged;
+  - `tools/check_lpcm_wiring.py --red`: 10 mutations of `emu.sv` and `sys_top`.
+
+  19 RTL mutations each fail exactly their own arms.
+- **AC-3:** `tools/test_ac3_model.py`, `tools/test_ac3_isa.py` (arms `nodual`, `nodyn2`
+  tied to the `dualmono` feature), `bench/dvd/run_ac3.sh --red`, `run_ac3_seq.sh --red`,
+  `run_ac3_ab.sh`, and `bench/ac3/run_imdct_xcheck.sh` (`imdct_512` = `imdct_model` on
+  the 1+1 stream). `tools/ac3_dualmono.py --check`: FFmpeg (CRC-checked) and a52dec
+  decode the stream as 1+1 with 440 Hz left and 1 kHz right, and the core's arithmetic
+  (`ac3_model` → `imdct_model`) correlates **1.00000** with a52dec per channel and
+  0.000 across.
+- Unchanged and green: `run_wav`, `run_mp2`, `run_vcd`, `run_dts_dec`, `run_cb_copy`,
+  `run_aud_retime`, `run_aud_switch`, `run_css`, `run_auddrain`, `run_seek_rf_pts`,
+  `run_subpic`, `run_menudrain`, `run_mgl`, `run_dts`, `run_dts_seq`, `run_ac3`,
+  `run_mp2_eng`.
+
+### Findings, so they are not rediscovered
+
+- **Authoring packs LPCM PES payloads in whole groups; FFmpeg's muxer does not.**
+  - Measured over the whole of both library LPCM discs: *Three Tenors* (16-bit) carries
+    2,008-byte payloads (502 × 4), and all 1,094,212 PES of *Roger Waters* (20-bit) are
+    2,010 bytes (201 × 10).
+  - So the realign path, which starts at a payload's first byte (`ps_demux`), stays as
+    it is.
+  - FFmpeg's `dvd` muxer splits groups across PES (24-bit stereo: 2,010 % 12 = 6) and
+    always writes first-access-unit = 4. An FFmpeg-muxed multichannel or 24-bit VOB
+    therefore mis-pairs channels after a seek. That is a property of the file. It is
+    also why the bench fixtures come from `tools/lpcm_model.py`'s own packer.
+- **An 18-bit signed constant cannot hold unity in Q1.17.** `18'sd131072` is −131072,
+  and Icarus says nothing. The first bench run negated every mono and 2.1 sample. The
+  gains are 19 bits (Cyclone V's 18 × 19 mode).
+- **The half-band must not start an output in the cycle its previous output is being
+  written:** `out_room` cannot count that write yet. Pressure arm R lost 7 pairs to a
+  full FIFO until `!out_v` joined the start condition (mutation H4).
+- **`dec` comes from `link96`, not from the latched NCO rate.** The NCO's rate
+  latches a cycle after the codec does, so the first byte of a 96 kHz stream would latch
+  the decimating path for one sample-time.
+- **AC-3 1+1 also carries `dynrng2e`/`dynrng2` in every audio block**, not only the
+  second BSI block. FFmpeg's "new coupling strategy must be present in block 0" on
+  the first rewritten stream found it. As in liba52 (`parse.c`), the last one sent
+  applies to both channels.
+- **The only 1+1 in the library is silence.** Both frames of the *Casino Royale* window
+  decode to zero in our arithmetic and in a52dec. The synthetic stream is the one that
+  proves the decode.
+
+### ⏳ Found, not fixed: bitstream passthrough on a 96 kHz HDMI link
+
+`main/integration/apply_integration.py` writes ADV7513 reg `0x15` from `hdmi_audio_96k` in
+bitstream mode too, and leaves N at 12288 (stock Main's 96 kHz value), while
+`dvd/hdmi_bs_i2s.sv` always sends 48 kHz frames. With `hdmi_audio_96k=1` the HDMI channel
+status therefore claims 96 kHz for an IEC 61937 burst that must be 48 kHz. This was read
+from the code, not heard. The rig has no receiver to confirm it on, and it predates this
+branch. **The fix is in the Main:** in bitstream mode write `0x15 = 0x20` and N = 6144
+(`0x01–0x03 = 00 18 00`), and restore the ini's values when returning to PCM. Optical
+S/PDIF is unaffected. The manual (`audio/passthrough.md`) tells users to leave the key at
+0 for HDMI passthrough meanwhile.
+
+### Known limitations
+
+- Output is 16-bit stereo: truncation, not dither, for 20/24-bit; multichannel downmixed.
+- The channel order is an assumption (§2): FFmpeg's. A disc authored to VLC's reading
+  would put its surrounds into the centre's gain and lose one surround.
+- 1+1's two DRC words: last one wins (liba52), not one per channel.
+- A track whose format changes mid-stream without an audio reset switches path only at a
+  sample-time boundary. In practice a track change resets the decoder.
+- 96 kHz native output needs `hdmi_audio_96k=1` and holds 42 ms in the 4,096-pair FIFO
+  (85 ms at 48 kHz).
+
+### Next
+
+Build and fit. Then by ear on the rig: synthetic VOBs from our packer (mono, 5.1/24,
+7.1/16, 96/24 stereo, 96/16 4.0), with the current `main` build as the control.
+`hdmi_audio_96k=1` needs an ini change and a reboot on the shared rig: ask first.

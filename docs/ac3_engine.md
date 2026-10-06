@@ -753,7 +753,11 @@ DTS (P2, P3) follows.
   3. **MP2 on the engine** (the rest of scenario E). It saves ~−878 more, but its
      synthesis needs its own LSB-bounded golden.
 
-- **The RTL's refusals.** It refuses acmod 0 (dual mono) and coupling-channel
+- **The RTL's refusals.** ✅ acmod 0 is no longer one: the engine decodes 1+1 dual
+  mono since 2026-10-05 (`docs/lpcm_full.md` §7, §11). `dvd/ac3` still refuses it, so
+  the gates score a 1+1 stream against its golden only up to that halt
+  (`test_ac3_model.golden_halts`), as they do a refusal window. Before that, it refused
+  acmod 0 (dual mono) and coupling-channel
   `deltbae == NEW`, and halts on any error. Trace identity says the engine reproduces
   that, and the model does by default. Microcode could implement coupling delta-BA
   cheaply instead.

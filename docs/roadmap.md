@@ -630,6 +630,21 @@ HDMI stays bit-exact. Gate: `bench/dvd/run_dac_dither.sh --red`.
 The maintainer judged it on the CRT: gradients look better with it on. Merged as PR #161.
 Composite and a 31 kHz monitor are unchecked.
 
+### 🔧 Full DVD-Video audio: every LPCM form and AC-3 dual mono (2026-10-05, branch `feature/lpcm-full`; built and gated, ⏳ fit and HW — see `docs/lpcm_full.md`)
+
+The 3rd-edition audit's item 4, reversed by decision: **support** the cases that failed
+silently instead of announcing them. LPCM at 48 or 96 kHz, 16/20/24-bit, 1–8 channels:
+multichannel downmixed to stereo (FFmpeg's order, the AC-3 law), 96 kHz decimated by a
+71-tap half-band on a 48 kHz HDMI link or played natively on a 96 kHz one
+(`hdmi_audio_96k`, tapped from `sys_top`). A reserved LPCM header is muted and shows
+`AUDIO UNSUPPORTED`. AC-3 1+1 dual mono decodes on the engine: Ch1 left, Ch2 right.
+Decisions (user, 2026-10-05): dedicated RTL rather than engine microcode, the `sys_top` tap,
+FFmpeg's channel order. Gates: `bench/dvd/run_lpcm_full.sh --red`,
+`tools/check_lpcm_wiring.py --red`, the AC-3 suites, `tools/ac3_dualmono.py --check`.
+Found on the way, ⏳ not fixed: HDMI bitstream passthrough declares 96 kHz when
+`hdmi_audio_96k=1` (a Main fix, `docs/lpcm_full.md` §11).
+**Next:** build and fit, then by ear on the rig with synthetic VOBs, `main` as the control.
+
 ### ✅ User Still off: Play/Pause or Select ends a still with no buttons (2026-10-05; ✅ HW-CONFIRMED on timed stills, A/B vs `main`, ✅ MERGED PR #159 — see `docs/dvd_nav.md` "Still off")
 
 The 3rd-edition audit's item 5, a mandatory user operation (UOP18). With Disc Menus on, on a

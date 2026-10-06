@@ -1,38 +1,44 @@
 //============================================================================
-//  dvd_audio_decode.sv — in-fabric DVD audio: AC-3 + LPCM -> s16 L/R.
+//  dvd_audio_decode.sv — in-fabric DVD audio: AC-3, DTS, MP2 and LPCM -> s16 L/R.
 //
 //  Replaces the old DDR3-ring + HPS-daemon audio path.  Drains the audio_ring
 //  read side (committed byte stream + {len,type} frame descriptors), dispatches
-//  each frame by codec, decodes it in fabric, and presents stereo s16 PCM at
-//  ~48 kHz for emu.sv to drive onto AUDIO_L/AUDIO_R.
+//  each frame by codec, decodes it in fabric, and presents stereo s16 PCM at the
+//  NCO's rate (48 kHz; MP2's and CD-DA's own 44.1/32 kHz; 96 kHz for a 96 kHz LPCM
+//  track on a 96 kHz HDMI link) for emu.sv to drive onto AUDIO_L/AUDIO_R.
 //
-//    frame_type (from ps_demux / audio_ring): 0=AC-3  1=DTS  2=LPCM  3=unknown
+//    frame_type (from ps_demux / audio_ring): 0=AC-3  1=DTS  2=LPCM  3=MP2
 //      AC-3   -> audio_engine (the microcoded engine's AC-3 program + imdct_512:
-//                decode + 5.1->stereo downmix) -> pcm_out (Q8.23->s16)
-//      LPCM   -> lpcm_unpack (BE->LE 16-bit, L/R interleave)
+//                decode + 5.1->stereo downmix; 1+1 dual mono as left/right) ->
+//                pcm_out (Q8.23->s16)
+//      LPCM   -> lpcm_unpack: every DVD-Video form (docs/lpcm_full.md), 16/20/24-bit
+//                to s16, 1-8 channels downmixed to stereo, 96 kHz decimated to 48 by
+//                lpcm_hb unless the link is 96 kHz (link96); a reserved header
+//                (lpcm_bad) is drained and announced (lpcm_unsup)
 //      MP2    -> audio_engine (the engine's MP2 program; docs/mp2_engine.md M3), its
 //                pairs serialised into lpcm_unpack's FIFO, as DTS's
 //      DTS    -> audio_engine (the engine's DTS core program, stereo; docs/dts_decoder.md,
 //                PRs #148/#149) once the codebooks have copied (cb_tables_ok);
-//                discarded if that copy failed. unknown -> discarded.
+//                discarded if that copy failed.
+//  Bitstream passthrough is not here: iec61937_wrap in emu.sv takes the ring's AC-3
+//  and DTS frames instead (docs/iec61937.md).
 //
 //  Everything runs in clk_sys (~27 MHz) — the same domain as ps_demux/audio_ring.
 //  The AC-3 core has ~3000x real-time headroom at this clock, and pcm_out's async
 //  output FIFO is run with aud_clk = clk so its CDC degenerates harmlessly.
 //
 //  PACING / A-V SYNC: pcm_out drains one pair per aud_ce (a 48 kHz fractional NCO
-//  off clk).  When its FIFO backs up, pcm_out stalls -> ac3_front.pcm_done is
+//  off clk).  When its FIFO backs up, pcm_out stalls -> the engine's pcm_done is
 //  delayed -> the input FIFO fills -> the dispatch holds out_ready low.  audio_ring
 //  then asserts almost_full and emu.sv stalls the DEMUX stream (STD-model flow
 //  control, watchdog-guarded; drop-on-full remains the fallback) — see the FLOW
 //  CONTROL note in dvd/audio_ring.sv.
 //
-//  The 48 kHz NCO is GENLOCKED to the video-referenced STC by dvd/av_sync.sv: the
-//  signed `nco_trim` input slews the increment (±0.5%) so the dispatched audio PTS
-//  tracks the video presentation clock (PTS-driven A/V sync).  We also emit
-//  `dispatch_pts` (the PTS of each frame as it enters the decoder) for av_sync's
-//  loop.  Free-running fallback: with av_sync disabled, nco_trim=0 and this reverts
-//  to the prior fixed-rate behaviour.
+//  A/V SYNC is the PTS-scheduled drain gate (docs/stc_freerun.md): decoded audio waits
+//  in the output FIFOs until the STC reaches the dispatched frame's PTS. The NCO
+//  free-runs: the `nco_trim` genlock port is tied 0 in emu.sv since the lip-sync v3
+//  retirement (2026-07-02, docs/fabric_audio.md). `dispatch_pts` is still emitted (the
+//  PTS of each frame as it enters the decoder) for the gate and the telemetry.
 //============================================================================
 
 `timescale 1ns/1ps
