@@ -216,6 +216,8 @@ static int raw_read10(int fd, uint32_t lba, void *buf, int count)
 	if (io.status || io.host_status) return -1;
 	return count;
 }
+// The no-libdvdcss read, behind a pointer so the host tests can drive the raw path.
+static int (*raw_rd)(int fd, uint32_t lba, void *buf, int count) = raw_read10;
 
 // Can the drive answer the CSS key exchange? RPC-II drives refuse the title-key
 // ioctl (ReadTitleKey) unless a region matching the disc is set, which forces
@@ -365,6 +367,7 @@ static int mark_cloexec_to(const char *path)
 // ISO9660 metadata used to enumerate VOB files. Returns sectors read or -1.
 static int css_raw_read(uint32_t lba, void *buf, int count)
 {
+	if (raw_fd >= 0) return raw_rd(raw_fd, lba, buf, count);   // no libdvdcss
 	if (p_seek(css, (int)lba, DVDCSS_NOFLAGS) < 0) return -1;
 	return p_read(css, buf, count, DVDCSS_NOFLAGS);
 }
@@ -529,6 +532,98 @@ static int first_with_key(int i)
 	return 1;
 }
 
+// ---------------------------------------------------------------------------
+// IFO <-> BUP pairs (audit item 8; docs/physical_disc.md "An unreadable IFO sector
+// is served from its .BUP").
+//
+// Every IFO has a byte-identical backup, VIDEO_TS.BUP / VTS_nn_0.BUP, written
+// after the title set's VOBs -- the far side of the disc from the IFO, so one
+// scratch rarely takes both. libdvdread re-opens the BUP when an IFO will not
+// parse. We know more than libdvdread does: the read itself failed, and which
+// sector. So a sector of an IFO the drive cannot read is served from the same
+// offset of its BUP (and the reverse), and the core never sees the hole. The
+// fabric's own header gate (dvd_iso_reader.sv) covers the cases this cannot:
+// stock Main, and an image that already holds zeros where a ripper failed.
+//
+// Indexed by title set: slot 0 is VIDEO_TS, slot nn is VTS_nn (the spec allows
+// 99). A pair whose two files differ in length, or alias one LBA, is not mirrored
+// and is logged -- the offset arithmetic would hand out the wrong sector. (Library
+// census, tools/bup_scan.py: 12,403 pairs, none differ in length; 30 differ in
+// CONTENT, all copy-protected or interactive discs whose IFO reads fine, and the
+// mirror only acts when the IFO does NOT read.)
+#define MAX_IFO_SETS 100
+static struct {
+	uint32_t ifo, ifo_nsec, bup, bup_nsec;
+	uint8_t  has_ifo, has_bup;
+	uint8_t  ok;          // both present, same length, distinct: mirrored
+	uint8_t  logged;      // the "served from" / "both unreadable" line was written
+} g_ifo[MAX_IFO_SETS];
+static int g_ifo_pairs = 0;
+
+// Sectors of a pair already found unreadable, remembered for the mount so each
+// costs the drive one failure, not one per window: `dead` = 0, served from its
+// twin (read the twin FIRST from now on); 1, both copies unreadable (zeros at once
+// -- the fabric's header gate then reads the BUP and reverts to the IFO, and
+// without this each of those reads would retry the drive again). Full: the next
+// bad sector is simply re-probed each time -- slower, never wrong -- and logged.
+#define MAX_MIRROR 256
+static struct { uint32_t lba; uint8_t dead; } g_mir[MAX_MIRROR];
+static int g_nmir = 0, g_mir_full = 0;
+
+// "VIDEO_TS.IFO" / "VTS_nn_0.BUP" (any case, an optional ";1") -> its slot, or -1.
+static int ifo_name_parse(const char *nm, int nlen, int *is_bup)
+{
+	if (nlen < 12 || (nlen > 12 && nm[12] != ';') || nm[8] != '.') return -1;
+	const char *x = nm + 9;
+	if ((x[0] | 32) == 'i' && (x[1] | 32) == 'f' && (x[2] | 32) == 'o') *is_bup = 0;
+	else if ((x[0] | 32) == 'b' && (x[1] | 32) == 'u' && (x[2] | 32) == 'p') *is_bup = 1;
+	else return -1;
+	if (name_eq(nm, 8, "VIDEO_TS")) return 0;
+	if ((nm[0] | 32) == 'v' && (nm[1] | 32) == 't' && (nm[2] | 32) == 's' && nm[3] == '_' &&
+	    nm[4] >= '0' && nm[4] <= '9' && nm[5] >= '0' && nm[5] <= '9' && nm[6] == '_' && nm[7] == '0')
+	{
+		int tt = (nm[4] - '0') * 10 + (nm[5] - '0');
+		if (tt >= 1 && tt < MAX_IFO_SETS) return tt;
+	}
+	return -1;
+}
+
+static void add_ifo(const char *nm, int nlen, uint32_t lba, uint32_t bytes)
+{
+	int bup = 0, i = ifo_name_parse(nm, nlen, &bup);
+	if (i < 0) return;
+	uint32_t nsec = (bytes + 2047) / 2048;
+	if (bup) { g_ifo[i].bup = lba; g_ifo[i].bup_nsec = nsec; g_ifo[i].has_bup = 1; }
+	else     { g_ifo[i].ifo = lba; g_ifo[i].ifo_nsec = nsec; g_ifo[i].has_ifo = 1; }
+}
+
+static void ifo_set_name(int i, char *out, size_t sz)
+{
+	if (i == 0) snprintf(out, sz, "VIDEO_TS");
+	else        snprintf(out, sz, "VTS_%02d_0", i);
+}
+
+static void resolve_ifo_pairs(void)
+{
+	g_ifo_pairs = 0;
+	for (int i = 0; i < MAX_IFO_SETS; i++)
+	{
+		if (!g_ifo[i].has_ifo || !g_ifo[i].has_bup) continue;
+		char nm[16];
+		ifo_set_name(i, nm, sizeof(nm));
+		if (g_ifo[i].ifo_nsec != g_ifo[i].bup_nsec || !g_ifo[i].ifo_nsec)
+			css_log("ifo: %s.IFO is %u sectors, its .BUP %u -- not mirrored", nm,
+			        g_ifo[i].ifo_nsec, g_ifo[i].bup_nsec);
+		else if (g_ifo[i].ifo == g_ifo[i].bup)
+			css_log("ifo: %s.IFO and .BUP share LBA %u -- not mirrored", nm, g_ifo[i].ifo);
+		else
+		{
+			g_ifo[i].ok = 1;
+			g_ifo_pairs++;
+		}
+	}
+}
+
 // Collect every *.VOB file's extent (start LBA + length in sectors).
 static void collect_vobs(uint32_t dir_lba, uint32_t dir_len)
 {
@@ -547,6 +642,8 @@ static void collect_vobs(uint32_t dir_lba, uint32_t dir_len)
 			const char *nm = (const char *)(sec + off + 33);
 			if (!(flags & 0x02) && name_has_vob(nm, nlen))
 				add_vob(rd_le32(sec + off + 2), (rd_le32(sec + off + 10) + 2047) / 2048, nm, nlen);
+			else if (!(flags & 0x02))
+				add_ifo(nm, nlen, rd_le32(sec + off + 2), rd_le32(sec + off + 10));
 			off += rlen;
 		}
 	}
@@ -580,6 +677,9 @@ static int enumerate_vobs(void)
 	g_vob_entries = 0;
 	g_vobs_dropped = 0;
 	g_heals = g_heal_ok = g_residual = 0;
+	memset(g_ifo, 0, sizeof(g_ifo));
+	g_ifo_pairs = 0;
+	g_nmir = g_mir_full = 0;
 	uint8_t sec[2048];
 	if (css_raw_read(16, sec, 1) < 1) { css_log("vobs: PVD read failed"); return 0; }
 	if (memcmp(sec + 1, "CD001", 5) != 0) { css_log("vobs: not ISO9660"); return 0; }
@@ -594,6 +694,7 @@ static int enumerate_vobs(void)
 	}
 	collect_vobs(vts_lba, vts_len);
 	resolve_vob_keys();
+	resolve_ifo_pairs();
 	if (g_vob_entries != g_nvobs)
 		css_log("vobs: %d .VOB entries -> %d distinct extents (%d aliased, %d dropped)",
 		        g_vob_entries, g_nvobs, g_vob_entries - g_nvobs - g_vobs_dropped, g_vobs_dropped);
@@ -873,7 +974,9 @@ int dvd_css_open(void)
 	        css ? "" : " raw — no libdvdcss, unencrypted discs only");
 
 	// Discover the VOB layout and pre-crack every title key at its VOB start.
+	// Without libdvdcss there are no keys, but the IFO/BUP pairs still come from it.
 	if (css) build_vob_list();
+	else     enumerate_vobs();
 	css_ra_start();
 	return 1;
 }
@@ -1024,12 +1127,14 @@ uint64_t dvd_css_size(void)
 #define SEEK_LOG_PATH "/tmp/dvd_seek.log"
 #define SEEK_LOG_MAX  5000
 static int seek_log_on = 0, seek_log_n = 0;
+static void fault_arm(int on);   // HIL fault injection, see src_chunk()
 
 static void seek_log_arm(void)
 {
 	struct stat st;
 	seek_log_on = (stat("/media/fat/dvd_hil", &st) == 0);
 	seek_log_n = 0;
+	fault_arm(seek_log_on);
 	if (seek_log_on) { FILE *f = fopen(SEEK_LOG_PATH, "w"); if (f) fclose(f); }
 }
 
@@ -1334,6 +1439,132 @@ static long ms_since(const struct timespec *t0)
 	return (t1.tv_sec - t0->tv_sec) * 1000L + (t1.tv_nsec - t0->tv_nsec) / 1000000L;
 }
 
+// ---------------------------------------------------------------------------
+// HIL fault injection (never on a normal install): with /media/fat/dvd_hil present,
+// /media/fat/dvd_fault_lbas lists LBAs (whitespace-separated, decimal) that read as
+// a drive error, read at mount. Lets the rig prove the IFO/BUP mirror on a sound
+// disc. Modelled as a block device fails: a command whose first sector is listed
+// fails; one that reaches a listed sector later comes back short.
+#define MAX_FAULT 64
+static uint32_t g_fault[MAX_FAULT];
+static int g_nfault = 0;
+
+static void fault_arm(int on)
+{
+	g_nfault = 0;
+	if (!on) return;
+	FILE *f = fopen("/media/fat/dvd_fault_lbas", "r");
+	if (!f) return;
+	unsigned v;
+	while (g_nfault < MAX_FAULT && fscanf(f, "%u", &v) == 1) g_fault[g_nfault++] = v;
+	fclose(f);
+	if (g_nfault) css_log("HIL: %d LBAs will read as drive errors (dvd_fault_lbas)", g_nfault);
+}
+
+// One read of the source: libdvdcss (one key domain), or the raw drive.
+static int src_chunk(void *buf, uint32_t lba, uint32_t count)
+{
+	for (int i = 0; i < g_nfault; i++)
+		if (g_fault[i] >= lba && g_fault[i] < lba + count)
+		{
+			if (g_fault[i] == lba) return -1;
+			count = g_fault[i] - lba;
+		}
+	if (raw_fd >= 0) return raw_rd(raw_fd, lba, buf, (int)count);
+	return css_read_chunk(buf, lba, count);
+}
+
+// The twin of `lba` if it lies in a mirrored IFO or BUP; returns the pair's slot,
+// or -1. A VOB sector never has one (the pairs hold no VOB extent).
+static int pair_twin(uint32_t lba, uint32_t *twin, int *in_bup)
+{
+	for (int i = 0; i < MAX_IFO_SETS; i++)
+	{
+		if (!g_ifo[i].ok) continue;
+		if (lba >= g_ifo[i].ifo && lba < g_ifo[i].ifo + g_ifo[i].ifo_nsec)
+		{ *twin = g_ifo[i].bup + (lba - g_ifo[i].ifo); *in_bup = 0; return i; }
+		if (lba >= g_ifo[i].bup && lba < g_ifo[i].bup + g_ifo[i].bup_nsec)
+		{ *twin = g_ifo[i].ifo + (lba - g_ifo[i].bup); *in_bup = 1; return i; }
+	}
+	return -1;
+}
+
+static int mir_find(uint32_t lba)
+{
+	for (int i = 0; i < g_nmir; i++) if (g_mir[i].lba == lba) return i;
+	return -1;
+}
+
+static void mir_add(uint32_t lba, int dead)
+{
+	if (g_nmir < MAX_MIRROR) { g_mir[g_nmir].lba = lba; g_mir[g_nmir].dead = (uint8_t)dead; g_nmir++; return; }
+	if (!g_mir_full++) css_log("ifo: %d bad IFO/BUP sectors remembered -- later ones are re-probed", MAX_MIRROR);
+}
+
+// Does [lba, lba+count) touch a mirrored IFO or BUP?
+static int pair_overlap(uint32_t lba, uint32_t count)
+{
+	for (int i = 0; i < MAX_IFO_SETS; i++)
+	{
+		if (!g_ifo[i].ok) continue;
+		if (lba < g_ifo[i].ifo + g_ifo[i].ifo_nsec && g_ifo[i].ifo < lba + count) return 1;
+		if (lba < g_ifo[i].bup + g_ifo[i].bup_nsec && g_ifo[i].bup < lba + count) return 1;
+	}
+	return 0;
+}
+
+// Stop a read short of the next sector already known to be bad, so a window never
+// sends the drive back to it.
+static uint32_t mir_clamp(uint32_t lba, uint32_t count)
+{
+	for (int i = 0; i < g_nmir; i++)
+		if (g_mir[i].lba > lba && g_mir[i].lba < lba + count) count = g_mir[i].lba - lba;
+	return count;
+}
+
+// One sector of a mirrored pair: from itself, else from its twin. 1, or -1 when
+// neither copy can be read.
+static int pair_sector(uint8_t *buf, uint32_t lba, uint32_t twin, int slot, int in_bup)
+{
+	int r = mir_find(lba);
+	if (r >= 0 && g_mir[r].dead) return -1;               // both known unreadable
+	if (r < 0 && src_chunk(buf, lba, 1) == 1) return 1;   // itself, first time round
+	int rt = mir_find(twin);
+	if (rt >= 0 && g_mir[rt].dead) { if (r < 0) mir_add(lba, 1); return -1; }
+	if (src_chunk(buf, twin, 1) == 1)
+	{
+		if (r < 0)
+		{
+			mir_add(lba, 0);
+			if (!(g_ifo[slot].logged & 1))
+			{
+				char nm[16];
+				ifo_set_name(slot, nm, sizeof(nm));
+				css_log("ifo: %s.%s sector %u unreadable -- served from %s.%s", nm,
+				        in_bup ? "BUP" : "IFO", lba - (in_bup ? g_ifo[slot].bup : g_ifo[slot].ifo),
+				        nm, in_bup ? "IFO" : "BUP");
+				g_ifo[slot].logged |= 1;
+			}
+		}
+		return 1;
+	}
+	if (r >= 0 && src_chunk(buf, lba, 1) == 1) return 1;  // the twin went bad instead
+	// Neither copy: remember BOTH sides, so a read from either costs no drive time.
+	if (r < 0) mir_add(lba, 1);
+	else       g_mir[r].dead = 1;
+	if (rt < 0) mir_add(twin, 1);
+	else        g_mir[rt].dead = 1;
+	if (!(g_ifo[slot].logged & 2))
+	{
+		char nm[16];
+		ifo_set_name(slot, nm, sizeof(nm));
+		css_log("ifo: %s sector %u unreadable in BOTH .IFO and .BUP", nm,
+		        lba - (in_bup ? g_ifo[slot].bup : g_ifo[slot].ifo));
+		g_ifo[slot].logged |= 2;
+	}
+	return -1;
+}
+
 // Serve EXACTLY `count` sectors, or fail outright.
 //
 // ⚠ Main's readA/readB (integration steps 8/9) set buffer_lba = lba on ANY
@@ -1356,8 +1587,7 @@ static long ms_since(const struct timespec *t0)
 static int css_src_read(void *buf, uint32_t lba, uint32_t count)
 {
 	if (src_cdda) return dvd_cdda_read(buf, lba, count);
-	if (raw_fd >= 0) return raw_read10(raw_fd, lba, buf, (int)count);   // no-libdvdcss fallback
-	if (!css) return -1;
+	if (!css && raw_fd < 0) return -1;                  // raw_fd: the no-libdvdcss fallback
 
 	struct timespec t0;
 	clock_gettime(CLOCK_MONOTONIC, &t0);
@@ -1365,9 +1595,30 @@ static int css_src_read(void *buf, uint32_t lba, uint32_t count)
 	uint8_t *p = (uint8_t *)buf;
 	uint32_t done = 0;
 	int chunks = 0;
+	int walk = 0;   // a read inside an IFO/BUP pair failed: go sector by sector
 	while (done < count)
 	{
-		int n = css_read_chunk(p + (size_t)done * 2048, lba + done, count - done);
+		uint32_t at = lba + done, twin = 0;
+		uint8_t *q = p + (size_t)done * 2048;
+		int in_bup = 0, slot = pair_twin(at, &twin, &in_bup);
+		int n;
+		if (slot >= 0 && (walk || mir_find(at) >= 0))
+			n = pair_sector(q, at, twin, slot, in_bup);   // a known-bad sector, or the walk
+		else if (walk)
+			n = src_chunk(q, at, 1);
+		else
+		{
+			uint32_t want = mir_clamp(at, count - done);
+			n = src_chunk(q, at, want);
+			if (n <= 0 && pair_overlap(at, want))
+			{
+				// The command failed somewhere in it, and it touches an IFO or BUP.
+				// Find out where, one sector at a time, serving a bad pair sector
+				// from its twin. Anything else failing ends the window as before.
+				walk = 1;
+				n = slot >= 0 ? pair_sector(q, at, twin, slot, in_bup) : src_chunk(q, at, 1);
+			}
+		}
 		chunks++;
 		if (n <= 0)
 		{
