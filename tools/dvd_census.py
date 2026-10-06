@@ -90,6 +90,9 @@ def census_iso(path, captions=False):
     prohibit = (cat >> 16) & 0xFF
     f["region_mask"]  = prohibit
     f["region_locked"] = prohibit not in (0x00, 0xFF)  # some-but-not-all blocked
+    # The disc forbids region 1 -- the region our SPRM20 constant claims
+    # (docs/conformance.md 3rd-edition audit, A/B #2).
+    f["region_excl_r1"] = bool(prohibit & 0x01) and prohibit != 0xFF
 
     # --- TT_SRPT: per-title chapters (nr_of_ptts) + angles (nr_of_angles) -----
     # title_info_t (12 B): pb_ty@0 nr_of_angles@1 nr_of_ptts@2 parental_id@4
@@ -118,6 +121,7 @@ def census_iso(path, captions=False):
     audio_fmts = set()
     lpcm_24bit = False
     lpcm_96k   = False
+    lpcm_multich = False
     dts        = False
     max_audio  = 0
     max_subp   = 0
@@ -138,12 +142,15 @@ def census_iso(path, captions=False):
                     lpcm_24bit = True
                 if (b1 >> 4) & 3 == 1:
                     lpcm_96k = True
+                if (b1 & 7) > 1:          # channels-1 > 1  ->  more than stereo
+                    lpcm_multich = True
     f["vts_with_tmap"] = tmap_vts
     f["has_tmap"]      = tmap_vts > 0
     f["audio_formats"] = sorted(audio_fmts)
     f["dts"]           = dts
     f["lpcm_24bit"]    = lpcm_24bit
     f["lpcm_96k"]      = lpcm_96k
+    f["lpcm_multich"]  = lpcm_multich
     f["max_audio_streams"] = max_audio
     f["max_subp_streams"]  = max_subp
 
@@ -160,6 +167,11 @@ def census_iso(path, captions=False):
         if "CallSS"       in m: vm["callss"]          += 1
         if "JumpSS"       in m: vm["jumpss"]          += 1
         if "unknown bits" in m: vm["unknown_bits"]    += 1
+        # player-parameter reads the 3rd-edition audit found hardcoded in
+        # dvd_vm.sv sprm_read (decode_vmcmd names SPRM20 "REGION")
+        if "SPRM14"       in m: vm["rd_sprm14"]       += 1
+        if "SPRM15"       in m: vm["rd_sprm15"]       += 1
+        if "REGION"       in m: vm["rd_sprm20"]       += 1
     f["vm_commands_scanned"] = vm_cmds
     f["vm_parental_cmd"] = vm["parental_cmd"] > 0
     f["vm_gprm_counter"] = vm["gprm_counter"] > 0
@@ -168,6 +180,113 @@ def census_iso(path, captions=False):
     f["vm_callss"]       = vm["callss"]       > 0
     f["vm_jumpss"]       = vm["jumpss"]       > 0
     f["vm_unknown_bits"] = vm["unknown_bits"]           # >0 = decode gap OR quirk
+    f["vm_reads_sprm14"] = vm["rd_sprm14"] > 0
+    f["vm_reads_sprm15"] = vm["rd_sprm15"] > 0
+    f["vm_reads_sprm20"] = vm["rd_sprm20"] > 0
+
+    # --- PGC header / cell-still axes (3rd-edition audit, 2026-10-01) ---------
+    # pg_playback_mode@162 != 0 = random/shuffle programs (reader ignores it);
+    # prohibited_ops@8 (u32) != 0 = PGC-level UOPs (not honoured, by decision);
+    # still_time@163 != 0 = PGC still (untimed in the reader); an indefinite
+    # (0xFF) cell still that also carries a cell command (the reader runs the
+    # command first -- deliberate for menus, see conformance.md).
+    #
+    # Re-rank pass (2026-10-06) splits two of them:
+    #   * @162 is random when non-zero with bit 7 CLEAR (libdvdnav play.c:69
+    #     picks a random first program among (mode & 0x7F) + 1) and shuffle when
+    #     bit 7 is SET (libdvdnav does not implement shuffle either).
+    #   * the 0xFF-still + cell-command cells are classed by what the command
+    #     does. A loop (LinkTopC / LinkCN / LinkTopPG / LinkTopPGC) looks the
+    #     same whether it runs before or after the still; anything else is the
+    #     BEAST_MASTER residual, a still we skip where libdvdnav holds it.
+    pgc_ax = collections.Counter()
+    pb_list, still_cmds = [], []
+    for dom, abs_byte, pgc in _iter_all_pgcs(nav):
+        try:
+            h = nav.rd(abs_byte, 236)
+        except Exception:
+            continue
+        pbm = h[162]
+        if pbm:
+            pgc_ax["pbmode"] += 1
+            pgc_ax["pb_shuffle" if pbm & 0x80 else "pb_random"] += 1
+            if dom == DOM_TT:
+                pgc_ax["pb_tt"] += 1
+            pb_list.append("%s:0x%02x/%dpg" % (_DOM_NAME.get(dom, dom), pbm,
+                                               pgc.get("nr_pgms", 0)))
+        if _be32(h, 8) and dom == DOM_TT:
+            pgc_ax["uop_tt"] += 1
+        if h[163]:
+            pgc_ax["pgc_still"] += 1
+        cellc = pgc.get("cellc", [])
+        for c in pgc.get("cells", []):
+            if c["still"] == 0xFF and c["cmd_nr"]:
+                pgc_ax["inf_still_cmd_tt" if dom == DOM_TT else "inf_still_cmd_menu"] += 1
+                if 0 < c["cmd_nr"] <= len(cellc):
+                    m = decode_vmcmd(cellc[c["cmd_nr"] - 1])
+                else:
+                    m = "?"
+                if not any(k in m for k in _STILL_LOOP_LINKS):
+                    pgc_ax["inf_still_nonloop_tt" if dom == DOM_TT
+                           else "inf_still_nonloop_menu"] += 1
+                    still_cmds.append("%s:%s" % (_DOM_NAME.get(dom, dom), m))
+    f["pgc_random_mode"]     = pgc_ax["pbmode"] > 0
+    f["pgc_random"]          = pgc_ax["pb_random"] > 0
+    f["pgc_shuffle"]         = pgc_ax["pb_shuffle"] > 0
+    f["pgc_pbmode_title"]    = pgc_ax["pb_tt"] > 0
+    f["pgc_pbmode_list"]     = pb_list
+    f["pgc_uop_title"]       = pgc_ax["uop_tt"] > 0
+    f["pgc_still_time"]      = pgc_ax["pgc_still"] > 0
+    f["inf_still_cmd_title"] = pgc_ax["inf_still_cmd_tt"] > 0
+    f["inf_still_cmd_menu"]  = pgc_ax["inf_still_cmd_menu"] > 0
+    f["inf_still_nonloop_title"] = pgc_ax["inf_still_nonloop_tt"] > 0
+    f["inf_still_nonloop_menu"]  = pgc_ax["inf_still_nonloop_menu"] > 0
+    f["inf_still_nonloop_cmds"]  = still_cmds
+
+    # --- menu-key entries (3rd-edition audit item 10, 2026-10-06) -------------
+    # The VM's Title / Menu / Chapter Menu keys jump to entry 2 (VMGM Title),
+    # 3 (VTSM Root) and 7 (VTSM PTT). The reader matches entry_id bit 7 + low
+    # nibble and, when NO SRP matches, takes SRP[0] = PGC 1
+    # (dvd_iso_reader.sv S_SRP_EVAL). The book (3rd ed. p. 9-26, quoting the
+    # spec: "the transition to Root menu is not actually executed") and
+    # libdvdnav (get_ID -> set_PGCN fails -> domain restored) make a missing
+    # entry a no-op. A domain with no PGCI_UT at all is a pgc_error instead,
+    # which runs the VM's fallback chain -- not counted here.
+    #   key_pgc1_*      : the UT exists but lacks the entry -> PGC 1 plays
+    #   key_pgc1_*_root : ...and that PGC 1 is the Root menu (benign: lands on
+    #                     the main menu, as the manual describes for Chapter)
+    def _entries(lst):
+        return {e & 0x0F for e, _ in (lst or []) if e & 0x80}
+
+    def _srp0(lst):
+        return (lst[0][0] & 0x8F) if lst else 0
+
+    try:
+        vm_lst = nav.pgcit(DOM_VMGM, 0)
+    except Exception:
+        vm_lst = None
+    f["vmgm_title_menu"] = 2 in _entries(vm_lst)
+    f["key_pgc1_title"]  = bool(vm_lst) and not f["vmgm_title_menu"]
+    title_vts = sorted({t["vts"] for t in titles if t["vts"]})
+    miss_root = miss_ptt = miss_ptt_root = miss_root_any = 0
+    for vn in title_vts:
+        try:
+            lst = nav.pgcit(DOM_VTSM, vn)
+        except Exception:
+            lst = None
+        if not lst:
+            continue
+        ids = _entries(lst)
+        if 3 not in ids:
+            miss_root += 1
+        if 7 not in ids:
+            miss_ptt += 1
+            if _srp0(lst) == 0x83:
+                miss_ptt_root += 1
+    f["key_pgc1_menu"]      = miss_root > 0
+    f["key_pgc1_cmenu"]     = miss_ptt > 0
+    f["key_pgc1_cmenu_nonroot"] = miss_ptt > miss_ptt_root
+    f["vtsm_title_sets"]    = len(title_vts)
 
     # --- GoUp (Return key) authoring: nonzero goup_pgc_nr per domain ---------
     # menu_goup = PGCs where the B13 Return key acts as authored menu-back;
@@ -215,6 +334,30 @@ def census_iso(path, captions=False):
     return f
 
 
+_DOM_NAME = {DOM_FP: "FP", DOM_VMGM: "VMGM", DOM_VTSM: "VTSM", DOM_TT: "TT"}
+# Cell commands that keep a 0xFF still's cell (or its PGC) looping: running
+# them before the still looks the same as holding it (conformance.md, class C).
+_STILL_LOOP_LINKS = ("LinkTopC", "LinkCN", "LinkTopPG", "LinkTopPGC")
+
+
+def _iter_all_pgcs(nav):
+    """Yield (domain, pgc_abs_byte, parsed_pgc) for every menu and title PGC.
+    Best-effort like _iter_all_commands (FP is not in a PGCIT, so not here)."""
+    for dom, vlist in ((DOM_VMGM, [0]),
+                       (DOM_VTSM, sorted(nav.vts_ifo.keys())),
+                       (DOM_TT,   sorted(nav.vts_ifo.keys()))):
+        for vn in vlist:
+            try:
+                lst = nav.pgcit(dom, vn)
+            except Exception:
+                continue
+            for _, abs_byte in (lst or []):
+                try:
+                    yield dom, abs_byte, nav.pgc(abs_byte)
+                except Exception:
+                    continue
+
+
 def _iter_all_commands(nav):
     """Yield every 8-byte VM command from FP + every menu PGC + every title PGC
     (pre/post/cell blocks). Best-effort: skips domains a disc lacks."""
@@ -255,28 +398,49 @@ def _iter_all_commands(nav):
 # current best-guess gap list so the printed table reads as a verification of
 # (or correction to) that ordering.
 PREVALENCE_ROWS = [
-    ("has_chapters",  "Chapters / PTT  (max_chapters > 1)",        "gap 1"),
-    ("multi_angle",   "Multi-angle titles",                        "gap (Phase 9 done)"),
-    ("ptl_mait",      "PTL_MAIT parental table present",           "gap 2"),
-    ("vm_parental_cmd","SetTmpPML parental command used",          "gap 2"),
-    ("any_parental_id","Title has a non-trivial parental_id",      "gap 2"),
-    ("region_locked", "Region-locked (partial region mask)",       "gap 2"),
-    ("vm_nav_timer",  "NavTimer (SPRM9) set by a command",         "gap 3"),
-    ("vm_gprm_counter","GPRM counter-mode (SetMode Counter)",      "gap 3"),
-    ("vm_rnd",        "rnd set-op used (game entropy)",            "gap 3"),
-    ("has_tmap",      "VTS_TMAPT time map present",                "retired (Phase 8b)"),
-    ("txtdt_mgi",     "TXTDT_MGI disc/title text names",           "gap 4"),
-    ("dts",           "DTS audio track present",                   "passthrough only"),
-    ("lpcm_24bit",    "LPCM 24-bit audio",                         "gap 4"),
-    ("lpcm_96k",      "LPCM 96 kHz audio",                         "gap 4"),
+    ("has_chapters",  "Chapters / PTT  (max_chapters > 1)",        "supported (PTT, fj#127)"),
+    ("multi_angle",   "Multi-angle titles",                        "supported (Phase 9)"),
+    ("ptl_mait",      "PTL_MAIT parental table present",           "gap: parental"),
+    ("vm_parental_cmd","SetTmpPML parental command used",          "gap: parental"),
+    ("any_parental_id","Title has a non-trivial parental_id",      "gap: parental"),
+    ("region_locked", "Region-locked (partial region mask)",       "never refused (by design)"),
+    ("vm_nav_timer",  "NavTimer (SPRM9) set by a command",         "stored, never fires"),
+    ("vm_gprm_counter","GPRM counter-mode (SetMode Counter)",      "supported (fj#119)"),
+    ("vm_rnd",        "rnd set-op used (game entropy)",            "supported (fj#119)"),
+    ("has_tmap",      "VTS_TMAPT time map present",                "supported (TMAP seek, #127)"),
+    ("txtdt_mgi",     "TXTDT_MGI disc/title text names",           "closed (never shown)"),
+    ("dts",           "DTS audio track present",                   "decoded (#148) + passthrough"),
+    ("lpcm_24bit",    "LPCM 24-bit audio",                         "supported (#162)"),
+    ("lpcm_96k",      "LPCM 96 kHz audio",                         "supported (#162)"),
+    # --- 3rd-edition audit axes (docs/conformance.md, 2026-10-01) ---------
+    ("lpcm_multich",  "LPCM with more than 2 channels",            "supported (#162)"),
+    ("vm_reads_sprm20","Command reads SPRM20 (player region)",     "audit #2, done (#154)"),
+    ("region_excl_r1","Region mask forbids region 1",              "audit #2, done (#154)"),
+    ("vm_reads_sprm14","Command reads SPRM14 (video pref/aspect)", "audit #3, done (#154)"),
+    ("vm_reads_sprm15","Command reads SPRM15 (audio caps)",        "audit #3, done (#154)"),
+    ("pgc_random_mode","PGC random/shuffle playback mode",         "audit #9 (open)"),
+    ("pgc_random",    "  ...random (bit 7 clear; libdvdnav does it)","audit #9 (open)"),
+    ("pgc_shuffle",   "  ...shuffle (bit 7 set; libdvdnav doesn't)","audit #9 (open)"),
+    ("pgc_pbmode_title","  ...on a title-domain PGC",              "audit #9 (open)"),
+    ("vmgm_title_menu","VMGM Title menu authored (Title key target)","audit #10a (open)"),
+    ("key_pgc1_title","Title key: VMGM lacks entry 2 -> PGC 1",    "audit #10b (open)"),
+    ("key_pgc1_menu", "Menu key: a title VTSM lacks Root -> PGC 1", "audit #10b (open)"),
+    ("key_pgc1_cmenu","Chapter key: a title VTSM lacks PTT -> PGC 1","audit #10b (open)"),
+    ("key_pgc1_cmenu_nonroot","  ...and that PGC 1 is not the Root menu","audit #10b (open)"),
+    ("pgc_uop_title", "Title PGC authors UOP prohibitions",        "not honoured (decision)"),
+    ("pgc_still_time","PGC still time authored",                   "audit C (deferred)"),
+    ("inf_still_cmd_title","0xFF cell still + cell command (title)","audit C"),
+    ("inf_still_nonloop_title","  ...command is not a loop (title)","audit C residual (open)"),
+    ("inf_still_cmd_menu", "0xFF cell still + cell command (menu)", "audit C (deliberate)"),
+    ("inf_still_nonloop_menu","  ...command is not a loop (menu)",  "audit C residual (open)"),
     ("vm_callss",     "CallSS (menu call w/ resume)",              "supported"),
     ("vm_jumpss",     "JumpSS (system-space jump)",                "supported"),
     ("has_menu_goup", "Menu GoUp authored (B13 Return acts)",      "supported (B13)"),
     ("has_title_goup","Title-domain GoUp authored",                "supported (B13)"),
     ("vm_unknown_bits","VM command with un-decoded bits",          "decode/quirk"),
     # --captions only (rows read 0/N when the ES scan was not requested)
-    ("cc_present",    "Line-21 captions (EIA-608 in user_data)",    "not decoded"),
-    ("cc_carrier",    "  ...CC carrier present but all-null",       "not decoded"),
+    ("cc_present",    "Line-21 captions (EIA-608 in user_data)",    "line-21 re-insertion"),
+    ("cc_carrier",    "  ...CC carrier present but all-null",       "n/a"),
     ("cc_708",        "  ...CEA-708 (A/53 GA94 cc_data)",           "not decoded"),
 ]
 
@@ -314,6 +478,9 @@ def report(vectors):
         if f["vm_gprm_counter"]: flags.append("GPRMcounter")
         if f["vm_rnd"]:          flags.append("rnd")
         if f["vm_unknown_bits"]: flags.append("UNKBITS=%d" % f["vm_unknown_bits"])
+        if f["pgc_pbmode_list"]: flags.append("PBMODE(%s)" % ",".join(f["pgc_pbmode_list"]))
+        if f["inf_still_nonloop_cmds"]:
+            flags.append("STILLCMD(%s)" % "; ".join(f["inf_still_nonloop_cmds"][:4]))
         if f.get("cc_present"):  flags.append("CC608(%d/%d pairs%s)"
                                               % (f["cc_nonnull"], f["cc_pairs"],
                                                  ",f2" if f.get("cc_field2") else ""))
@@ -330,8 +497,10 @@ def report(vectors):
     print("  " + "-" * 72)
     for key, label, gap in PREVALENCE_ROWS:
         cnt = sum(1 for f in vectors if f.get(key))
-        bar = "#" * cnt + "." * (n - cnt)
-        print("  %-42s %3d/%-3d [%s] %s" % (label, cnt, n, bar, gap))
+        w = min(n, 40)                  # a 1,500-disc library needs a scaled bar
+        k = (cnt * w + n - 1) // n if n else 0
+        bar = "#" * k + "." * (w - k)
+        print("  %-46s %4d/%-4d [%s] %s" % (label, cnt, n, bar, gap))
     print("\nNote: prevalence is measured over the local library only -- a small,")
     print("curated set. Treat counts as a coarse prior for gap ordering, not a")
     print("catalog-wide statistic. Add more ISOs to sharpen it.")

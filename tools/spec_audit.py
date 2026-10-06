@@ -362,6 +362,74 @@ def spu_has_fsta(unit):
     return False
 
 
+def hli_auto_axes(buf, pci):
+    """auto_action axes for one live HLI (btn_ns > 0) -- 3rd-edition audit
+    item 11, re-ranked 2026-10-06. btni_t (nav_types.h): 18 B per button from
+    PCI 0x8E; auto_action_mode = top 2 bits of byte 3; up/down/left/right =
+    low 6 bits of bytes 6..9. With btngr_ns > 1 the 36 slots split evenly per
+    group; every group is counted (this measures authoring, not our group pick).
+      aa_any      an auto-action button exists
+      aa_deadlink one has a zero / self / out-of-range link in some direction.
+                  libdvdnav (highlight.c:254-291) calls button_auto_action after
+                  EVERY D-pad press, so a press that goes nowhere activates it;
+                  nav_pci only fires when the selection moved.
+      aa_mode23   auto_action_mode 2 or 3 (reserved): libdvdnav fires on any
+                  non-zero mode, nav_pci on == 1 only.
+      aa_fosl     the forced-select target is auto-action. The book's "activated
+                  when selected" reading would fire it; libdvdnav and we don't.
+      aa_btn1     button 1 is auto-action (the usual initial selection: the same
+                  book-only reading).
+      aa_orphan   an auto-action button no OTHER button links to. It can only be
+                  the initial selection, so arriving never fires it: libdvdnav
+                  then fires it on any arrow press, nav_pci only on Select. This
+                  is where aa_deadlink becomes visible (a dead link on a button
+                  you arrived at has already fired).
+      aa_init_orphan  aa_orphan AND it is the initial selection (the fosl target,
+                  or button 1 when fosl is 0). This is the user-visible case: the
+                  book fires it on selection, libdvdnav on the first arrow press
+                  (any direction), nav_pci only on Select. aa_deadlink alone is
+                  near-universal (authored auto buttons self-link all round) and
+                  must not be ranked on."""
+    ns = buf[pci+0x71] & 0x3F
+    ngr = (buf[pci+0x6E] >> 4) & 3 or 1
+    fosl = buf[pci+0x74] & 0x3F
+    per = 36 // ngr
+    out = set()
+    for g in range(ngr):
+        for i in range(min(ns, per)):
+            e = pci + 0x8E + (g * per + i) * 18
+            mode = buf[e+3] >> 6
+            if not mode:
+                continue
+            b = i + 1
+            out.add("aa_any")
+            if any((buf[e+6+k] & 0x3F) in (0, b) or (buf[e+6+k] & 0x3F) > ns
+                   for k in range(4)):
+                out.add("aa_deadlink")
+            if mode >= 2:
+                out.add("aa_mode23")
+            if fosl and b == fosl:
+                out.add("aa_fosl")
+            if b == 1:
+                out.add("aa_btn1")
+            linked = False
+            for j in range(min(ns, per)):
+                if j != i:
+                    ej = pci + 0x8E + (g * per + j) * 18
+                    if any((buf[ej+6+k] & 0x3F) == b for k in range(4)):
+                        linked = True
+                        break
+            if not linked:
+                out.add("aa_orphan")
+                if (fosl and b == fosl) or (not fosl and b == 1):
+                    out.add("aa_init_orphan")
+    return out
+
+
+AA_AXES = ("aa_any", "aa_deadlink", "aa_orphan", "aa_init_orphan", "aa_mode23",
+           "aa_fosl", "aa_btn1")
+
+
 def scan_domain(f, extents):
     """Scan a domain's VOB extents (in stream order) for SPU unit sizes and
     NAV-pack HLI features. Mirrors css_scan's pack walk + spu_ref's SPU unit
@@ -379,7 +447,8 @@ def scan_domain(f, extents):
     r = {"max_spu": 0, "max_spu_sub": 0, "max_spu_at": 0, "spu_units": 0,
          "spu_trunc": 0, "nav": 0, "hli": 0, "btngr_sites": 0, "btngr_max": 0,
          "dsp_ty": set(), "foac": 0,
-         "fsta_units": 0, "fsta_hli_units": 0, "fsta_subs": set()}
+         "fsta_units": 0, "fsta_hli_units": 0, "fsta_subs": set(),
+         "aa": collections.defaultdict(set)}   # axis -> distinct HLI keys
 
     def unit_done(sub, data):
         if spu_has_fsta(data):
@@ -429,6 +498,13 @@ def scan_domain(f, extents):
                                                  buf[pci+0x6F] & 7))        # gr3
                             if buf[pci+0x75] & 0x3F:         # foac_btnn
                                 r["foac"] += 1
+                            aa = hli_auto_axes(buf, pci)
+                            if aa:
+                                # one HLI repeats in every VOBU's NAV pack:
+                                # count distinct HLIs, not packs
+                                key = hash(bytes(buf[pci+0x6E:pci+0x8E+36*18]))
+                                for k in aa:
+                                    r["aa"][k].add(key)
                     pos += 1
                     continue
                 # walk PES packets for private_stream_1 subpicture payloads
@@ -501,6 +577,7 @@ def audit_deep(nav, d, verbose=False):
         if verbose:
             print(" max_spu=%d nav=%d hli=%d trunc=%d"
                   % (r["max_spu"], r["nav"], r["hli"], r["spu_trunc"]))
+        r["aa"] = {k: len(v) for k, v in r["aa"].items()}
         r["dsp_ty"] = sorted(r["dsp_ty"])
         r["fsta_subs"] = sorted(r["fsta_subs"])
         if verbose and (r["fsta_units"] or r["fsta_hli_units"]):
@@ -527,6 +604,9 @@ def audit_deep(nav, d, verbose=False):
                       "%s) -- nav_pci always uses group 1 (Phase 3)"
                       % (label, r["btngr_sites"], r["btngr_max"],
                          r["dsp_ty"])))
+        for k in AA_AXES:
+            if r["aa"].get(k):
+                F.append(("INFO", k, "%s: %d distinct HLI(s)" % (label, r["aa"][k])))
         if r["foac"]:
             F.append(("INFO", "foac",
                       "%s: %d HLI NAV packs with foac != 0 (forced-activate "
