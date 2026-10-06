@@ -290,8 +290,9 @@ Smooth dark gradients do not: a night sky, a fade to black or a dim wall can bre
 visible **bands** on a CRT, each one four levels wide.
 
 `On` adds a very fine ordered dither, a fixed pattern of tiny offsets, just before the
-picture reaches the DAC. The pattern flips every field. The television blurs it into the
-in-between levels the DAC cannot output, so a gradient comes out smooth.
+picture reaches the DAC. The television blurs it into the in-between levels the DAC cannot
+output, so a gradient comes out smooth. The two fields of an interlaced picture get
+opposite patterns. On a progressive picture the pattern flips every frame.
 
 - **Leave it `Off` on a board with a full 8-bit (24-bit colour) analog DAC,** such as a
   SuperStation. It has no bands to fix.
@@ -301,7 +302,8 @@ in-between levels the DAC cannot output, so a gradient comes out smooth.
   sync, the colour burst or the line-21 closed captions.
 
 HDMI is completely unaffected by this setting. Like Analog CSync, it applies to the direct
-analog path (`vga_scaler=0`). With `vga_scaler=1` the setting does nothing.
+analog path (`vga_scaler=0`). With `vga_scaler=1` or direct video the setting does
+nothing.
 
 ## Known limitations
 

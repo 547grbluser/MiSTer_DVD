@@ -13,7 +13,9 @@
 //                  burst live there), with a non-zero pattern on din
 //   [T5] bypass    en = 0: every word, in DE or not, passes bit-exact
 //   [T6] fields    the same position in two consecutive fields adds exactly 3 LSB in all:
-//                  the pattern inverts, so a still picture does not stand as a crosshatch
+//                  the pattern inverts per vs. This raster is PROGRESSIVE (one vs per
+//                  frame), so T6 is the Progressive claim; on Interlaced the two inverting
+//                  fields are the frame's two fields (see dvd/dac_dither.sv)
 //
 // All comparisons use !== so an X on dout fails rather than passing vacuously.
 

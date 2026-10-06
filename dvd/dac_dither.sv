@@ -15,9 +15,15 @@
  *     sum_{t=0..3} floor((v + t) / 4) = v
  *
  * so the DAC's output averages to the 8-bit value exactly (v <= 252; above that the sum
- * saturates at 255). Every other field (frame, on Progressive) the matrix is inverted
- * (15 - b), so a still picture's pattern also cancels over two fields instead of standing
- * as a fixed crosshatch on flat areas.
+ * saturates at 255): in every field, every 4-clock x 4-line cell. The matrix is inverted
+ * (15 - b) on every other vs:
+ *   Progressive  one vs per frame, so consecutive frames invert and a still picture's
+ *                pattern cancels over two frames (30 Hz) instead of standing still.
+ *   Interlaced   two vs per frame, so the top field always gets one pattern and the
+ *                bottom field the complementary one: the pattern is SPATIALLY fixed on a
+ *                still. Kept on purpose for now: per-frame inversion here would be a 15 Hz
+ *                alternation, likelier to read as shimmer. The HW round judges it;
+ *                docs/single_raster_analog.md §8 records the alternative.
  *
  *   the place    the core-raster VGA path's last 24-bit word (vga_o, after vga_out and the
  *                yc_out mux: RGB, YPbPr or S-Video / composite alike). HDMI never sees it,

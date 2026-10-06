@@ -1090,10 +1090,20 @@ this way, which is why the option is Off by default.
 **What ships.** `dvd/dac_dither.sv`, instanced in `sys/sys_top.v` (a `DVD-FORK` edit)
 on the core-raster VGA word `vga_o`. That word is taken after `vga_out` and after the
 `yc_out` mux, so RGB, YPbPr and S-Video/composite all get it. The module adds a 4×4 Bayer
-threshold of 0..3 LSB to each channel before the truncation, saturating at 255. The
-matrix inverts every field (`15 - b`). By Hermite's identity, `Σ_{t=0..3} floor((v+t)/4) = v`,
-so the DAC's mean is exactly `v/4` for `v ≤ 252`, and two consecutive fields at one
-position add exactly 3 LSB. The dither acts in DE only. Blanking, sync levels, the burst
+threshold of 0..3 LSB to each channel before the truncation, saturating at 255. By
+Hermite's identity, `Σ_{t=0..3} floor((v+t)/4) = v`, so in every field each 4-clock × 4-line
+cell averages to exactly `v/4` for `v ≤ 252`. The matrix inverts (`15 - b`) on every other
+vs:
+- **Progressive:** one vs per frame, so consecutive frames invert. Two frames at one
+  position add exactly 3 LSB, and a still's pattern alternates at 30 Hz.
+- **Interlaced:** two vs per frame, so the top field always gets one pattern and the bottom
+  field the inverted one. On a still the pattern is **spatially fixed**. (The two fields'
+  row phase depends on each field's VBI hs count, so no line-pair complementarity is
+  claimed.) This is deliberate for the first HW round: inverting per frame instead would
+  alternate each pixel at 15 Hz, which is likelier to read as shimmer. **Alternative if a
+  fixed pattern is visible on the CRT:** toggle `fld` once per frame, keyed on the field
+  flag. `VGA_F1`'s timing against `vga_vs` through the `vga_out` pipeline must be checked
+  first (`docs/field_parity.md`, the F1 polarity note). One behavioural change per flash. The dither acts in DE only. Blanking, sync levels, the burst
 and the **line-21 caption waveform** pass bit-exact. The CC waveform is written outside DE
 (the `de_emu` note on the scanlines instance in sys_top), so the DE gate protects it. A
 multiple of 4 is unchanged at 6 bits.
@@ -1123,13 +1133,16 @@ faster clock domain (it would need a CLK_VIDEO change). Not designed.
 - An always-on dither: it does nothing for 24-bit DACs.
 - A MiSTer.ini key: a core cannot read MiSTer.ini.
 
-**Not covered:** the scaler-to-VGA path (`vgas_o`, `vga_scaler=1`). No NTSC 7.5 IRE setup
+**Not covered:** the scaler-to-VGA path (`vgas_o`, `vga_scaler=1`), and direct video
+(`dv_data` is taken from `vga_data_osd`, ahead of `vga_out`). A direct-video adapter's DAC
+sits behind the ADV7513's 8-bit link anyway. No NTSC 7.5 IRE setup
 is added.
 
 **Gates:**
 - `bench/dvd/run_dac_dither.sh` (`--red`). [T1] exact mean per level and v + 0..3 per
   sample; [T2] multiples of 4; [T3] saturation; [T4] blanking bit-exact with a non-zero
-  word there; [T5] bypass bit-exact; [T6] fields complementary. Scored with `!==`, and
+  word there; [T5] bypass bit-exact; [T6] consecutive fields complementary on a
+  progressive raster (one vs per frame). Scored with `!==`, and
   seven module mutations each fail their own arm.
 - `tools/check_dac_dither_wiring.py`, with seven wiring mutations in the same `--red`. It
   checks:

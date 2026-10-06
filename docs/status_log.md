@@ -27,7 +27,8 @@ predate later confirmations; the `CLAUDE.md` index carries the reconciled status
   - **Gap.** sys_top drives the classic I/O board's DAC from `vga_o[23:18]`: 64 levels per
     channel. Dark film gradients contour on a CRT. HDMI and 24-bit analog DACs are unaffected.
   - **Built.** `dvd/dac_dither.sv` on `vga_o` in sys_top (`DVD-FORK`). A 4×4 Bayer threshold
-    of 0..3 LSB, inverted every field, in DE only, saturating. OSD `O[8],Analog Dither,Off,On`
+    of 0..3 LSB, inverted every other vs, in DE only, saturating. On Interlaced that means the
+    two fields get opposite patterns, fixed on a still (deliberate; §8 has the alternative). OSD `O[8],Analog Dither,Off,On`
     (bit 8 never allocated, no `v,N` bump). No SDC entry, because `status` and `CLK_VIDEO`
     are the same 27 MHz `clk_sys`.
   - **Open question for HW.** At 27 MHz the pattern is per-pixel on Progressive (6.75 MHz
