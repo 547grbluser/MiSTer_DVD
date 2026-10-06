@@ -114,7 +114,7 @@ itself. Once the warning appears it stays until the disc is reloaded.
 Check, in order:
 
 1. `MiSTer_DVDcss` is at `/media/fat/MiSTer_DVDcss` — **not** overwriting `/media/fat/MiSTer`
-2. `MiSTer.ini` has a `[DVD]` section with `main=MiSTer_DVDcss`
+2. `MiSTer.ini` has a `[DVD]` section with `main=MiSTer_DVDcss`, at the end of the file
 3. The core was reloaded after adding that — the Main is chosen at core load
 4. The drive is a USB optical drive that enumerates on the MiSTer
 
