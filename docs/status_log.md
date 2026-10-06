@@ -23,7 +23,7 @@ predate later confirmations; the `CLAUDE.md` index carries the reconciled status
 ## Hardware status (THIS fork, verified 2026-06-21)
 
 - 🔧 **ANALOG DITHER MATRIX: A LATIN SQUARE, EXACT ON EVERY LINE (2026-10-06,
-  `dev-ditherlatin`, `feature/dither-latin`; ✅ HW-measured via capture, ⏳ CRT look).**
+  `dev-ditherlatin`, `feature/dither-latin`; ✅ HW-measured via capture, ✅ HW-CONFIRMED on a CRT).**
   - **Trigger.** Reviewing the PWM cores (`Jokippo/MiSTer_PWM_Cores`) as a replacement for
     PR #161's dither, together with a forum critique of them. The critic wants a pattern
     with "the same sum of values per line". Ours did not have that.
@@ -55,9 +55,11 @@ predate later confirmations; the `CLAUDE.md` index carries the reconciled status
     are mean-exact in sim, so this reads as an analog/RetroTINK-sampling interaction with
     the pattern's spectrum, not a mean error. Table and reasoning: §8 "The matrix".
     Tool: `tools/dither_ab.py`.
-  - **Next:** the maintainer's CRT look at 480i over S-Video, A/B against PR #161's build,
-    with dark gradients and a blue sky. If the CRT agrees, merge. If blue reads worse,
-    compare `{0 2 1 3; 3 1 2 0; 1 3 0 2; 2 0 3 1}` (the other Latin choice in §8).
+  - **CRT (the maintainer, 480i S-Video, A/B against PR #161's build twice):** "blue does
+    not look noticeably worse on the latin-square version, and the whole image is improved
+    with less of that crosshatching." The capture's blue reading is an instrument effect.
+  - **Next:** merge (PR when asked). Still unchecked, as for PR #161: composite and a 31 kHz
+    monitor.
 - ✅ **.BUP FALLBACK WHEN AN IFO IS UNREADABLE (audit item 8, 2026-10-06,
   `dev-bupfallback`; fabric ✅ HW-CONFIRMED A/B vs `main`; Main mirror ✅ HW-CONFIRMED on a
   physical disc; ✅ MERGED (PR #163)).** Design: `docs/dvd_nav.md` "IFO header gate

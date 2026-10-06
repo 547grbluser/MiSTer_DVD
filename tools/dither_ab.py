@@ -4,7 +4,7 @@
 The rig's analog RGB goes through a RetroTINK into the USB capture card, so this measures
 what the I/O board's 6-bit DAC actually puts out (docs/single_raster_analog.md §8).
 
-  dither_ab.py ramp [out.mpg]          make the test clip (720x480 MPEG-2 at qscale 1, 180 s):
+  dither_ab.py ramp [out.mpg] [--secs N]  make the test clip (720x480 MPEG-2 at qscale 1, 180 s):
                                        top half Y 16 -> 64 left to right (grey), bottom half
                                        the same with Cb = 152 (a dark blue ramp)
   dither_ab.py cap <label> [--secs 4]  capture the card -> .sim/dither_cap/<label>.npz
@@ -59,8 +59,8 @@ def grab(secs, warm=1.5):
     sys.exit('dither_ab: no live signal from the capture card')
 
 
-def make_ramp(out):
-    w, h, secs = 720, 480, 180
+def make_ramp(out, secs=180):
+    w, h = 720, 480
     yrow = np.round(16 + 48 * np.arange(w) / (w - 1)).astype(np.uint8)
     cb = np.full((h // 2, w // 2), 128, np.uint8)
     cb[h // 4:, :] = 128 + 24
@@ -160,7 +160,9 @@ if __name__ == '__main__':
     if not a:
         sys.exit(__doc__)
     if a[0] == 'ramp':
-        make_ramp(a[1] if len(a) > 1 else os.path.join(ROOT, '.sim', 'RAMP_DITHER.mpg'))
+        secs = float(a[a.index('--secs') + 1]) if '--secs' in a else 180
+        pos = [x for x in a[1:] if x != '--secs' and x != a[a.index('--secs') + 1]] if '--secs' in a else a[1:]
+        make_ramp(pos[0] if pos else os.path.join(ROOT, '.sim', 'RAMP_DITHER.mpg'), secs)
     elif a[0] == 'cap':
         cap(a[1], float(a[a.index('--secs') + 1]) if '--secs' in a else 4.0)
     elif a[0] == 'score':

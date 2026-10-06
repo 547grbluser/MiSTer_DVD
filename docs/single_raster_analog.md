@@ -1108,7 +1108,7 @@ and the **line-21 caption waveform** pass bit-exact. The CC waveform is written 
 (the `de_emu` note on the scanlines instance in sys_top), so the DE gate protects it. A
 multiple of 4 is unchanged at 6 bits.
 
-**The matrix (revised 2026-10-06, `dev-ditherlatin`, ✅ HW-measured via capture, ⏳ CRT look).** The first
+**The matrix (revised 2026-10-06, `dev-ditherlatin`, ✅ HW-measured via capture, ✅ HW-CONFIRMED on a CRT).** The first
 build took the top two bits of a 4×4 Bayer matrix. Those collapse to the 2×2 Bayer
 `{0 2; 3 1}` tiled, so the "4×4" was really 2×2. It is exact over a 4×4 cell, but **not per
 line**: for `v % 4 = 1`, alternate lines average 0 and ½ DAC step (ideal ¼), and for
@@ -1178,6 +1178,13 @@ detrended row means over the ramp, i.e. the line texture itself.
   - the RetroTINK's ADC samples at the dot rate, so it treats the two spectra differently.
   A CRT low-passes continuously rather than sampling, so the capture cannot settle this. The
   CRT look does.
+
+✅ **Judged on a CRT (2026-10-06, the maintainer).** Same ramp at 480i over S-Video, behind
+the 18-bit I/O board, A/B'd against PR #161's build by flashing back and forth twice:
+*"blue does not look noticeably worse on the latin-square version, and the whole image is
+improved with less of that crosshatching. Overall seems like an improvement."* The capture's
+blue-staircase reading is therefore an instrument effect. The Latin square ships, and the
+alternative matrix stays recorded above.
 - Tooling: `tools/dither_ab.py` (`ramp`, `cap`, `score --ref`, `still`). Captures land in
   the gitignored `.sim/dither_cap/`. PR #161's capture scripts were never committed and had
   to be rebuilt for this round.
