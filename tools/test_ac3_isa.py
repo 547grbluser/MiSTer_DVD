@@ -29,13 +29,14 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
 import ac3_isa as A          # noqa: E402
 import ac3_model as M        # noqa: E402
-from test_ac3_model import streams, features, goldens   # noqa: E402
+from test_ac3_model import streams, features, goldens, golden_halts   # noqa: E402
 
 FRAME_CYC = 27_000_000 * 1536 // 48000      # 864,000
 BUDGET = 0.60
 IMDCT_BLOCK = {1: 4573, 2: 4573}            # by channel count; 3+ -> 13479 (measured)
 ARMS = {'p3seed': 'blocks', 'cplseed': 'cpl', 'phsflg': 'phsflg', 'dynreset': 'dynrnge',
-        'knee': 'blocks', 'noremat': 'remat', 'nomerge': 'cplmerge', 'ctail': 'cpl'}
+        'knee': 'blocks', 'noremat': 'remat', 'nomerge': 'cplmerge', 'ctail': 'cpl',
+        'nodual': 'dualmono', 'nodyn2': 'dualmono'}
 
 
 def frame_cost(m, nch):
@@ -86,11 +87,12 @@ def main():
     gold = goldens(paths, a.frames)
     worst = (0.0, '')
     base_bad = {}
+    feat = features(paths, a.frames)
     for p in paths:
         m, nf, bad, first = A.emulate(p, a.frames)
         base_bad[p] = bad
         rbad, rfirst, nrb = rtl_compare(m, gold[p])
-        okr = rbad == 0 and (nrb > 0 or 'refuse' in os.path.basename(p))
+        okr = rbad == 0 and (nrb > 0 or golden_halts(p, feat))
         fails += not okr
         if not okr:
             print(f'[1r] FAIL {os.path.basename(p)}: {rbad} values differ from the RTL ({rfirst})')
@@ -104,7 +106,6 @@ def main():
         print(f'[1] {"PASS" if ok1 else "FAIL"} {os.path.basename(p)}: {nf} frames, {bad} mismatches'
               + (f' ({first})' if first else '') + f'; [2] {"PASS" if ok2 else "FAIL"} worst frame '
               f'{frac * 100:.0f} %')
-    feat = features(paths, a.frames)
     for arm, need in ARMS.items():
         have = [p for p in paths if feat[p].get(need) and not base_bad[p]]
         if not have:

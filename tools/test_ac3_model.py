@@ -125,6 +125,15 @@ def features(paths, nframes):
     return out
 
 
+def golden_halts(p, feat):
+    """A window the RTL golden (dvd/ac3, retired from the core) stops on: a refusal
+    window, or one carrying 1+1 dual mono, which dvd/ac3 refuses and the engine and the
+    model decode (docs/lpcm_full.md §7). Past that point only the model and the engine
+    are compared (tools/test_ac3_isa.py [1]), and a52dec checks the 1+1 arithmetic
+    (tools/ac3_dualmono.py --check)."""
+    return 'refuse' in os.path.basename(p) or feat[p].get('dualmono', 0) > 0
+
+
 def run(paths, gold, nframes):
     res = {}
     for p in paths:
@@ -147,13 +156,13 @@ def main():
     gold = goldens(paths, a.frames)
     fails = 0
     base = run(paths, gold, a.frames)
+    feat = features(paths, a.frames)
     for p, (nf, nb, bad, first) in base.items():
-        refusal = 'refuse' in os.path.basename(p)      # a window that tests a refusal ([2])
+        refusal = golden_halts(p, feat)                # the RTL stops there ([2])
         ok = bad == 0 and (nb > 0 or (refusal and nf > 0))
         fails += not ok
         print(f'[1] {"PASS" if ok else "FAIL"} {os.path.basename(p)}: {nf} frames, {nb} blocks, '
               f'{bad} values differ' + (f' (first: {first})' if first else ''))
-    feat = features(paths, a.frames)
     for name, (patch, restore) in _arms().items():
         need = NEEDS[name]
         have = [p for p in paths if feat[p].get(need)]
