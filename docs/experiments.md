@@ -299,7 +299,7 @@ is left. That is what earns the name PWM.
 - The critic's real point, a dither whose every line sums to the same value, was taken. It
   exposed that our own 4×4 Bayer matrix's top two bits were a 2×2 pattern that was not exact
   per line. The fix is a Latin-square matrix, HW-confirmed on a CRT: less crosshatching
-  (`feature/dither-latin`, `docs/single_raster_analog.md` §8 "The matrix").
+  (PR #164, `docs/single_raster_analog.md` §8 "The matrix").
 
 **What genuine sub-pixel PWM would take (the open maybe).** A clock faster than the dot
 clock, on the DAC word only:
