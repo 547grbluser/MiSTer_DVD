@@ -298,7 +298,7 @@ engine.
 
 ### ✅ Refuted on hardware (2026-10-06): bitstream passthrough on a 96 kHz HDMI link
 
-**It works.** On .201, over HDMI to an AV receiver with `hdmi_audio_96k=1`, THE_OFFICE in
+**It works.** On the second HIL rig, over HDMI to an AV receiver with `hdmi_audio_96k=1`, THE_OFFICE in
 `Passthru` locked to Dolby Digital and played normally. The receiver evidently identifies
 the IEC 61937 burst from its preamble and ignores the 96 kHz that the channel status
 declares. The prediction below was read from the code; it is kept because a stricter
@@ -352,7 +352,7 @@ but if the next change touches it, re-sweep the seed before trusting it.
 `clk_mem`'s margin is back (4.6 MHz worst corner): the thin pass above was this
 placement, not the design.
 
-**Rebased build on the rig (2026-10-06, .236, 48 kHz link):**
+**Rebased build on the rig (2026-10-06, the HIL rig, 48 kHz link):**
 - All seven test VOBs pass, as in §12. The 30 kHz image is −99 and −102 dB, and 1+1 is
   440 Hz left / 1 kHz right with ≥ 120 dB of separation.
 - *Almost Famous* (AC-3 + DTS) and *Roger Waters* (20-bit LPCM): every track audible.
@@ -361,7 +361,7 @@ placement, not the design.
 - The 96 kHz-link arm was not repeated: neither the merge nor the dither touches that
   path.
 
-## 12. Hardware (2026-10-06, rig .236, `DVD_lpcmfull_20261006_0207.rbf`)
+## 12. Hardware (2026-10-06, the HIL rig, `DVD_lpcmfull_20261006_0207.rbf`)
 
 Method: `tools/lpcm_vob.py` makes the VOBs (FFmpeg's video, our group-aligned LPCM, a
 speaker walk), and `tools/lpcm_hil.py` plays each one while capturing the HDMI audio. It
@@ -403,7 +403,7 @@ Unchanged paths, this build:
   reached the core, and on stock Main.
 - A 48 kHz 5.1 file and the AC-3 1+1 file also play correctly on the 96 kHz link.
 
-**.201, HDMI to an AV receiver, `hdmi_audio_96k=1` (2026-10-06, rebased build):**
+**The second HIL rig, HDMI to an AV receiver, `hdmi_audio_96k=1` (2026-10-06, rebased build):**
 - The 96 kHz LPCM file: the core measures 96,001 Hz with 0 drain-gate closures, and the
   receiver reports **PCM 96 kHz, 2 ch** and plays the tones. That is native 96 kHz end to
   end, as far as HDMI.
