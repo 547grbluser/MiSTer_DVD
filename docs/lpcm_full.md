@@ -312,8 +312,22 @@ S/PDIF is unaffected. The manual (`audio/passthrough.md`) tells users to leave t
 - 96 kHz native output needs `hdmi_audio_96k=1` and holds 42 ms in the 4,096-pair FIFO
   (85 ms at 48 kHz).
 
+### Fit (2026-10-06, `releases/DVD_lpcmfull_20261006_0207.rbf`, SEED 7)
+
+| | before (`dev-stilloff`) | this build | delta | §4 estimate |
+|---|---|---|---|---|
+| ALM | 38,699 | 39,104 (93 %) | **+405** | 350–550 |
+| M10K | 519 | 520 | +1 | 1 |
+| DSP | 87 | 91 | +4 | 2 (four 18 × 19 multipliers, no sharing) |
+| `clk_dec` slow 100 °C / −40 °C | 93.55 / 89.74 | 91.80 / 91.61 MHz | | gate 86.0 |
+| `clk_mem` slow 100 °C / −40 °C | 95.22 / 96.38 | **90.14 / 90.75 MHz** | | runs at 90.0 |
+
+⚠ `clk_mem` passes with 0.14 MHz to spare, down from 5. It is placement-sensitive
+(PR #157), and this netlist moved it. It passes the gate, so the build is flashable,
+but if the next change touches it, re-sweep the seed before trusting it.
+
 ### Next
 
-Build and fit. Then by ear on the rig: synthetic VOBs from our packer (mono, 5.1/24,
+Fit done (above). Then by ear on the rig: synthetic VOBs from our packer (mono, 5.1/24,
 7.1/16, 96/24 stereo, 96/16 4.0), with the current `main` build as the control.
 `hdmi_audio_96k=1` needs an ini change and a reboot on the shared rig: ask first.

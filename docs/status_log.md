@@ -80,7 +80,9 @@ predate later confirmations; the `CLAUDE.md` index carries the reconciled status
     - The half-band started an output while the last one was still being written.
   - ⏳ **Not fixed, pre-existing:** HDMI bitstream passthrough declares 96 kHz with
     `hdmi_audio_96k=1` (the Main writes reg 0x15/N from the ini).
-  - **Next:** fit, then by ear on the rig.
+  - **Fit (SEED 7):** +405 ALM, +1 M10K, +4 DSP. `clk_dec` 91.8/91.6 MHz; `clk_mem`
+    90.14/90.75 MHz, a thin pass (it runs at 90.0).
+  - **Next:** by ear and by capture on the rig (`tools/lpcm_hil.py`).
 
 - ✅ **USER STILL OFF: PLAY/PAUSE OR SELECT ENDS A STILL WITH NO BUTTONS (audit item 5,
   2026-10-05, `dev-stilloff`; sim-verified, ✅ HW-CONFIRMED on
