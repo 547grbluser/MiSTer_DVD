@@ -1218,7 +1218,7 @@ faster clock domain (it would need a CLK_VIDEO change). Not designed.
 - An always-on dither: it does nothing for 24-bit DACs.
 - A MiSTer.ini key: a core cannot read MiSTer.ini.
 - **The PWM cores' method** (evaluated 2026-10-06; `Jokippo/MiSTer_PWM_Cores`, source in
-  the author's N64 fork as `sys/vga_pwm.sv`). It outputs `top6 + (phase < low2)` with a
+  the author's N64 fork as `sys/vga_pwm.sv`; full write-up in `docs/experiments.md`). It outputs `top6 + (phase < low2)` with a
   2-bit `phase` counting on `clk_vid` and cleared at hsync. That is the same as an ordered
   dither with thresholds 3, 2, 1, 0 along the line, with no line term and no frame term. It
   works in those cores because `clk_vid` is far faster than the dot clock (N64 48.68 MHz,
