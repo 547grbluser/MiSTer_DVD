@@ -1140,6 +1140,11 @@ is added.
     dithers, which no screenshot can show);
   - the `.qsf` names the module.
 
+**Fit (2026-10-06, `DVD_dither_20261006_0425.rbf`, SEED 7 unchanged):** `dac_dither` is
+15.2 ALM and 31 registers. Whole design 38,830 ALM (93 %). Timing passes at both slow corners:
+clk_dec 91.2 / 89.4 MHz (target 86), clk_mem 95.75 / 96.34 MHz (runs at 90). `lint_undriven`
+and `netlist_canary` pass.
+
 **HW plan:**
 - Control arm first: the previous build on the HIL rig with the 18-bit I/O board (CRT,
   S-Video) shows the bands.

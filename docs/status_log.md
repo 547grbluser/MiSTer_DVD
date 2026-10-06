@@ -35,7 +35,9 @@ predate later confirmations; the `CLAUDE.md` index carries the reconciled status
     monitor is the go/no-go. The fallback (a faster clock domain) is recorded, not designed.
   - **Gates:** `bench/dvd/run_dac_dither.sh --red` (T1–T6, 7 module + 7 wiring mutations)
     and `tools/check_dac_dither_wiring.py`. Design: `docs/single_raster_analog.md` §8.
-  - **Next:** build, then the HW round in §8: control arm first, Off identical, On judged by
+  - **Fit:** 15 ALM, SEED 7 unchanged, both clocks pass at both corners (clk_dec 89.4 MHz
+    at −40 °C, clk_mem 95.75 at 100 °C). Build `DVD_dither_20261006_0425.rbf`.
+  - **Next:** the HW round in §8: control arm first, Off identical, On judged by
     the maintainer on the 18-bit-board CRT, HDMI bit-identical between On and Off.
 
 - ✅ **USER STILL OFF: PLAY/PAUSE OR SELECT ENDS A STILL WITH NO BUTTONS (audit item 5,
