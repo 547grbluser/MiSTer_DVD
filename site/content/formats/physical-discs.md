@@ -25,7 +25,8 @@ step 2. Otherwise download the `MiSTer_DVDcss` release asset and put it at:
 
 ## 2. Point the DVD core at it
 
-Add this to `/media/fat/MiSTer.ini` — add the section, do not replace the file:
+Add this at the end of `/media/fat/MiSTer.ini`, after everything already there. Add the
+section, do not replace the file:
 
 ```ini
 [DVD]

@@ -116,7 +116,7 @@ MiSTer DVD Player ${VER}
      Scripts/set_dvd_region.sh
      Scripts/dvd_report.py
 
-2. To play PHYSICAL discs or ENCRYPTED ISOs, add to /media/fat/MiSTer.ini
+2. To play PHYSICAL discs or ENCRYPTED ISOs, add to the END of /media/fat/MiSTer.ini
    (add the section; do NOT replace the file):
 
      [DVD]

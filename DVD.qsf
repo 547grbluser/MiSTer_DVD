@@ -1594,4 +1594,16 @@ set_global_assignment -name PHYSICAL_SYNTHESIS_COMBO_LOGIC OFF
 #   SEED  9: 90.59/86.11 | 96.58/93.76
 # SEED 9 pinned: passes both gates, but clk_dec's cold corner has only +0.11 on 86.0.
 # 40,749 / 41,910 ALMs (97 %). -> releases/DVD_ditherlatin_20261006_1829.rbf.
-set_global_assignment -name SEED 9
+
+# RELEASE (2026-10-07, main, release commit): the dither-latin netlist plus the release
+# version string only. SEED 9 (above) re-rolled: clk_dec 89.14/89.98 held, clk_mem
+# 91.46/89.02 missed 90 at the cold corner. Sweep, clk_dec / clk_mem @100C / @-40C:
+#   SEED 13: 86.85/84.10 | 95.59/95.80 (clk_dec FAIL)   SEED 29: 91.79/88.98 | 88.93/91.54
+#   SEED  1: 88.52/90.31 | 78.99/80.46                  SEED  5: 92.34/89.87 | 90.13/94.05
+#   SEED  7: 92.14/88.62 | 89.90/92.31                  SEED 11: 92.28/89.45 | 82.58/85.28
+#   SEED 17: 92.28/91.60 | 88.90/92.19
+# SEED 5 pinned: the only seed of eight that clears both (clk_mem's hot corner by +0.13 MHz).
+# The sweep wrote SEED 17 here, the last seed it fitted -- the trap recorded above.
+# clk_mem's worst paths on the misses are mem_shim_burst again (cur_addr -> cache_valid on
+# SEED 17), so the next clk_mem retime is the real fix (status_log "clk_mem timing").
+set_global_assignment -name SEED 5

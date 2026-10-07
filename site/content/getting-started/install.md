@@ -17,7 +17,8 @@ network (SSH/SFTP) rather than pulling the card out.
 
 ## 2. Add two lines to `MiSTer.ini`
 
-Add this to `/media/fat/MiSTer.ini`. **Add the section, do not replace the file:**
+Add this **at the end of** `/media/fat/MiSTer.ini`, after everything already there. **Add
+the section, do not replace the file:**
 
 ```ini
 [DVD]
@@ -78,6 +79,12 @@ name it in `MiSTer.ini`, and the two scripts do nothing until you run them.
 `MiSTer_DVDcss` instead of the stock Main. Every other core is unaffected. Delete the
 section, or the binary, and the core reverts to image-only playback with nothing else
 changed.
+
+**Put the section at the end of the file.** A `[section]` line applies to every line below
+it, up to the next one. Pasted into the middle of the `[MiSTer]` section, `[DVD]` would take
+the `[MiSTer]` settings below it and apply them to the DVD core only. At the end of the file
+it can't do that. One user found physical discs only worked once the section was
+moved to the end, so if the core still plays images only, check that first.
 
 **Reload the core after editing.** The Main is chosen at core load, so an already-running
 core will not pick up the change.
