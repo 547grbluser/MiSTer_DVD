@@ -43,6 +43,9 @@ predate later confirmations; the `CLAUDE.md` index carries the reconciled status
   - **Next:** the PR; then run it per seed in `seed_sweep.sh` (30 s a fit is cheap) and
     rank seeds on every clock, and decide whether `clk_mem` becomes a FAIL. The real fix
     for `clk_mem` is the next `mem_shim_burst` retime.
+  - **Seen in passing:** every STA run logs `Latch emu|dvd_vm|lfsr[8]~15 is being clocked by
+    …clocks_resets~FF_4365` (an HPS reset node). A latch in our own RTL is worth a look; it
+    is outside every clock domain, so `clock_check` cannot see it.
 
 - 📋 **DVD DEMYSTIFIED 3RD-EDITION AUDIT: LANDED ON `main`, OPEN ITEMS RE-RANKED BY CENSUS
   (2026-10-06, ✅ MERGED PR #165; docs + census tools, no RTL, no
