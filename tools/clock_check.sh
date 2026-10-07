@@ -4,8 +4,8 @@
 #   [USE_DOCKER=1] tools/clock_check.sh            # quartus_sta, then the policy pass
 #   tools/clock_check.sh --report-only             # re-judge an existing clock_check.tsv
 #
-# Needs a completed fit on disk (db/ + output_files/); it does NOT refit. Takes a few
-# minutes: one timing-netlist update per corner. Writes output_files/clock_check.tsv and
+# Needs a completed fit on disk (db/ + output_files/); it does NOT refit. Takes about
+# 30 s: one timing-netlist update per corner. Writes output_files/clock_check.tsv and
 # prints one row per clock plus every WARN/FAIL with its worst path's endpoints.
 # Exit: 0 = no FAIL, 1 = FAIL, 2 = no fit / quartus_sta failed / unreadable TSV.
 #

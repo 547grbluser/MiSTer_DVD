@@ -37,8 +37,12 @@ predate later confirmations; the `CLAUDE.md` index carries the reconciled status
     **`clk_hdmi` misses 148.5 MHz by 2.5 ns, entirely inside stock `ascal`** (`o_vacpt →
     o_adrs_pre`, unmodified since the import), only at a 1080p `video_mode`: waived above a
     −3.0 ns floor. Every other clock has margin (`h2f_user0` the least, +1.43 ns).
-  - **Next:** the PR; then consider running it per seed in `seed_sweep.sh` (it costs a few
-    minutes a fit) and whether `clk_mem` should become a FAIL.
+  - **The shipped release fit (SEED 5):** `PASS (0 fail, 0 warn)`. `clk_mem` clears by
+    +0.016 ns, the only one of eight seeds to clear it at all; `clk_hdmi` −2.41 in `ascal`.
+    The run takes about 30 s.
+  - **Next:** the PR; then run it per seed in `seed_sweep.sh` (30 s a fit is cheap) and
+    rank seeds on every clock, and decide whether `clk_mem` becomes a FAIL. The real fix
+    for `clk_mem` is the next `mem_shim_burst` retime.
 
 - 📋 **DVD DEMYSTIFIED 3RD-EDITION AUDIT: LANDED ON `main`, OPEN ITEMS RE-RANKED BY CENSUS
   (2026-10-06, ✅ MERGED PR #165; docs + census tools, no RTL, no

@@ -37,7 +37,7 @@ The only reliable reading is `report_timing -from_clock X -to_clock X`, which is
 | Tool | Reads | Covers | Role |
 |---|---|---|---|
 | `tools/fmax_check.sh` | `DVD.sta.rpt` (free) | `clk_dec` FAIL < 86 MHz; `clk_mem` WARN < 90 | the gate `build_release.sh` and `seed_sweep.sh` run on every fit |
-| `tools/clock_check.sh` | a `quartus_sta` run on the fit on disk (a few minutes) | every clock: intra-domain setup, hold, recovery, removal, all four corners | run on the fit a release ships; record the result |
+| `tools/clock_check.sh` | a `quartus_sta` run on the fit on disk (about 30 s) | every clock: intra-domain setup, hold, recovery, removal, all four corners | run on the fit a release ships; record the result |
 | `tools/timing_paths.sh` | a `quartus_sta` run | top N intra-`clk_dec` setup paths | finding the cluster to retime |
 
 `fmax_check`'s "Restricted Fmax" for `clk_dec` and `clk_mem` is exactly `clock_check`'s
@@ -92,4 +92,19 @@ The release netlist of 2026-10-07 (the dither-latin netlist plus the release ver
 - `clk_sys`'s heaviest paths are the audio engine's `imdct_512` RAM writes (about 29 ns of
   the 37 ns period on an earlier fit); it is the domain to watch as the engine grows.
 
-**SEED 5** (shipped): see below.
+**SEED 5** (the fit that ships), worst over all four corners:
+
+| Clock | Runs | Fmax (slow) | Setup ns | Hold ns | Recovery ns | Removal ns |
+|---|---|---|---|---|---|---|
+| `clk_dec` | 81.00 | 89.87 | +1.218 | +0.116 | +4.784 | +0.534 |
+| `clk_mem` | 90.00 | 90.13 | +0.016 | +0.103 | – | – |
+| `clk_sys` | 27.00 | 33.15 | +6.872 | +0.080 | +26.570 | +0.659 |
+| `clk_hdmi` | 148.54 | 109.40 | −2.409 | +0.118 | +2.557 | +0.236 |
+| `h2f_user0` | 100.00 | 111.71 | +1.048 | +0.136 | +6.221 | +0.431 |
+| `clk_audio` | 24.58 | 38.13 | +14.455 | +0.169 | +38.227 | +0.422 |
+| `FPGA_CLK1_50` | 50.00 | 73.38 | +6.372 | +0.131 | +17.419 | +0.605 |
+| `FPGA_CLK2_50` | 50.00 | 110.89 | +10.982 | +0.167 | – | – |
+
+Verdict `PASS (0 fail, 0 warn)`; `clk_hdmi` INFO only (in `ascal`, above the floor).
+`clk_mem` passes by **+0.016 ns**: one seed of eight cleared it on this netlist, so the
+next `mem_shim_burst` retime is needed before the next feature adds logic.
