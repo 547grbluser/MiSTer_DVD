@@ -99,6 +99,14 @@ would cost a second compile.
 4. **Record the fit in `DVD.qsf`'s seed ledger.** `jq . releases/DVD_YYYYMMDD.rbf.json` has
    every number the entry quotes (seed, both clk_dec corners, ALM/RAM/DSP), and the workflow
    reprints them as a table in its run summary.
+   **Choose the seed on BOTH `fmax_check` lines** (`clk_dec` gate and `clk_mem` WARN): the
+   sweep ranks on `clk_dec` alone, and writes the LAST seed it fitted into `DVD.qsf`, not
+   the best — set it by hand.
+   **Then run `USE_DOCKER=1 tools/clock_check.sh` on the fit that ships** (a few minutes;
+   it needs the fit on disk, so run it before anything else compiles) and quote its
+   verdict line in the ledger. It covers every clock's own setup/hold/recovery/removal at
+   all four corners, which `fmax_check` cannot (`docs/timing.md`). A FAIL blocks the release;
+   a WARN is a judgement to record.
 
 5. **Create the draft and package it:**
    ```bash

@@ -22,6 +22,24 @@ predate later confirmations; the `CLAUDE.md` index carries the reconciled status
 
 ## Hardware status (THIS fork, verified 2026-06-21)
 
+- 🔧 **CLOCK_CHECK: EVERY CLOCK, INTRA-DOMAIN, EVERY CORNER (2026-10-07, branch
+  `feature/clock-check`).** Full note: `docs/timing.md`.
+  - **Why:** the release sweep of 2026-10-07 tracked two clocks, and the question was
+    whether the other six needed it. `DVD.sta.rpt`'s summaries mix a domain's own paths with
+    every crossing into it, so they cannot answer that, and `fmax_check` read only two rows.
+  - **What:** `tools/clock_check.{sh,tcl,py}`. The Tcl runs `get_timing_paths -from_clock X
+    -to_clock X` for setup, hold, recovery and removal on every clock at every corner; the
+    Python applies the policy (intra hold/removal < 0 FAIL; `clk_dec` < 86 FAIL; `clk_mem`
+    < 90 WARN; other negative setup WARN; unknown clocks flagged). `--selftest`, 13 arms.
+  - **First run (the release netlist, SEED 17):** agrees with `fmax_check` to the digit
+    (`clk_dec` 91.60, `clk_mem` 88.90). **Every domain's own hold is positive** (worst
+    +0.086 ns), so the negative hold in the summaries is crossings, now measured.
+    **`clk_hdmi` misses 148.5 MHz by 2.5 ns, entirely inside stock `ascal`** (`o_vacpt →
+    o_adrs_pre`, unmodified since the import), only at a 1080p `video_mode`: waived above a
+    −3.0 ns floor. Every other clock has margin (`h2f_user0` the least, +1.43 ns).
+  - **Next:** the PR; then consider running it per seed in `seed_sweep.sh` (it costs a few
+    minutes a fit) and whether `clk_mem` should become a FAIL.
+
 - 📋 **DVD DEMYSTIFIED 3RD-EDITION AUDIT: LANDED ON `main`, OPEN ITEMS RE-RANKED BY CENSUS
   (2026-10-06, ✅ MERGED PR #165; docs + census tools, no RTL, no
   `CORE_VERSION` change).**
