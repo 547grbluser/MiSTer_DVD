@@ -1151,9 +1151,13 @@ predate later confirmations; the `CLAUDE.md` index carries the reconciled status
     alone. §4's scenario D (the AC-3 parse onto the engine) is on the critical path, so
     the order of P2 (codebooks in DDR3), P3 (wiring) and the P4 reclaims comes first.
 
-- ⏳ **SHOW-FIRST AUDIO/SUBTITLE BUTTONS (2026-10-01, ✅ MERGED PR #145;
-  sim-proven, ⏳ HW-confirm pending).**
+- ✅ **SHOW-FIRST AUDIO/SUBTITLE BUTTONS (2026-10-01, ✅ MERGED PR #145;
+  ✅ HW-CONFIRMED 2026-10-07).**
   Full record: `docs/track_selection.md` "Show-first Audio/Subtitle".
+  - **HW (v0.9.0 release smoke, 2026-10-07):** from a popup-down state, a show press
+    then a step 0.5 s later walks *Ultimate T2* 3/4 → 4/4 → 1/4 (wrap), and *Naked Gun*
+    `SUB OFF` (show only) → 8/11 → 9/11 → 10/11 → 11/11. Presses ~2.5 s apart only
+    re-show, which is the design (and the harness trap in the hil-testing skill).
   - **Report (maintainer):** a set-top player's Audio/Subtitle button shows the current
     setting first and changes it only when pressed again while it is on screen. This core
     changed it on every press, so checking the track meant cycling all the way back round.
