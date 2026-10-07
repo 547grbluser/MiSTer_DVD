@@ -8,7 +8,7 @@ Usage:
 Normally run by tools/clock_check.sh, which produces the TSV with quartus_sta first.
 Exit codes: 0 = no FAIL (WARNs allowed), 1 = FAIL, 2 = missing/unparseable input.
 
-The rules (docs/timing.md "Every clock"):
+The rules (docs/timing.md "The checks"):
   * hold / removal < 0 inside a domain, at ANY corner -> FAIL. A hold violation does not
     get better at a lower clock rate or a cooler die, so no margin argument rescues it.
   * setup: clk_dec FAILs below 86 MHz at either slow corner (the same gate as

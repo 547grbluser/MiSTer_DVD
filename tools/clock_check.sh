@@ -10,7 +10,7 @@
 # Exit: 0 = no FAIL, 1 = FAIL, 2 = no fit / quartus_sta failed / unreadable TSV.
 #
 # fmax_check.sh stays the gate build_release.sh runs (it reads the .sta.rpt for free);
-# this is the deeper check, run on the fit a release ships (docs/timing.md "Every clock").
+# this is the deeper check, run on the fit a release ships (docs/timing.md "The checks").
 # Rules and the per-clock policy live in tools/clock_check.py.
 
 set -u
