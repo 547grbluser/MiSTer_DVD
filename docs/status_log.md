@@ -22,8 +22,8 @@ predate later confirmations; the `CLAUDE.md` index carries the reconciled status
 
 ## Hardware status (THIS fork, verified 2026-06-21)
 
-- 🔧 **CLOCK_CHECK: EVERY CLOCK, INTRA-DOMAIN, EVERY CORNER (2026-10-07, branch
-  `feature/clock-check`).** Full note: `docs/timing.md`.
+- ✅ **CLOCK_CHECK: EVERY CLOCK, INTRA-DOMAIN, EVERY CORNER (2026-10-07, ✅ MERGED
+  PR #167; run on the v0.9.0 fit: PASS).** Full note: `docs/timing.md`.
   - **Why:** the release sweep of 2026-10-07 tracked two clocks, and the question was
     whether the other six needed it. `DVD.sta.rpt`'s summaries mix a domain's own paths with
     every crossing into it, so they cannot answer that, and `fmax_check` read only two rows.
@@ -40,7 +40,7 @@ predate later confirmations; the `CLAUDE.md` index carries the reconciled status
   - **The shipped release fit (SEED 5):** `PASS (0 fail, 0 warn)`. `clk_mem` clears by
     +0.016 ns, the only one of eight seeds to clear it at all; `clk_hdmi` −2.41 in `ascal`.
     The run takes about 30 s.
-  - **Next:** the PR; then run it per seed in `seed_sweep.sh` (30 s a fit is cheap) and
+  - **Next:** run it per seed in `seed_sweep.sh` (30 s a fit is cheap) and
     rank seeds on every clock, and decide whether `clk_mem` becomes a FAIL. The real fix
     for `clk_mem` is the next `mem_shim_burst` retime.
   - **Seen in passing:** every STA run logs `Latch emu|dvd_vm|lfsr[8]~15 is being clocked by
