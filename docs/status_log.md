@@ -22,6 +22,31 @@ predate later confirmations; the `CLAUDE.md` index carries the reconciled status
 
 ## Hardware status (THIS fork, verified 2026-06-21)
 
+- ✅ **CLOCK_CHECK: EVERY CLOCK, INTRA-DOMAIN, EVERY CORNER (2026-10-07, ✅ MERGED
+  PR #167; run on the v0.9.0 fit: PASS).** Full note: `docs/timing.md`.
+  - **Why:** the release sweep of 2026-10-07 tracked two clocks, and the question was
+    whether the other six needed it. `DVD.sta.rpt`'s summaries mix a domain's own paths with
+    every crossing into it, so they cannot answer that, and `fmax_check` read only two rows.
+  - **What:** `tools/clock_check.{sh,tcl,py}`. The Tcl runs `get_timing_paths -from_clock X
+    -to_clock X` for setup, hold, recovery and removal on every clock at every corner; the
+    Python applies the policy (intra hold/removal < 0 FAIL; `clk_dec` < 86 FAIL; `clk_mem`
+    < 90 WARN; other negative setup WARN; unknown clocks flagged). `--selftest`, 13 arms.
+  - **First run (the release netlist, SEED 17):** agrees with `fmax_check` to the digit
+    (`clk_dec` 91.60, `clk_mem` 88.90). **Every domain's own hold is positive** (worst
+    +0.086 ns), so the negative hold in the summaries is crossings, now measured.
+    **`clk_hdmi` misses 148.5 MHz by 2.5 ns, entirely inside stock `ascal`** (`o_vacpt →
+    o_adrs_pre`, unmodified since the import), only at a 1080p `video_mode`: waived above a
+    −3.0 ns floor. Every other clock has margin (`h2f_user0` the least, +1.43 ns).
+  - **The shipped release fit (SEED 5):** `PASS (0 fail, 0 warn)`. `clk_mem` clears by
+    +0.016 ns, the only one of eight seeds to clear it at all; `clk_hdmi` −2.41 in `ascal`.
+    The run takes about 30 s.
+  - **Next:** run it per seed in `seed_sweep.sh` (30 s a fit is cheap) and
+    rank seeds on every clock, and decide whether `clk_mem` becomes a FAIL. The real fix
+    for `clk_mem` is the next `mem_shim_burst` retime.
+  - **Seen in passing:** every STA run logs `Latch emu|dvd_vm|lfsr[8]~15 is being clocked by
+    …clocks_resets~FF_4365` (an HPS reset node). A latch in our own RTL is worth a look; it
+    is outside every clock domain, so `clock_check` cannot see it.
+
 - 📋 **DVD DEMYSTIFIED 3RD-EDITION AUDIT: LANDED ON `main`, OPEN ITEMS RE-RANKED BY CENSUS
   (2026-10-06, ✅ MERGED PR #165; docs + census tools, no RTL, no
   `CORE_VERSION` change).**
@@ -1126,9 +1151,13 @@ predate later confirmations; the `CLAUDE.md` index carries the reconciled status
     alone. §4's scenario D (the AC-3 parse onto the engine) is on the critical path, so
     the order of P2 (codebooks in DDR3), P3 (wiring) and the P4 reclaims comes first.
 
-- ⏳ **SHOW-FIRST AUDIO/SUBTITLE BUTTONS (2026-10-01, ✅ MERGED PR #145;
-  sim-proven, ⏳ HW-confirm pending).**
+- ✅ **SHOW-FIRST AUDIO/SUBTITLE BUTTONS (2026-10-01, ✅ MERGED PR #145;
+  ✅ HW-CONFIRMED 2026-10-07).**
   Full record: `docs/track_selection.md` "Show-first Audio/Subtitle".
+  - **HW (v0.9.0 release smoke, 2026-10-07):** from a popup-down state, a show press
+    then a step 0.5 s later walks *Ultimate T2* 3/4 → 4/4 → 1/4 (wrap), and *Naked Gun*
+    `SUB OFF` (show only) → 8/11 → 9/11 → 10/11 → 11/11. Presses ~2.5 s apart only
+    re-show, which is the design (and the harness trap in the hil-testing skill).
   - **Report (maintainer):** a set-top player's Audio/Subtitle button shows the current
     setting first and changes it only when pressed again while it is on screen. This core
     changed it on every press, so checking the track meant cycling all the way back round.

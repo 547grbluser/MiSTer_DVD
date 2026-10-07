@@ -399,7 +399,7 @@ otherwise; `--red` runs its mutation arms).
 | HUD authored for the DE window, not the raster | ✅ | `transport_hud.md` | `run_ov_geom.sh`, `check_ov_geom_wiring.py` |
 | Keyboard / CEC / IR-receiver transport (`kbd_map`) | ✅ ⏳ CEC unsupported on the rig | `dvd_nav.md` | `run_kbd.sh` |
 | IR / media-remote keys work unmapped (Main-side remap, `DVD_IR_REMAP`; PR #124) | ✅ | `ir_remote.md` | `main/tests/run_tests.sh`, `test_ir_integration.py`, `check_ir_remap.py` |
-| Show-first Audio/Subtitle: first press shows, a press while shown steps; popup shows the effective (menu-chosen) track (PR #145) | 🔧 MERGED ⏳ HW-confirm pending | `track_selection.md` "Show-first" | `run_track_show.sh --red`, `check_track_step_wiring.py` |
+| Show-first Audio/Subtitle: first press shows, a press while shown steps; popup shows the effective (menu-chosen) track (PR #145) | ✅ HW (v0.9.0 smoke, 2026-10-07: T2 3/4→4/4→1/4, Naked Gun to `SUB 11/11`), MERGED PR #145 | `track_selection.md` "Show-first" | `run_track_show.sh --red`, `check_track_step_wiring.py` |
 | Remote buttons: Stop, Aspect, Chapter Menu, A-B, Frame Step, Eject, Volume | ✅ | `dvd_nav.md`, `screensaver.md` | `run_frame_step.sh`, `check_frame_step_wiring.py` |
 | Still off (UOP18): Play/Pause or Select ends a still with no buttons armed or pending (audit 5); a jump no longer leaves a stale still timer | ✅ HW (timed stills, Play + Select, A/B vs `main`; SEED 7), MERGED PR #159 | `dvd_nav.md` "Still off" | `run_still_off.sh --red`, `check_still_off_wiring.py`, `check_select_noop.py` |
 | Frame step as a pause route; unbounded steps; clock follows the step | ✅ | `dvd_nav.md` | `run_frame_step.sh` |
@@ -430,6 +430,7 @@ otherwise; `--red` runs its mutation arms).
 | Analog Dither: 4×4 ordered dither (inverted per vs) ahead of the I/O board's 6-bit VGA DAC (`O[8]`, Off by default; HDMI bit-exact) | ✅ HW (CRT by eye, S-Video 480i; RGB capture: staircase 1.00 → 0.50, Off = `main`), MERGED PR #161 | `single_raster_analog.md` §8 | `run_dac_dither.sh --red`, `check_dac_dither_wiring.py` |
 | Dither matrix: Latin square, every line/column exact (was Bayer top bits = 2×2, line texture); PWM cores evaluated and rejected | ✅ HW (CRT by eye vs PR #161: less crosshatching, blue no worse; capture: 480i line texture 0.26 → 0.055), MERGED PR #164 | `single_raster_analog.md` §8 "The matrix" | `run_dac_dither.sh --red` |
 | mem_shim tag/LRU store in M10K | ✅ | `history.md` §11 | `run_mem_shim.sh` |
+| `clock_check`: every clock's intra-domain setup/hold/recovery/removal at all four corners (`fmax_check` reads summaries that mix in crossings); `clk_hdmi`'s −2.5 ns is stock `ascal` | ✅ MERGED PR #167; v0.9.0 fit PASS | `timing.md` | `clock_check.py --selftest` |
 | clk_mem closes 90 MHz: victim invalidate deferred a cycle (82.2 → 93.2 worst corner, SEED 9); `fmax_check` WARNs on clk_mem | ✅ sim cycle-exact; HW smoke = `main` (THE_OFFICE Prog: same 1 late, 0 drops); MERGED PR #157 | `status_log.md` "clk_mem timing" | `run_mem_shim.sh --red` (LOCKSTEP arm) |
 | Logic reclaim (AC-3, nav/VM, reader ×2; debug overlay retired) | ✅ (D HW-confirmed 2026-09-26) | `logic_reclaim.md` §8 | `bench/ac3` suites, `run_reader_regress.sh` |
 | Logic reclaim E: VM GPRMs in an M10K (−1,129 ALUTs) | ✅ | `logic_reclaim.md` §9 | `run_gprm_ram.sh`, `check_gprm_ram.py` |

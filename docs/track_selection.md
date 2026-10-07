@@ -636,7 +636,7 @@ a chain bench: emu's glue has no bench, and each module bench is handed the othe
 value, so a missing or wrong port connection is invisible to both. It reads the connections
 out of `dvd/emu.sv` rather than restating them.
 
-## Show-first Audio/Subtitle (2026-10-01) — ✅ MERGED PR #145, ⏳ HW-confirm pending
+## Show-first Audio/Subtitle (2026-10-01) — ✅ MERGED PR #145, ✅ HW-CONFIRMED 2026-10-07
 
 **Behaviour.** The first press of **Audio** (B7) or **Subtitle** (B8) only *shows* the
 current setting (`AUDIO 2/4 FR`, `SUB OFF`). Pressing the same button again **while that
