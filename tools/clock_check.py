@@ -44,6 +44,16 @@ POLICY = {
     "hdmi_sck": ("hdmi_sck", "warn_slack", None),
 }
 
+# Known setup misses outside our logic: short name -> (node prefix, slack floor ns, why).
+# The waiver holds only while the worst path starts AND ends under the prefix and its
+# slack stays at or above the floor; anything else WARNs as usual, so a regression, or
+# the worst path moving into our own logic, is still reported.
+KNOWN = {
+    "clk_hdmi": ("ascal:ascal|", -3.0,
+                 "stock ascal (sys/ascal.vhd, unmodified since the import) at the 1080p "
+                 "148.5 MHz constraint; docs/timing.md \"clk_hdmi\""),
+}
+
 
 def fmax_mhz(period_ns, slack_ns):
     """Clock rate at which the worst same-edge path would have zero slack."""
@@ -73,8 +83,6 @@ def judge(rows):
     for raw in sorted(clocks, key=lambda c: (c not in POLICY, POLICY.get(c, (c,))[0])):
         rs = clocks[raw]
         short, rule, thresh = POLICY.get(raw, (raw, "warn_slack", None))
-        if raw not in POLICY:
-            findings.append(("INFO", short, "not in clock_check.py POLICY; judged by the generic rules"))
         period = rs[0]["period_ns"]
 
         worst = {}
@@ -84,6 +92,8 @@ def judge(rows):
         if all(w is None for w in worst.values()):
             # A PLL VCO phase or an unused board clock: nothing to time.
             continue
+        if raw not in POLICY:
+            findings.append(("INFO", short, "not in clock_check.py POLICY; judged by the generic rules"))
 
         s = worst["setup"]
         slow = [r for r in rs if r["analysis"] == "setup" and r["slack_ns"] is not None
@@ -97,7 +107,13 @@ def judge(rows):
                     lvl = "FAIL" if rule == "fail_fmax" else "WARN"
                     findings.append((lvl, short, f"setup {min_fmax:.2f} MHz < {thresh} at a slow corner: {where}"))
             elif s["slack_ns"] < 0:
-                findings.append(("WARN", short, f'setup slack {s["slack_ns"]:.3f} ns ({fmax_mhz(period, s["slack_ns"]):.2f} MHz vs {1000/period:.2f}): {where}'))
+                k = KNOWN.get(short)
+                lvl = "WARN"
+                if (k and s["from_node"].startswith(k[0]) and s["to_node"].startswith(k[0])
+                        and s["slack_ns"] >= k[1]):
+                    lvl = "INFO"
+                    where += f" -- known, floor {k[1]} ns: {k[2]}"
+                findings.append((lvl, short, f'setup slack {s["slack_ns"]:.3f} ns ({fmax_mhz(period, s["slack_ns"]):.2f} MHz vs {1000/period:.2f}): {where}'))
 
         for kind, lvl in (("hold", "FAIL"), ("removal", "FAIL"), ("recovery", "WARN")):
             w = worst[kind]
@@ -183,9 +199,26 @@ def selftest():
     rs.append({"corner": "Slow 1100mV 100C Model", "clock": "vco|vcoph[0]", "period_ns": 1.2,
                "analysis": "setup", "npaths": "0", "slack_ns": None, "from_node": "-", "to_node": "-"})
     t, f = judge(rs)
-    ok = all(r[0] != "vco|vcoph[0]" for r in t) and all(c != "vco|vcoph[0]" or l == "INFO" for l, c, _ in f)
+    ok = all(r[0] != "vco|vcoph[0]" for r in t) and all(c != "vco|vcoph[0]" for _, c, _ in f)
     bad += not ok
     print(f"  [{'ok' if ok else 'BAD'}] pathless clock is skipped")
+
+    # The clk_hdmi waiver: inside ascal and above the floor is INFO; past the floor, or a
+    # path that leaves ascal, is a WARN again.
+    HDMI = next(k for k, v in POLICY.items() if v[0] == "clk_hdmi")
+    def hdmi(slack, frm, to):
+        rs = rows()
+        rs.append({"corner": "Slow 1100mV -40C Model", "clock": HDMI, "period_ns": 6.732,
+                   "analysis": "setup", "npaths": "1", "slack_ns": slack, "from_node": frm, "to_node": to})
+        return levels(rs)
+    for name, got, want in [
+        ("clk_hdmi in ascal above the floor is known", hdmi(-2.5, "ascal:ascal|a", "ascal:ascal|b"), []),
+        ("clk_hdmi past the floor warns", hdmi(-3.2, "ascal:ascal|a", "ascal:ascal|b"), [("WARN", "clk_hdmi")]),
+        ("clk_hdmi path leaving ascal warns", hdmi(-0.5, "emu:emu|x", "ascal:ascal|b"), [("WARN", "clk_hdmi")]),
+    ]:
+        ok = got == want
+        bad += not ok
+        print(f"  [{'ok' if ok else 'BAD'}] {name}: {got}")
 
     print("clock_check selftest: " + ("PASS" if not bad else f"FAIL ({bad} arm(s))"))
     return 1 if bad else 0
